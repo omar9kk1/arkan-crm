@@ -1,0 +1,74 @@
+.segmented.segmented {
+  --segment-surface: rgba(255, 255, 255, 0.55);
+  --segment-border: rgba(255, 255, 255, 0.75);
+  --segment-active: rgba(255, 255, 255, 0.7);
+  --segment-count: rgba(255, 255, 255, 0.65);
+  display: flex;
+  flex-wrap: nowrap;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  margin: 0;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--segment-border);
+  border-radius: var(--radius-pill);
+  background: var(--segment-surface);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-behavior: smooth;
+}
+.segmented.segmented button {
+  flex: 1 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  white-space: nowrap;
+  box-shadow: none;
+}
+.segmented.segmented button:hover {
+  background: var(--segment-surface);
+}
+.segmented.segmented button[aria-selected='true'] {
+  background: var(--segment-active);
+  color: var(--ink);
+  border-color: var(--segment-border);
+  box-shadow: var(--shadow-control);
+  font-weight: 700;
+}
+.segmented button span {
+  display: inline-grid;
+  place-items: center;
+  min-width: 26px;
+  min-height: 26px;
+  padding-inline: var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--segment-count);
+  font-size: var(--text-caption);
+  color: var(--ink);
+}
+.segmented button:focus-visible {
+  outline-offset: -3px;
+}
+@media (max-width: 600px) {
+  .segmented.segmented {
+    width: 100%;
+  }
+  .segmented.segmented button {
+    padding-inline: var(--space-3);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .segmented.segmented {
+    scroll-behavior: auto;
+  }
+}

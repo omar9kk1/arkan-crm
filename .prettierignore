@@ -1,0 +1,10 @@
+node_modules
+.npm-cache
+dist
+.next
+**/next-env.d.ts
+package-lock.json
+prototype
+docs
+README.md
+apps/backend/prisma/migrations

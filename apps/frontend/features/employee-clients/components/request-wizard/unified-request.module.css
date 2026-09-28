@@ -1,0 +1,303 @@
+.modal.modal {
+  width: 860px;
+  padding: 20px;
+  border-radius: 24px;
+  background: linear-gradient(
+    140deg,
+    rgba(255, 255, 255, 0.88),
+    rgba(245, 240, 232, 0.84)
+  );
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 24px 80px rgba(51, 42, 29, 0.16);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+.modal > header {
+  margin-bottom: 16px;
+}
+.modal > header h2 {
+  font-size: 19px;
+  margin: 0;
+}
+.modal > div {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+.steps {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 10px 6px;
+  border-block: 1px solid rgba(130, 110, 80, 0.12);
+}
+.steps li {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 0;
+}
+.stepNumber {
+  flex: 0 0 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+}
+.steps li[aria-current='step'] {
+  color: var(--ink);
+  font-weight: 700;
+}
+.steps li[aria-current='step'] .stepNumber {
+  background: rgba(190, 164, 111, 0.28);
+  border-color: rgba(166, 135, 79, 0.35);
+}
+.stageTitle {
+  flex-shrink: 0;
+  font-size: 18px;
+  margin: 18px 2px 12px;
+}
+.requestSection + .requestSection {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(130, 110, 80, 0.18);
+}
+.requestTitle {
+  font-size: 16px;
+  margin: 0 0 14px;
+  padding-inline-start: 10px;
+  border-inline-start: 3px solid rgba(166, 135, 79, 0.5);
+}
+.stageTitle:focus {
+  outline: none;
+}
+.form {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.content {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(167, 144, 104, 0.35) transparent;
+  padding: 0 2px 4px;
+  scroll-padding-block: 12px;
+}
+.grid,
+.exchange {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  align-items: start;
+}
+.grid > *,
+.exchange > * {
+  min-width: 0;
+}
+.panel {
+  min-width: 0;
+  margin: 0 0 14px;
+  padding: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.25);
+}
+.panel h3 {
+  font-size: 15px;
+  margin: 0 0 18px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(130, 110, 80, 0.12);
+}
+.desiredPanel {
+  background: rgba(225, 215, 194, 0.18);
+}
+.field {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  min-width: 0;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: #635d52;
+}
+.budgetRow {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 125px) minmax(0, 125px) minmax(0, 1fr) minmax(0, 125px);
+  gap: 8px;
+}
+.budgetRow > * {
+  min-width: 0;
+}
+.budgetRow > :last-child {
+  grid-column: 4;
+}
+.wideField {
+  grid-column: 1 / -1;
+}
+.field input,
+.field textarea,
+.field button[role='combobox'] {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 9px 12px;
+  font: inherit;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid rgba(152, 131, 98, 0.18);
+  border-radius: 11px;
+  box-shadow: none;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+.field input:focus,
+.field textarea:focus {
+  outline: 2px solid rgba(156, 125, 69, 0.3);
+  outline-offset: 1px;
+  border-color: rgba(156, 125, 69, 0.45);
+  background: rgba(255, 255, 255, 0.82);
+}
+.field textarea {
+  min-height: 70px;
+  resize: vertical;
+}
+.field .message {
+  min-height: 150px;
+  line-height: 1.9;
+}
+.types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 8px 0 18px;
+}
+.choice {
+  flex: 1 1 160px;
+  position: relative;
+  text-align: start;
+  color: var(--ink);
+  font: inherit;
+  padding: 14px 16px;
+  border: 1px solid rgba(152, 131, 98, 0.18);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.52);
+  cursor: pointer;
+}
+.choice[aria-pressed='true'] {
+  background: rgba(228, 218, 198, 0.55);
+  border-color: rgba(151, 119, 64, 0.45);
+}
+.choice span {
+  display: block;
+  margin-top: 7px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.preview,
+.summary {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.9;
+  padding: 14px;
+  border-inline-start: 2px solid rgba(166, 135, 79, 0.4);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.4);
+  font-size: 14px;
+}
+.hint {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.actions {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 12px 0 0;
+  border-top: 1px solid rgba(130, 110, 80, 0.14);
+}
+.actions > button {
+  min-height: 40px;
+  padding: 7px 18px;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: 12px;
+  box-shadow: none;
+}
+.actions > button:first-child {
+  margin-inline-end: auto;
+  background: rgba(255, 255, 255, 0.25);
+}
+.actions > button:last-child {
+  background: rgba(255, 255, 255, 0.85);
+  border-color: rgba(166, 135, 79, 0.3);
+  font-weight: 600;
+}
+.custom {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+@media (max-width: 800px) {
+  .exchange {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 600px) {
+  .modal.modal {
+    width: calc(100vw - 16px);
+    max-width: calc(100vw - 16px);
+    padding: 14px;
+    border-radius: 20px;
+  }
+  .grid,
+  .custom {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .panel {
+    padding: 14px;
+  }
+  .steps {
+    gap: 4px;
+    padding-inline: 0;
+  }
+  .steps li {
+    flex-direction: column;
+    gap: 5px;
+    text-align: center;
+    font-size: 11px;
+  }
+  .stageTitle {
+    font-size: 17px;
+    margin-block: 12px;
+  }
+  .field input,
+  .field textarea,
+  .field button {
+    font-size: 16px;
+  }
+  .actions > button {
+    padding-inline: 12px;
+    min-height: 44px;
+  }
+}

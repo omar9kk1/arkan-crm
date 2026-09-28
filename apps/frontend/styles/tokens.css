@@ -1,0 +1,54 @@
+:root {
+  color-scheme: light;
+  --background: #f7f4ee;
+  --surface: #fffdf8;
+  --ink: #25241f;
+  --muted: #686459;
+  --border: #e7ddcc;
+  --accent: #e8d4ac;
+  --accent-hover: #ddc391;
+  --accent-soft: #efe1c7;
+  --focus: #8d713d;
+  --danger: #a32929;
+  --glass-surface: rgba(255, 253, 248, 0.85);
+  --glass-border: rgba(255, 255, 255, 0.95);
+  --glass-blur: 16px;
+  --shadow-card: 0 16px 48px rgba(74, 61, 35, 0.09);
+  --radius-control: 12px;
+  --radius-card: 24px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --control-height: 48px;
+  --auth-card-width: 460px;
+  --motion-fast: 150ms;
+  --space-1: 4px;
+  --text-caption: 0.75rem;
+  --text-small: 0.875rem;
+  --text-body: 0.9375rem;
+  --text-heading: 1.125rem;
+  --text-stat: 2.25rem;
+  --radius-pill: 999px;
+  --shadow-control: 0 6px 18px rgba(74, 61, 35, 0.06);
+  --overlay-scrim: rgba(37, 36, 31, 0.3);
+  --manager-nav-active: linear-gradient(135deg, #efe1c7, #e0c799);
+  --manager-inset-surface: rgba(255, 253, 248, 0.6);
+  --manager-sidebar-width: 250px;
+  --manager-topbar-height: 98px;
+  --manager-bottom-height: 76px;
+  --manager-search-width: 380px;
+  --manager-content-width: 1360px;
+  --manager-more-width: 520px;
+  --manager-period-width: 160px;
+  --manager-chart-height: 240px;
+  --layer-navigation: 30;
+  --layer-skip: 50;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+  }
+}

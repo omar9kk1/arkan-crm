@@ -1,0 +1,21 @@
+.scope {
+  --property-overlay: var(--manager-dialog-surface);
+  --property-overlay-shadow: var(--shadow-card);
+}
+.toast {
+  position: fixed;
+  inset-inline: var(--space-4);
+  bottom: calc(var(--manager-bottom-height) + var(--space-8));
+  margin-inline: auto;
+  max-width: 520px;
+  z-index: var(--layer-navigation);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--manager-dialog-surface);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-card);
+}

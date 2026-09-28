@@ -1,0 +1,70 @@
+.card {
+  min-width: 0;
+  padding: var(--space-5);
+  background:
+    var(--manager-glass-highlight, none),
+    var(--manager-stat-surface, var(--glass-surface));
+}
+.heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+}
+.heading h2 {
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: 500;
+  min-width: 0;
+  color: var(--muted);
+}
+.icon {
+  display: grid;
+  place-items: center;
+  width: var(--control-height);
+  height: var(--control-height);
+  border-radius: var(--radius-control);
+  background: var(--accent-soft);
+  color: var(--focus);
+  flex-shrink: 0;
+}
+.value {
+  display: block;
+  font-size: var(--text-stat);
+  line-height: 1.3;
+  margin-block: var(--space-3);
+}
+.card p {
+  margin: 0;
+  font-size: var(--text-small);
+}
+@media (max-width: 767px) {
+  .card {
+    padding: var(--space-3);
+  }
+  .heading {
+    gap: var(--space-2);
+  }
+  .heading h2 {
+    font-size: var(--text-small);
+    line-height: 1.5;
+    min-height: 3em;
+  }
+  .icon {
+    display: none;
+  }
+  .card {
+    scroll-snap-align: start;
+    border-radius: var(--radius-control);
+    box-shadow: var(--shadow-control);
+  }
+  .value {
+    font-size: 24px;
+    margin-block: var(--space-2);
+    overflow-wrap: anywhere;
+  }
+  .card p {
+    font-size: 11px;
+    line-height: 1.5;
+  }
+}

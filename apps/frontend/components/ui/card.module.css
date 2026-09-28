@@ -1,0 +1,13 @@
+.card {
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  min-width: 0;
+  padding: var(
+    --manager-card-padding,
+    clamp(var(--space-5), 6vw, var(--space-8))
+  );
+  background: var(--manager-glass-highlight, none), var(--glass-surface);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+}

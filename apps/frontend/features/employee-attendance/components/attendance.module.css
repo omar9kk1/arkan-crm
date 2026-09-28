@@ -1,0 +1,126 @@
+.overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: var(--space-5);
+  margin-bottom: var(--space-6);
+  align-items: start;
+}
+.overview > * {
+  min-width: 0;
+}
+.overview h2 {
+  margin-top: 0;
+  font-size: var(--text-heading);
+}
+.today {
+  display: grid;
+  gap: var(--space-3);
+}
+.today p {
+  margin: 0;
+}
+.today small,
+.overview p,
+.note {
+  color: var(--muted);
+  font-size: var(--text-small);
+}
+.actions {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.actions > button {
+  flex: 1;
+  min-height: 48px;
+}
+.badge,
+.late {
+  justify-self: start;
+  display: inline-flex;
+  padding: var(--space-2) var(--space-3);
+  background: var(--manager-button-surface);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-caption);
+}
+.late {
+  background: var(--accent-soft);
+}
+.times {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.times dt {
+  font-size: var(--text-caption);
+  color: var(--muted);
+}
+.times dd {
+  margin: var(--space-2) 0 0;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.row {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.6fr) minmax(0, 1.5fr);
+  gap: var(--space-3);
+  align-items: center;
+}
+.row h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-body);
+}
+.note {
+  grid-column: 1/-1;
+  margin: 0;
+}
+.list {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.filters > label {
+  display: grid;
+  gap: var(--space-2);
+  flex: 1 1 200px;
+  min-width: 0;
+}
+@media (max-width: 800px) {
+  .overview,
+  .row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 600px) {
+  .filters > label {
+    flex-basis: 100%;
+  }
+  .actions {
+    flex-direction: column;
+  }
+}
+.confirmation {
+  position: fixed;
+  inset-block-start: calc(env(safe-area-inset-top, 0px) + var(--space-4));
+  inset-inline-start: 50%;
+  transform: translateX(50%);
+  z-index: var(--layer-skip);
+  width: max-content;
+  max-width: calc(100vw - var(--space-8));
+  padding: var(--space-3) var(--space-5);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--glass-surface);
+  backdrop-filter: blur(var(--glass-blur));
+  box-shadow: var(--shadow-control);
+  color: var(--ink);
+  font-size: var(--text-small);
+  text-align: center;
+  pointer-events: none;
+}

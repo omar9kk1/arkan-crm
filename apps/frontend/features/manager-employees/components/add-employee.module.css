@@ -1,0 +1,85 @@
+.modal.modal {
+  width: 960px;
+  max-width: calc(100vw - 32px);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.86),
+    rgba(245, 239, 230, 0.8)
+  );
+}
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(200px, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+.layout > * {
+  min-width: 0;
+}
+.fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+.fields label,
+.result label {
+  display: grid;
+  gap: var(--space-2);
+  font-size: var(--text-small);
+  min-width: 0;
+}
+.modal input:not([type='checkbox']),
+.modal textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: var(--space-2);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+  background: var(--manager-button-surface);
+  color: var(--ink);
+  font: inherit;
+}
+.modal textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+.full {
+  grid-column: 1/-1;
+}
+.fields .toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.toggle input {
+  accent-color: var(--focus);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  justify-content: space-between;
+  margin-top: var(--space-4);
+}
+.result {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 620px;
+  margin: auto;
+}
+.modal p {
+  line-height: 1.8;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+@media (max-width: 700px) {
+  .layout,
+  .fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .modal.modal {
+    width: calc(100vw - 16px);
+    max-width: calc(100vw - 16px);
+  }
+}

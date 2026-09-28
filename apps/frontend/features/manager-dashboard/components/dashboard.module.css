@@ -1,0 +1,284 @@
+/* Only the manager dashboard grid and panels from prototype V102. */
+.preview {
+  margin: 0 0 var(--space-3);
+  color: var(--muted);
+  font-size: var(--text-caption);
+}
+.period {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 210px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+  background: var(--glass-surface);
+  box-shadow: var(--shadow-card);
+  font-size: var(--text-caption);
+  color: var(--muted);
+}
+.period select {
+  width: 100%;
+  min-height: 37px;
+  padding-inline: var(--space-3);
+  border: 0;
+  border-radius: var(--radius-control);
+  font: inherit;
+  font-size: var(--text-small);
+  background: var(--dashboard-inset);
+  color: var(--ink);
+  opacity: 1;
+  cursor: not-allowed;
+}
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--dashboard-gap);
+  margin-bottom: var(--dashboard-gap);
+}
+.panels {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.85fr);
+  gap: var(--dashboard-gap);
+  align-items: stretch;
+}
+.panel {
+  padding: var(--dashboard-padding);
+  background: var(--manager-glass-highlight), var(--dashboard-surface);
+  overflow-wrap: anywhere;
+}
+.panelHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--dashboard-gap);
+}
+.panelHeading > div {
+  min-width: 0;
+}
+.panelHeading h2 {
+  margin: 0 0 var(--space-1);
+  font-size: var(--dashboard-heading);
+  line-height: 1.35;
+}
+.panelHeading p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-caption);
+  line-height: 1.7;
+}
+.tag {
+  display: inline-grid;
+  place-items: center;
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--focus);
+  font-size: var(--text-caption);
+  white-space: nowrap;
+}
+.chartCard {
+  min-height: 350px;
+  grid-row: span 2;
+}
+.chart {
+  height: var(--dashboard-chart-height);
+  padding: var(--dashboard-gap);
+  border-radius: var(--radius-card);
+  background: var(--dashboard-chart-surface);
+  border: 1px solid var(--glass-border);
+}
+.chart svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.gridLine {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.chartLine {
+  fill: none;
+  stroke: var(--dashboard-gold);
+  stroke-width: 5;
+  stroke-linecap: round;
+}
+.areaStart {
+  stop-color: var(--dashboard-gold);
+  stop-opacity: 0.34;
+}
+.areaEnd {
+  stop-color: var(--dashboard-gold);
+  stop-opacity: 0;
+}
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--dashboard-inset-gap);
+  margin: 0 0 var(--dashboard-gap);
+}
+.metrics > div,
+.leaders li,
+.feed li {
+  min-width: 0;
+  border-radius: var(--dashboard-inset-radius);
+  background: var(--dashboard-inset);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--dashboard-inset-shadow);
+}
+.metrics > div {
+  min-height: 78px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: var(--space-3);
+}
+.metrics dt {
+  color: var(--muted);
+  font-size: var(--text-caption);
+}
+.metrics dd {
+  order: -1;
+  margin: 0;
+  font-size: 25px;
+  line-height: 1.2;
+  font-weight: 800;
+}
+.metrics.chartSummary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: var(--dashboard-gap);
+  margin-bottom: 0;
+}
+.chartSummary > div {
+  text-align: center;
+  min-height: 74px;
+}
+.chartSummary dd {
+  font-size: 21px;
+}
+.leaders,
+.feed {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: var(--dashboard-inset-gap);
+}
+.leaders li {
+  min-height: 78px;
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--dashboard-gap);
+}
+.leaders small {
+  font-size: var(--text-caption);
+  color: var(--muted);
+}
+.leaders strong {
+  font-size: var(--text-heading);
+}
+.leaders span {
+  font-size: var(--text-caption);
+  color: var(--dashboard-positive);
+  font-weight: 700;
+}
+.statusBars {
+  display: grid;
+  gap: var(--dashboard-inset-gap);
+}
+.statusBars label {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  gap: var(--dashboard-inset-gap);
+  align-items: center;
+  font-size: var(--text-caption);
+  color: var(--muted);
+}
+.statusBars progress {
+  appearance: none;
+  width: 100%;
+  min-width: 0;
+  height: 13px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  background: var(--dashboard-inset);
+}
+.statusBars progress::-webkit-progress-bar {
+  background: var(--dashboard-inset);
+}
+.statusBars progress::-webkit-progress-value {
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+}
+.statusBars progress::-moz-progress-bar {
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+}
+.feedPanel {
+  min-height: 250px;
+}
+.feed li {
+  padding: var(--space-3) var(--dashboard-gap);
+}
+.feed strong,
+.feed span {
+  display: block;
+}
+.feed strong {
+  font-size: var(--text-small);
+  margin-bottom: var(--space-1);
+}
+.feed span {
+  font-size: var(--text-caption);
+  color: var(--muted);
+  line-height: 1.65;
+}
+.metrics .warning,
+.feed .warning {
+  background: var(--dashboard-warning);
+  border-color: var(--dashboard-warning-border);
+}
+@media (max-width: 1180px) {
+  .panels {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .chartCard {
+    grid-row: auto;
+  }
+  .stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 980px) {
+  .period {
+    width: 100%;
+    min-width: 0;
+  }
+  .panel {
+    border-radius: 22px;
+  }
+}
+@media (max-width: 600px) {
+  .stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .panelHeading {
+    flex-wrap: wrap;
+  }
+}
+@media (max-width: 430px) {
+  .metrics.chartSummary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .chartSummary > div {
+    min-height: 66px;
+  }
+  .chartSummary dd {
+    font-size: var(--text-heading);
+  }
+}

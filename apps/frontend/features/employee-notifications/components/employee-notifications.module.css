@@ -1,0 +1,104 @@
+.list {
+  --notification-surface: rgba(255, 253, 249, 0.82);
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: var(--notification-surface);
+  backdrop-filter: blur(var(--glass-blur));
+  box-shadow: var(--shadow-control);
+}
+.row {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-6);
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.row + .row {
+  border-top: 1px solid var(--border);
+}
+.row:hover {
+  background: var(--manager-button-surface);
+}
+.row:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -4px;
+}
+.indicator {
+  width: 6px;
+  height: 6px;
+  margin-top: 9px;
+  border-radius: 50%;
+}
+.indicator[data-unread='true'] {
+  background: var(--dashboard-gold);
+}
+.body {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-1);
+}
+.title {
+  font-size: var(--text-body);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.description {
+  font-size: var(--text-small);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.category {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-caption);
+  color: var(--muted);
+}
+.urgent {
+  padding-inline: var(--space-2);
+  background: var(--accent-soft);
+  border-radius: var(--radius-pill);
+  color: var(--ink);
+}
+.date {
+  padding-top: var(--space-1);
+  font-size: var(--text-caption);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.markAll.markAll {
+  min-height: 38px;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-small);
+  border-radius: var(--radius-pill);
+  box-shadow: none;
+}
+.empty {
+  padding: var(--space-6);
+  margin: 0;
+  color: var(--muted);
+  text-align: center;
+}
+@media (max-width: 700px) {
+  .row {
+    grid-template-columns: 6px minmax(0, 1fr);
+    padding: var(--space-4);
+    gap: var(--space-2);
+  }
+  .date {
+    grid-column: 2;
+    padding: 0;
+    white-space: normal;
+  }
+}

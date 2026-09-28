@@ -1,0 +1,45 @@
+.button {
+  border: 1px solid var(--manager-button-border, transparent);
+  border-radius: var(--radius-control);
+  padding: var(--space-3) var(--space-5);
+  min-height: var(--control-height);
+  font: inherit;
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--manager-button-surface, var(--accent));
+  backdrop-filter: blur(var(--manager-button-blur, 0px));
+  -webkit-backdrop-filter: blur(var(--manager-button-blur, 0px));
+  cursor: pointer;
+  transition: background var(--motion-fast);
+}
+.button:hover:not(:disabled) {
+  background: var(--manager-button-hover, var(--accent-hover));
+}
+.button:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+.primary {
+  background: var(--manager-button-surface, var(--accent));
+  box-shadow: var(--manager-button-shadow, none);
+}
+.ghost {
+  background: var(--manager-button-surface, transparent);
+  border-color: var(--manager-button-border, var(--border));
+}
+.ghost:hover:not(:disabled) {
+  background: var(--manager-button-hover, var(--accent-soft));
+}
+@media (max-width: 767px) {
+  .button.compactOnMobile {
+    min-height: 34px;
+    width: fit-content;
+    max-width: 100%;
+    justify-self: start;
+    padding: var(--space-1) var(--space-3);
+    font-weight: 500;
+    line-height: 1.5;
+    border-radius: var(--radius-pill);
+    box-shadow: none;
+  }
+}

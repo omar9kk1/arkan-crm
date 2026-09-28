@@ -1,0 +1,198 @@
+.scope {
+  --property-overlay: var(--manager-dialog-surface);
+  --property-overlay-shadow: var(--shadow-card);
+  --people-gap: 14px;
+  min-width: 0;
+}
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--people-gap);
+  margin-bottom: var(--space-5);
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-block: var(--space-5);
+}
+.toolbar > label {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.peopleList {
+  display: grid;
+  gap: var(--people-gap);
+}
+.personCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 0.75fr) auto;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+  min-width: 0;
+  text-align: start;
+  font: inherit;
+  color: var(--ink);
+  padding: var(--space-5);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: var(--manager-glass-highlight), var(--glass-surface);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.personCard > span {
+  min-width: 0;
+}
+.personCard:hover {
+  background: var(--manager-button-hover);
+}
+.personCard.delayed {
+  border-color: var(--dashboard-warning-border);
+}
+.personMain {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.personMain > span:last-child {
+  min-width: 0;
+}
+.avatar {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-control);
+  background: var(--accent-soft);
+  color: var(--focus);
+}
+.secondary {
+  display: block;
+  font-size: var(--text-caption);
+  color: var(--muted);
+  line-height: 1.7;
+}
+.phone {
+  display: block;
+  font-size: var(--text-small);
+  margin-top: var(--space-1);
+}
+.personCard strong {
+  font-size: var(--text-small);
+}
+.personCard time {
+  font-size: var(--text-caption);
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: start;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--manager-button-surface);
+  font-size: var(--text-caption);
+}
+.warning,
+.alert {
+  background: var(--dashboard-warning);
+  border: 1px solid var(--dashboard-warning-border);
+  color: var(--focus);
+}
+.lateMessage {
+  grid-column: 1/-1;
+  color: var(--focus);
+  font-size: var(--text-caption);
+}
+.alert,
+.empty {
+  padding: var(--space-3);
+  border-radius: var(--radius-control);
+  font-size: var(--text-small);
+}
+.empty {
+  background: var(--glass-surface);
+}
+.facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
+}
+.facts > div,
+.timeline li {
+  min-width: 0;
+  background: var(--dashboard-inset);
+  border: 1px solid var(--glass-border);
+  padding: var(--space-3);
+  border-radius: var(--radius-control);
+  overflow-wrap: anywhere;
+}
+.facts dt {
+  font-size: var(--text-caption);
+  color: var(--muted);
+}
+.facts dd {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-small);
+  font-weight: 700;
+}
+.timeline {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+.timeline li {
+  border-inline-start: 3px solid var(--accent-soft);
+}
+.timeline p {
+  font-size: var(--text-small);
+  margin-bottom: 0;
+}
+.timeline .badge {
+  margin-inline-start: var(--space-2);
+}
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  font-size: var(--text-caption);
+  color: var(--muted);
+}
+@media (max-width: 1180px) {
+  .stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .personCard {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .personMain {
+    grid-column: 1/-1;
+  }
+}
+@media (max-width: 600px) {
+  .stats,
+  .personCard {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .toolbar > label {
+    max-width: none;
+    width: 100%;
+  }
+  .personCard {
+    padding: var(--space-4);
+  }
+}

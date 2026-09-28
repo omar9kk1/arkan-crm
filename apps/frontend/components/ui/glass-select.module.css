@@ -1,0 +1,92 @@
+.root {
+  position: relative;
+  display: block;
+  min-width: 0;
+  width: 100%;
+}
+.root .native {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  clip-path: inset(50%);
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+.trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  color: var(--ink);
+  text-align: right;
+  direction: rtl;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+  background: var(--manager-button-surface, var(--glass-surface));
+  backdrop-filter: blur(var(--glass-blur));
+  box-shadow: var(--shadow-control);
+  cursor: pointer;
+}
+.trigger > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trigger:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.trigger[aria-invalid='true'] {
+  outline: 2px solid var(--danger);
+}
+.trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.menu {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: var(--space-2);
+  box-sizing: border-box;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  direction: rtl;
+  text-align: right;
+  font: inherit;
+  color: var(--ink);
+  background: rgba(255, 253, 248, 0.58);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: var(--radius-control);
+  box-shadow: 0 8px 24px rgba(60, 45, 25, 0.1);
+}
+.option {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.option[aria-selected='true'],
+.option[data-active='true'],
+.option:not([aria-disabled='true']):hover {
+  background: rgba(190, 164, 111, 0.18);
+}
+.option[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

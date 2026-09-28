@@ -1,0 +1,121 @@
+.region {
+  margin-bottom: var(--space-6);
+}
+.formContent {
+  min-width: 0;
+}
+.formSections {
+  display: grid;
+  gap: var(--space-4);
+}
+.ownerFields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.ownerFields > h3,
+.ownerFields > label:last-child {
+  grid-column: 1 / -1;
+}
+@media (max-width: 600px) {
+  .ownerFields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.region h2 {
+  font-size: var(--text-heading);
+}
+.photo {
+  background-image:
+    linear-gradient(
+      to top,
+      rgba(255, 253, 248, 0.97),
+      rgba(255, 253, 248, 0.4)
+    ),
+    url('/backgrounds/manager-architecture.jpg');
+  background-size: cover;
+  background-position: center;
+}
+.badge {
+  display: inline-flex;
+  align-self: start;
+  padding: var(--space-1) var(--space-3);
+  background: var(--manager-button-surface);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-caption);
+}
+.warning {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+.facts,
+.list {
+  display: grid;
+  gap: var(--space-3);
+  margin-block: var(--space-4);
+}
+.facts > div {
+  padding: var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+  background: var(--dashboard-inset);
+  overflow-wrap: anywhere;
+}
+.facts dt {
+  color: var(--muted);
+}
+.facts dd {
+  margin: var(--space-1) 0 0;
+}
+.photo {
+  min-height: 150px;
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  font-size: var(--text-small);
+}
+.tabFrame {
+  min-width: 0;
+  overflow: hidden;
+  padding: var(--space-2);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--manager-button-surface);
+  backdrop-filter: blur(var(--glass-blur));
+  box-shadow: var(--shadow-card);
+}
+.tabFrame.tabFrame > div {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  justify-content: flex-start;
+  scrollbar-width: none;
+}
+.tabFrame.tabFrame > div::-webkit-scrollbar {
+  display: none;
+}
+.tabFrame.tabFrame > div button {
+  flex: 1 0 auto;
+  padding-inline: var(--space-2);
+}
+.toolbar.toolbar > .tabFrame {
+  flex: 2 1 640px;
+}
+.toolbar.toolbar > label {
+  flex: 1 1 240px;
+}
+@media (max-width: 600px) {
+  .toolbar.toolbar > .tabFrame,
+  .toolbar.toolbar > label {
+    flex-basis: 100%;
+    width: 100%;
+  }
+}

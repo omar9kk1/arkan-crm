@@ -1,0 +1,382 @@
+/* Compact property cards and left drawer distilled from prototype V83/V100. */
+.scope {
+  --property-card-height: 315px;
+  --property-radius: 23px;
+  --property-image: url('/backgrounds/manager-architecture.jpg');
+  --property-image-wash: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.12),
+    rgba(255, 255, 255, 0.9)
+  );
+  --property-overlay: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.94),
+    rgba(238, 229, 216, 0.94)
+  );
+  --property-overlay-shadow: 0 34px 90px rgba(41, 28, 14, 0.22);
+  --property-gap: 14px;
+  min-width: 0;
+}
+.preview {
+  font-size: var(--text-caption);
+  margin: 0 0 var(--space-3);
+}
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--property-gap);
+  margin-bottom: var(--space-5);
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-6);
+}
+.toolbar > label {
+  flex: 1 1 220px;
+}
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.toolbar .tabs {
+  margin-bottom: 0;
+}
+.tabs button {
+  font: inherit;
+  font-size: var(--text-small);
+  padding: var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  background: var(--manager-button-surface);
+  cursor: pointer;
+}
+.tabs button[aria-selected='true'] {
+  background: var(--manager-button-hover);
+  box-shadow: var(--shadow-control);
+  border-color: var(--focus);
+}
+.region {
+  margin-bottom: var(--space-8);
+}
+.propertyGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: var(--property-gap);
+}
+.propertyCard {
+  position: relative;
+  min-width: 0;
+  min-height: var(--property-card-height);
+  padding: var(--space-4);
+  border-radius: var(--property-radius);
+  border: 1px solid var(--glass-border);
+  background:
+    var(--property-image-wash),
+    var(--property-image) center / cover;
+  box-shadow: var(--shadow-card);
+  color: var(--ink);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+.propertyCard:nth-child(even) {
+  background-position:
+    center,
+    70% center;
+}
+.propertyCard:hover {
+  border-color: var(--focus);
+}
+.badges {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--manager-button-surface);
+  border: 1px solid var(--glass-border);
+  font-size: var(--text-caption);
+  backdrop-filter: blur(var(--glass-blur));
+}
+.approved {
+  color: var(--dashboard-positive);
+}
+.propertyContent {
+  display: grid;
+  gap: var(--space-1);
+  font-size: var(--text-small);
+}
+.price {
+  font-size: 22px;
+}
+.meta {
+  color: var(--muted);
+  font-size: var(--text-caption);
+}
+.specs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+.specs > span {
+  font-size: var(--text-caption);
+  background: var(--manager-button-surface);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  padding: var(--space-1) var(--space-2);
+}
+.detailsLink {
+  margin-inline-start: auto;
+  backdrop-filter: blur(var(--glass-blur));
+}
+.approvalList {
+  display: grid;
+  gap: var(--property-gap);
+}
+.approvalCard {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: var(--space-5);
+}
+.approvalImage,
+.drawerImage {
+  background:
+    var(--property-image-wash),
+    var(--property-image) center / cover;
+  border-radius: var(--property-radius);
+  min-height: 180px;
+}
+.approvalCard h3 {
+  margin: var(--space-2) 0;
+}
+.approvalCard p {
+  margin: var(--space-2) 0;
+  font-size: var(--text-small);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.overlay {
+  position: fixed;
+  color: var(--ink);
+  font: inherit;
+  padding: var(--space-4);
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.8),
+    rgba(245, 239, 230, 0.76)
+  );
+  box-shadow: 0 16px 48px rgba(60, 45, 25, 0.12);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  max-width: calc(100vw - var(--space-8));
+  max-height: calc(100dvh - var(--space-8));
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.overlay[open] {
+  display: flex;
+  flex-direction: column;
+}
+.overlayBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding-inline: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+.overlay::backdrop {
+  background: var(--overlay-scrim);
+  backdrop-filter: blur(7px);
+}
+.drawer {
+  left: var(--space-4);
+  right: auto;
+  top: var(--space-4);
+  bottom: var(--space-4);
+  margin: 0;
+  width: 430px;
+  height: calc(100dvh - var(--space-8));
+}
+.modal {
+  margin: auto;
+  width: 520px;
+}
+.overlayHeader {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.overlayHeader h2 {
+  margin: 0;
+  font-size: var(--text-heading);
+}
+.overlayHeader button {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  color: var(--muted);
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1;
+  box-shadow: none;
+}
+.overlayHeader button:hover {
+  background: rgba(255, 255, 255, 0.65);
+  color: var(--ink);
+}
+.overlayBody > form button {
+  min-height: 40px;
+  padding: var(--space-2) var(--space-4);
+  font-weight: 500;
+  box-shadow: var(--shadow-control);
+}
+.drawerImage {
+  margin-bottom: var(--space-4);
+}
+.facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin-block: var(--space-4);
+}
+.facts > div,
+.inset,
+.followups li {
+  padding: var(--space-3);
+  background: var(--dashboard-inset);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+  min-width: 0;
+}
+.facts dt,
+.followups time {
+  font-size: var(--text-caption);
+  color: var(--muted);
+}
+.facts dd {
+  margin: var(--space-1) 0 0;
+  font-weight: 700;
+}
+.overlay h3 {
+  font-size: var(--text-body);
+}
+.inset h3 {
+  margin-top: 0;
+}
+.inset p,
+.followups p {
+  font-size: var(--text-small);
+}
+.followups {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+.toast {
+  position: fixed;
+  inset-inline: var(--space-4);
+  bottom: calc(var(--manager-bottom-height) + var(--space-8));
+  z-index: var(--layer-navigation);
+  margin-inline: auto;
+  max-width: 520px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--glass-border);
+  background: var(--property-overlay);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(var(--glass-blur));
+  font-size: var(--text-small);
+}
+@media (max-width: 1180px) {
+  .stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 600px) {
+  .stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .propertyGrid {
+    --property-card-height: 290px;
+    --property-mobile-width: 230px;
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: min(var(--property-mobile-width), 85%);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    scroll-padding-inline: var(--space-1);
+    padding: var(--space-1) var(--space-1) var(--space-3);
+    max-width: 100%;
+    min-width: 0;
+  }
+  .propertyGrid .propertyCard {
+    scroll-snap-align: start;
+    padding: var(--space-3);
+  }
+  .propertyGrid .propertyCard:focus-visible {
+    outline-offset: -3px;
+  }
+  .approvalCard {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .tabs {
+    width: 100%;
+  }
+  .tabs button {
+    flex: 1;
+  }
+  .overlay {
+    inset: var(--space-2);
+    margin: 0;
+    width: calc(100% - var(--space-4));
+    height: calc(100dvh - var(--space-4));
+    max-width: none;
+    max-height: none;
+    padding: var(--space-4);
+  }
+  .toolbar > label {
+    min-width: 0;
+    width: 100%;
+  }
+}

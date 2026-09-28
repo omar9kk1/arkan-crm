@@ -1,0 +1,196 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap');
+@import './tokens.css';
+:root {
+  --scrollbar-thumb: #dfcfb4;
+  --scrollbar-thumb-hover: #cebb9d;
+  --scrollbar-track: rgba(255, 255, 255, 0.16);
+  --scrollbar-size: 6px;
+}
+html {
+  overflow-x: clip;
+}
+/* Keep native scrolling on the page and nested scroll regions. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+@supports selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+  *::-webkit-scrollbar {
+    width: var(--scrollbar-size);
+    height: var(--scrollbar-size);
+  }
+  *::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+    border-radius: var(--radius-pill);
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: var(--radius-pill);
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+  }
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--ink);
+  font-family: 'IBM Plex Sans Arabic', Tahoma, Arial, sans-serif;
+  line-height: 1.8;
+}
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+a {
+  color: inherit;
+  text-underline-offset: 5px;
+}
+a:focus-visible,
+button:focus-visible,
+input:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 5px;
+}
+h1 {
+  font-size: clamp(1.6rem, 4vw, 2.2rem);
+  margin: 0 0 12px;
+}
+p {
+  color: var(--muted);
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.4rem;
+}
+.brand > .brand-logo {
+  position: relative;
+  flex: 0 0 64px;
+  width: 64px;
+  height: 80px;
+  overflow: hidden;
+}
+/* Frame the mark within the supplied image's transparent margins. */
+.brand-logo img {
+  position: absolute;
+  width: 160px;
+  max-width: none;
+  height: auto;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+.brand strong {
+  min-width: 0;
+}
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: clamp(24px, 5vw, 48px);
+}
+.eyebrow {
+  font-size: 0.85rem;
+  margin-top: 28px;
+}
+.workspace-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 20px;
+  padding: 20px clamp(20px, 5vw, 64px);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.workspace-header > button {
+  margin-inline-start: auto;
+}
+.workspace-main {
+  max-width: 1100px;
+  margin: 40px auto;
+  padding-inline: 20px;
+}
+.badge {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 12px;
+  background: #f0eadf;
+  font-size: 0.8rem;
+}
+.auth-status {
+  padding: var(--space-8);
+  text-align: center;
+}
+
+/* Stat groups share a compact swipeable row on phones. */
+@media (max-width: 767px) {
+  :has(> [data-stat-card]) {
+    display: grid !important;
+    grid-template-columns: none !important;
+    grid-auto-flow: column;
+    grid-auto-columns: min(170px, 72vw);
+    gap: 12px !important;
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    padding-block: 4px;
+  }
+}
+
+/* Prevent iOS focus zoom, including landscape phones and custom selects.
+   Override component font shorthands without changing control dimensions. */
+@media (max-width: 767px), (hover: none) and (pointer: coarse) {
+  input,
+  textarea,
+  select,
+  button,
+  [contenteditable]:not([contenteditable='false']),
+  [role='combobox'],
+  [role='listbox'],
+  [role='option'] {
+    font-size: max(16px, 1rem) !important;
+  }
+}
+
+/* Hide mobile scrollbars without disabling touch or keyboard scrolling. */
+@media (max-width: 767px), (hover: none) and (pointer: coarse) {
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  main[tabindex]:focus,
+  [role='tabpanel']:focus {
+    outline: none;
+  }
+
+  html,
+  body,
+  * {
+    scrollbar-width: none !important;
+  }
+
+  *::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
+}

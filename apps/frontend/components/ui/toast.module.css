@@ -1,0 +1,28 @@
+.toast {
+  position: fixed;
+  inset: auto;
+  top: calc(env(safe-area-inset-top, 0px) + var(--space-4));
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  width: max-content;
+  max-width: min(460px, calc(100vw - 32px));
+  padding: var(--space-3) var(--space-5);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+  background: rgba(255, 253, 248, 0.94);
+  backdrop-filter: blur(var(--glass-blur));
+  box-shadow: var(--shadow-control);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-small);
+  line-height: 1.7;
+  direction: rtl;
+  text-align: center;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+.toast::backdrop {
+  background: transparent;
+  pointer-events: none;
+}

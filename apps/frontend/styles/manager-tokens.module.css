@@ -1,0 +1,105 @@
+/* Scoped to ManagerLayout. Values distilled from the prototype's CSS;
+   the background asset is its original embedded body image. */
+.theme {
+  --dashboard-surface: rgba(255, 255, 255, 0.62);
+  --dashboard-inset: rgba(255, 255, 255, 0.56);
+  --dashboard-chart-surface: rgba(255, 255, 255, 0.44);
+  --dashboard-gold: #c9a76f;
+  --dashboard-positive: #237f52;
+  --dashboard-warning: rgba(218, 164, 67, 0.13);
+  --dashboard-warning-border: rgba(218, 164, 67, 0.18);
+  --dashboard-gap: 14px;
+  --dashboard-padding: 18px;
+  --dashboard-inset-gap: 10px;
+  --dashboard-inset-radius: 18px;
+  --dashboard-inset-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  --dashboard-chart-height: 190px;
+  --dashboard-heading: 20px;
+  --background: #f3ede4;
+  --surface: rgba(255, 255, 255, 0.58);
+  --ink: #242119;
+  --muted: #6e6559;
+  --border: rgba(112, 82, 39, 0.12);
+  --accent: linear-gradient(135deg, #e4d1ae, #c9a76f);
+  --accent-hover: linear-gradient(135deg, #dfc79f, #c29d61);
+  --accent-soft: rgba(201, 167, 111, 0.18);
+  --focus: #806238;
+  --glass-surface: rgba(255, 255, 255, 0.47);
+  --glass-border: rgba(255, 255, 255, 0.72);
+  --glass-blur: 25px;
+  --radius-card: 26px;
+  --radius-control: 16px;
+  --shadow-card: 0 16px 36px rgba(58, 39, 20, 0.08);
+  --shadow-control:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 12px 26px rgba(191, 155, 104, 0.15);
+  --manager-background-image: url('/backgrounds/manager-architecture.jpg');
+  --manager-background-position: center center;
+  --manager-background-wash: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.12),
+    rgba(255, 255, 255, 0.08)
+  );
+  --manager-background-light: radial-gradient(
+    circle at 18% 16%,
+    rgba(255, 255, 255, 0.34),
+    transparent 22%
+  );
+  --manager-background-shade: radial-gradient(
+    circle at 82% 88%,
+    rgba(127, 93, 52, 0.08),
+    transparent 26%
+  );
+  --manager-glass-highlight: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.18),
+    transparent 50%
+  );
+  --manager-sidebar-surface: rgba(255, 255, 255, 0.28);
+  --manager-sidebar-shadow: -14px 0 40px rgba(58, 41, 19, 0.09);
+  --manager-topbar-surface: rgba(255, 255, 255, 0.38);
+  --manager-nav-surface: rgba(255, 255, 255, 0.72);
+  --manager-button-surface: rgba(255, 255, 255, 0.55);
+  --manager-button-hover: rgba(255, 255, 255, 0.8);
+  --manager-button-border: rgba(255, 255, 255, 0.65);
+  --manager-button-blur: var(--glass-blur);
+  --manager-nav-active: var(--manager-button-surface);
+  --manager-button-shadow: var(--shadow-control);
+  --manager-inset-surface: rgba(255, 255, 255, 0.28);
+  --manager-stat-surface: rgba(255, 255, 255, 0.52);
+  --manager-dialog-surface: rgba(255, 253, 248, 0.88);
+  --manager-sidebar-width: 268px;
+  --manager-topbar-height: 80px;
+  --manager-bottom-height: 72px;
+  --manager-card-padding: 20px;
+  --manager-section-gap: 18px;
+  --manager-page-gap: 28px;
+  --manager-chart-height: 270px;
+}
+@media (max-width: 980px) {
+  .theme {
+    --dashboard-gap: 12px;
+    --dashboard-padding: 14px;
+    --dashboard-inset-gap: 8px;
+    --dashboard-chart-height: 160px;
+    --dashboard-heading: 18px;
+    --glass-blur: 18px;
+    --manager-background-position: 65% center;
+    --manager-card-padding: 18px;
+    --manager-section-gap: 14px;
+    --manager-page-gap: 20px;
+  }
+}
+/* More opaque fallback keeps text readable without backdrop-filter support. */
+@supports not (
+  (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))
+) {
+  .theme {
+    --dashboard-surface: rgba(255, 253, 248, 0.9);
+    --glass-surface: rgba(255, 253, 248, 0.9);
+    --manager-stat-surface: rgba(255, 253, 248, 0.9);
+    --manager-sidebar-surface: rgba(255, 253, 248, 0.92);
+    --manager-topbar-surface: rgba(255, 253, 248, 0.92);
+    --manager-nav-surface: rgba(255, 253, 248, 0.95);
+  }
+}

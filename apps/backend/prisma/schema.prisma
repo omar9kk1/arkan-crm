@@ -1,0 +1,449 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  MANAGER
+  EMPLOYEE
+}
+
+enum PropertyStatus {
+  PENDING
+  AVAILABLE
+  REJECTED
+  SOLD
+  RENTED
+  ARCHIVED
+}
+
+enum DealType {
+  SALE
+  RENT
+}
+
+enum AssignmentPurpose {
+  MARKETING
+  OWNER_FOLLOWUP
+  VIEWINGS
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+}
+
+enum FollowUpStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  CANCELLED
+}
+
+enum CommissionRole {
+  PROPERTY_EMPLOYEE
+  CLIENT_EMPLOYEE
+  MANUAL
+}
+
+enum FinanceDirection {
+  INCOME
+  EXPENSE
+}
+
+enum FinanceSourceType {
+  DEAL
+  COMMISSION
+  PAYROLL
+  MANUAL_EXPENSE
+}
+
+enum AttendanceStatus {
+  PRESENT
+  LATE
+  ABSENT
+  LEAVE
+}
+
+model User {
+  id                      String                    @id @default(uuid()) @db.Uuid
+  email                   String                    @unique
+  passwordHash            String
+  name                    String
+  role                    Role                      @default(EMPLOYEE)
+  isActive                Boolean                   @default(true)
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+  employee                EmployeeProfile?
+  refreshTokens           RefreshToken[]
+  notifications           Notification[]
+  auditLogs               AuditLog[]
+  recordedDeals           Deal[]
+  requestedApprovals      PropertyApprovalRequest[] @relation("ApprovalRequester")
+  reviewedApprovals       PropertyApprovalRequest[] @relation("ApprovalReviewer")
+  uploadedFiles           FileAsset[]
+  createdCommissions      Commission[]
+  createdPayrollEntries   PayrollEntry[]
+  createdFinanceMovements FinanceMovement[]
+  createdManualExpenses   ManualExpense[]
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, expiresAt])
+}
+
+model EmployeeProfile {
+  id                 String               @id @default(uuid()) @db.Uuid
+  userId             String               @unique @db.Uuid
+  user               User                 @relation(fields: [userId], references: [id], onDelete: Restrict)
+  phone              String?
+  hiredAt            DateTime?
+  baseSalary         Decimal?             @db.Decimal(14, 2)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  createdClients     Client[]             @relation("ClientCreator")
+  responsibleClients Client[]             @relation("ClientResponsible")
+  createdOwners      Owner[]              @relation("OwnerCreator")
+  responsibleOwners  Owner[]              @relation("OwnerResponsible")
+  createdProperties  Property[]
+  assignments        PropertyAssignment[]
+  followups          FollowUp[]
+  propertyDeals      Deal[]               @relation("PropertyEmployee")
+  clientDeals        Deal[]               @relation("ClientEmployee")
+  commissions        Commission[]
+  payroll            PayrollEntry[]
+  attendance         AttendanceRecord[]
+}
+
+model Client {
+  id                    String           @id @default(uuid()) @db.Uuid
+  name                  String
+  phone                 String
+  notes                 String?
+  source                String?
+  status                String?
+  createdById           String?          @db.Uuid
+  createdBy             EmployeeProfile? @relation("ClientCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  responsibleEmployeeId String?          @db.Uuid
+  responsibleEmployee   EmployeeProfile? @relation("ClientResponsible", fields: [responsibleEmployeeId], references: [id], onDelete: Restrict)
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  deals                 Deal[]
+  followups             FollowUp[]
+  notifications         Notification[]
+
+  @@index([responsibleEmployeeId])
+  @@index([phone])
+}
+
+model Owner {
+  id                    String           @id @default(uuid()) @db.Uuid
+  name                  String
+  phone                 String
+  notes                 String?
+  source                String?
+  status                String?
+  createdById           String?          @db.Uuid
+  createdBy             EmployeeProfile? @relation("OwnerCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  responsibleEmployeeId String?          @db.Uuid
+  responsibleEmployee   EmployeeProfile? @relation("OwnerResponsible", fields: [responsibleEmployeeId], references: [id], onDelete: Restrict)
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  properties            Property[]
+  followups             FollowUp[]
+  notifications         Notification[]
+
+  @@index([responsibleEmployeeId])
+  @@index([phone])
+}
+
+model Property {
+  id             String                    @id @default(uuid()) @db.Uuid
+  reference      String                    @unique
+  title          String
+  area           String
+  address        String?
+  sizeSqm        Decimal?                  @db.Decimal(14, 2)
+  bedrooms       Int?
+  bathrooms      Int?
+  block          String?
+  street         String?
+  description    String?
+  askingPrice    Decimal?                  @db.Decimal(14, 2)
+  currency       String                    @db.Char(3)
+  status         PropertyStatus            @default(PENDING)
+  listingType    DealType
+  ownerId        String                    @db.Uuid
+  owner          Owner                     @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  createdById    String?                   @db.Uuid
+  createdBy      EmployeeProfile?          @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+  assignments    PropertyAssignment[]
+  approvals      PropertyApprovalRequest[]
+  deals          Deal[]
+  followups      FollowUp[]
+  notifications  Notification[]
+  files          FileAsset[]
+  manualExpenses ManualExpense[]
+
+  @@index([area, status])
+  @@index([ownerId])
+}
+
+model PropertyAssignment {
+  id         String            @id @default(uuid()) @db.Uuid
+  propertyId String            @db.Uuid
+  property   Property          @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  employeeId String            @db.Uuid
+  employee   EmployeeProfile   @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  purpose    AssignmentPurpose
+  createdAt  DateTime          @default(now())
+
+  @@unique([propertyId, employeeId, purpose])
+  @@index([employeeId])
+}
+
+model PropertyApprovalRequest {
+  id            String         @id @default(uuid()) @db.Uuid
+  propertyId    String         @db.Uuid
+  property      Property       @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  requestedById String         @db.Uuid
+  requestedBy   User           @relation("ApprovalRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  reviewedById  String?        @db.Uuid
+  reviewedBy    User?          @relation("ApprovalReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+  status        ApprovalStatus @default(PENDING)
+  notes         String?
+  createdAt     DateTime       @default(now())
+  reviewedAt    DateTime?
+
+  @@index([status, createdAt])
+}
+
+model FollowUp {
+  id            String          @id @default(uuid()) @db.Uuid
+  employeeId    String          @db.Uuid
+  employee      EmployeeProfile @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  clientId      String?         @db.Uuid
+  client        Client?         @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  ownerId       String?         @db.Uuid
+  owner         Owner?          @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  propertyId    String?         @db.Uuid
+  property      Property?       @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  dueAt         DateTime
+  completedAt   DateTime?
+  status        FollowUpStatus  @default(PENDING)
+  notes         String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  notifications Notification[]
+
+  @@index([employeeId, status, dueAt])
+}
+
+model Deal {
+  id                 String            @id @default(uuid()) @db.Uuid
+  reference          String            @unique
+  type               DealType
+  propertyId         String            @db.Uuid
+  property           Property          @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  clientId           String            @db.Uuid
+  client             Client            @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  recordedById       String            @db.Uuid
+  recordedBy         User              @relation(fields: [recordedById], references: [id], onDelete: Restrict)
+  propertyEmployeeId String?           @db.Uuid
+  propertyEmployee   EmployeeProfile?  @relation("PropertyEmployee", fields: [propertyEmployeeId], references: [id], onDelete: Restrict)
+  clientEmployeeId   String?           @db.Uuid
+  clientEmployee     EmployeeProfile?  @relation("ClientEmployee", fields: [clientEmployeeId], references: [id], onDelete: Restrict)
+  price              Decimal           @db.Decimal(14, 2)
+  companyCommission  Decimal           @db.Decimal(14, 2)
+  currency           String            @db.Char(3)
+  closedAt           DateTime
+  createdAt          DateTime          @default(now())
+  commissions        Commission[]
+  financeMovements   FinanceMovement[]
+  notifications      Notification[]
+
+  @@index([propertyId])
+  @@index([clientId])
+}
+
+model Commission {
+  id               String            @id @default(uuid()) @db.Uuid
+  dealId           String            @db.Uuid
+  deal             Deal              @relation(fields: [dealId], references: [id], onDelete: Restrict)
+  employeeId       String            @db.Uuid
+  employee         EmployeeProfile   @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  commissionRole   CommissionRole
+  createdById      String            @db.Uuid
+  createdBy        User              @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  notes            String?
+  amount           Decimal           @db.Decimal(14, 2)
+  currency         String            @db.Char(3)
+  calculationNotes String?
+  status           PaymentStatus     @default(PENDING)
+  paidAt           DateTime?
+  createdAt        DateTime          @default(now())
+  financeMovements FinanceMovement[]
+
+  @@index([employeeId, status])
+  @@index([dealId])
+}
+
+model PayrollEntry {
+  id               String            @id @default(uuid()) @db.Uuid
+  employeeId       String            @db.Uuid
+  employee         EmployeeProfile   @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  createdById      String            @db.Uuid
+  createdBy        User              @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  notes            String?
+  period           DateTime          @db.Date
+  baseSalary       Decimal           @db.Decimal(14, 2)
+  deductions       Decimal           @default(0) @db.Decimal(14, 2)
+  bonus            Decimal           @default(0) @db.Decimal(14, 2)
+  netAmount        Decimal           @db.Decimal(14, 2)
+  currency         String            @db.Char(3)
+  status           PaymentStatus     @default(PENDING)
+  paidAt           DateTime?
+  createdAt        DateTime          @default(now())
+  financeMovements FinanceMovement[]
+  notifications    Notification[]
+
+  @@unique([employeeId, period])
+}
+
+model ManualExpense {
+  id               String            @id @default(uuid()) @db.Uuid
+  reference        String            @unique
+  type             String
+  amount           Decimal           @db.Decimal(14, 2)
+  currency         String            @db.Char(3)
+  description      String
+  propertyId       String?           @db.Uuid
+  property         Property?         @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  createdById      String            @db.Uuid
+  createdBy        User              @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  occurredAt       DateTime
+  createdAt        DateTime          @default(now())
+  financeMovements FinanceMovement[]
+
+  @@index([propertyId])
+  @@index([createdById, occurredAt])
+}
+
+model FinanceMovement {
+  id               String            @id @default(uuid()) @db.Uuid
+  reference        String            @unique
+  direction        FinanceDirection
+  sourceType       FinanceSourceType
+  sourceId         String            @db.Uuid
+  dealId           String?           @db.Uuid
+  deal             Deal?             @relation(fields: [dealId], references: [id], onDelete: Restrict)
+  commissionId     String?           @db.Uuid
+  commission       Commission?       @relation(fields: [commissionId], references: [id], onDelete: Restrict)
+  payrollEntryId   String?           @db.Uuid
+  payrollEntry     PayrollEntry?     @relation(fields: [payrollEntryId], references: [id], onDelete: Restrict)
+  manualExpenseId  String?           @db.Uuid
+  manualExpense    ManualExpense?    @relation(fields: [manualExpenseId], references: [id], onDelete: Restrict)
+  createdById      String            @db.Uuid
+  createdBy        User              @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  amount           Decimal           @db.Decimal(14, 2)
+  currency         String            @db.Char(3)
+  counterparty     String
+  calculationNotes String?
+  notes            String?
+  occurredAt       DateTime
+  createdAt        DateTime          @default(now())
+
+  @@index([sourceType, sourceId])
+  @@index([manualExpenseId])
+  @@index([occurredAt, direction])
+}
+
+model AttendanceRecord {
+  id         String           @id @default(uuid()) @db.Uuid
+  employeeId String           @db.Uuid
+  employee   EmployeeProfile  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  date       DateTime         @db.Date
+  status     AttendanceStatus
+  checkIn    DateTime?
+  checkOut   DateTime?
+  notes      String?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  @@unique([employeeId, date])
+}
+
+model Notification {
+  id             String        @id @default(uuid()) @db.Uuid
+  userId         String        @db.Uuid
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title          String
+  body           String
+  readAt         DateTime?
+  createdAt      DateTime      @default(now())
+  propertyId     String?       @db.Uuid
+  property       Property?     @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  clientId       String?       @db.Uuid
+  client         Client?       @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  ownerId        String?       @db.Uuid
+  owner          Owner?        @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  dealId         String?       @db.Uuid
+  deal           Deal?         @relation(fields: [dealId], references: [id], onDelete: Restrict)
+  followUpId     String?       @db.Uuid
+  followUp       FollowUp?     @relation(fields: [followUpId], references: [id], onDelete: Restrict)
+  payrollEntryId String?       @db.Uuid
+  payrollEntry   PayrollEntry? @relation(fields: [payrollEntryId], references: [id], onDelete: Restrict)
+
+  @@index([userId, readAt, createdAt])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String   @db.Uuid
+  actor      User     @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  action     String
+  entityType String
+  entityId   String   @db.Uuid
+  before     Json?
+  after      Json?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorId, createdAt])
+}
+
+model FileAsset {
+  id           String    @id @default(uuid()) @db.Uuid
+  bucket       String
+  key          String    @unique
+  mimeType     String
+  sizeBytes    BigInt
+  uploadedById String    @db.Uuid
+  uploadedBy   User      @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
+  propertyId   String?   @db.Uuid
+  property     Property? @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  createdAt    DateTime  @default(now())
+
+  @@index([propertyId])
+}

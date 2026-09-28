@@ -1,0 +1,44 @@
+{
+  "name": "@arkan/backend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "nest start --watch",
+    "build": "nest build",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "test": "jest --runInBand",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:validate": "prisma validate",
+    "db:seed": "npm run build && node --env-file-if-exists=.env prisma/seed.cjs"
+  },
+  "dependencies": {
+    "@arkan/shared": "0.1.0",
+    "@nestjs/common": "^11.1.0",
+    "@nestjs/core": "^11.1.0",
+    "@nestjs/platform-express": "^11.1.0",
+    "@nestjs/config": "^4.0.0",
+    "@nestjs/jwt": "^11.0.0",
+    "@nestjs/bullmq": "^11.0.0",
+    "@prisma/client": "~6.19.0",
+    "bullmq": "^5.61.0",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.2",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "joi": "^18.0.0"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.0",
+    "@nestjs/testing": "^11.1.0",
+    "@types/express": "^5.0.0",
+    "@types/jest": "^30.0.0",
+    "@types/supertest": "^6.0.0",
+    "jest": "^30.0.0",
+    "ts-jest": "^29.4.0",
+    "supertest": "^7.1.0",
+    "prisma": "~6.19.0"
+  }
+}

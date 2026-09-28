@@ -1,0 +1,637 @@
+[
+  {
+    "area": "مدينة الكويت",
+    "governorate": "العاصمة",
+    "blocks": 5
+  },
+  {
+    "area": "بنيد القار",
+    "governorate": "العاصمة",
+    "blocks": 3
+  },
+  {
+    "area": "الدسمة",
+    "governorate": "العاصمة",
+    "blocks": 5
+  },
+  {
+    "area": "الدعية",
+    "governorate": "العاصمة",
+    "blocks": 5
+  },
+  {
+    "area": "المنصورية",
+    "governorate": "العاصمة",
+    "blocks": 2
+  },
+  {
+    "area": "ضاحية عبد الله السالم",
+    "governorate": "العاصمة",
+    "blocks": 4
+  },
+  {
+    "area": "النزهة",
+    "governorate": "العاصمة",
+    "blocks": 3
+  },
+  {
+    "area": "الفيحاء",
+    "governorate": "العاصمة",
+    "blocks": 9
+  },
+  {
+    "area": "كيفان",
+    "governorate": "العاصمة",
+    "blocks": 7
+  },
+  {
+    "area": "الروضة",
+    "governorate": "العاصمة",
+    "blocks": 5
+  },
+  {
+    "area": "العديلية",
+    "governorate": "العاصمة",
+    "blocks": 4
+  },
+  {
+    "area": "الخالدية",
+    "governorate": "العاصمة",
+    "blocks": 4
+  },
+  {
+    "area": "القادسية",
+    "governorate": "العاصمة",
+    "blocks": 9
+  },
+  {
+    "area": "الشامية",
+    "governorate": "العاصمة",
+    "blocks": 10
+  },
+  {
+    "area": "اليرموك",
+    "governorate": "العاصمة",
+    "blocks": 4
+  },
+  {
+    "area": "قرطبة",
+    "governorate": "العاصمة",
+    "blocks": 4
+  },
+  {
+    "area": "السرة",
+    "governorate": "العاصمة",
+    "blocks": 6
+  },
+  {
+    "area": "الصليبيخات",
+    "governorate": "العاصمة",
+    "blocks": 5
+  },
+  {
+    "area": "الدوحة",
+    "governorate": "العاصمة",
+    "blocks": 4
+  },
+  {
+    "area": "غرناطة",
+    "governorate": "العاصمة",
+    "blocks": 3
+  },
+  {
+    "area": "القيروان",
+    "governorate": "العاصمة",
+    "blocks": 3
+  },
+  {
+    "area": "النهضة",
+    "governorate": "العاصمة",
+    "blocks": 3
+  },
+  {
+    "area": "مدينة جابر الأحمد",
+    "governorate": "العاصمة",
+    "blocks": 7
+  },
+  {
+    "area": "شمال غرب الصليبيخات",
+    "governorate": "العاصمة",
+    "blocks": 3
+  },
+  {
+    "area": "الشرق",
+    "governorate": "العاصمة",
+    "blocks": 7
+  },
+  {
+    "area": "المرقاب",
+    "governorate": "العاصمة",
+    "blocks": 4
+  },
+  {
+    "area": "القبلة",
+    "governorate": "العاصمة",
+    "blocks": 5
+  },
+  {
+    "area": "الصالحية",
+    "governorate": "العاصمة",
+    "blocks": 2
+  },
+  {
+    "area": "الوطية",
+    "governorate": "العاصمة",
+    "blocks": 1
+  },
+  {
+    "area": "الري",
+    "governorate": "العاصمة",
+    "blocks": 5
+  },
+  {
+    "area": "الشويخ السكنية",
+    "governorate": "العاصمة",
+    "blocks": 5
+  },
+  {
+    "area": "الشويخ الصناعية",
+    "governorate": "العاصمة",
+    "blocks": 3
+  },
+  {
+    "area": "حولي",
+    "governorate": "حولي",
+    "blocks": 12
+  },
+  {
+    "area": "الشعب",
+    "governorate": "حولي",
+    "blocks": 7
+  },
+  {
+    "area": "السالمية",
+    "governorate": "حولي",
+    "blocks": 12
+  },
+  {
+    "area": "الرميثية",
+    "governorate": "حولي",
+    "blocks": 12
+  },
+  {
+    "area": "الجابريية",
+    "governorate": "حولي",
+    "blocks": 12
+  },
+  {
+    "area": "سلوى",
+    "governorate": "حولي",
+    "blocks": 12
+  },
+  {
+    "area": "بيان",
+    "governorate": "حولي",
+    "blocks": 13
+  },
+  {
+    "area": "مشرف",
+    "governorate": "حولي",
+    "blocks": 7
+  },
+  {
+    "area": "ميدان حولي",
+    "governorate": "حولي",
+    "blocks": 4
+  },
+  {
+    "area": "النقرة",
+    "governorate": "حولي",
+    "blocks": 3
+  },
+  {
+    "area": "بيان",
+    "governorate": "حولي",
+    "blocks": 11
+  },
+  {
+    "area": "ضاحية مبارك العبد الله الجابر (غرب مشرف)",
+    "governorate": "حولي",
+    "blocks": 7
+  },
+  {
+    "area": "جنوب السرة - حطين",
+    "governorate": "حولي",
+    "blocks": 4
+  },
+  {
+    "area": "جنوب السرة - السلام",
+    "governorate": "حولي",
+    "blocks": 7
+  },
+  {
+    "area": "جنوب السرة - الصديق",
+    "governorate": "حولي",
+    "blocks": 7
+  },
+  {
+    "area": "جنوب السرة - الزهراء",
+    "governorate": "حولي",
+    "blocks": 8
+  },
+  {
+    "area": "جنوب السرة - الشهداء",
+    "governorate": "حولي",
+    "blocks": 5
+  },
+  {
+    "area": "البدع",
+    "governorate": "حولي",
+    "blocks": 2
+  },
+  {
+    "area": "الفروانية",
+    "governorate": "الفروانية",
+    "blocks": 6
+  },
+  {
+    "area": "خيطان",
+    "governorate": "الفروانية",
+    "blocks": 10
+  },
+  {
+    "area": "أبرق خيطان",
+    "governorate": "الفروانية",
+    "blocks": 5
+  },
+  {
+    "area": "العمرية",
+    "governorate": "الفروانية",
+    "blocks": 5
+  },
+  {
+    "area": "العارضية",
+    "governorate": "الفروانية",
+    "blocks": 11
+  },
+  {
+    "area": "العارضية الصناعية",
+    "governorate": "الفروانية",
+    "blocks": 3
+  },
+  {
+    "area": "الرقعي",
+    "governorate": "الفروانية",
+    "blocks": 2
+  },
+  {
+    "area": "الاندلس",
+    "governorate": "الفروانية",
+    "blocks": 12
+  },
+  {
+    "area": "الفردوس",
+    "governorate": "الفروانية",
+    "blocks": 9
+  },
+  {
+    "area": "الرحاب",
+    "governorate": "الفروانية",
+    "blocks": 3
+  },
+  {
+    "area": "الرابية",
+    "governorate": "الفروانية",
+    "blocks": 5
+  },
+  {
+    "area": "إشبيلية",
+    "governorate": "الفروانية",
+    "blocks": 4
+  },
+  {
+    "area": "جليب الشيوخ",
+    "governorate": "الفروانية",
+    "blocks": 5
+  },
+  {
+    "area": "الضجيج",
+    "governorate": "الفروانية",
+    "blocks": 2
+  },
+  {
+    "area": "صباح الناصر",
+    "governorate": "الفروانية",
+    "blocks": 7
+  },
+  {
+    "area": "ضاحية عبد الله المبارك",
+    "governorate": "الفروانية",
+    "blocks": 9
+  },
+  {
+    "area": "غرب عبد الله المبارك",
+    "governorate": "الفروانية",
+    "blocks": 7
+  },
+  {
+    "area": "الشدادية",
+    "governorate": "الفروانية",
+    "blocks": 2
+  },
+  {
+    "area": "الحساوي",
+    "governorate": "الفروانية",
+    "blocks": 4
+  },
+  {
+    "area": "العباسية",
+    "governorate": "الفروانية",
+    "blocks": 3
+  },
+  {
+    "area": "الأحمدي",
+    "governorate": "الأحمدي",
+    "blocks": 6
+  },
+  {
+    "area": "الفنطاس",
+    "governorate": "الأحمدي",
+    "blocks": 4
+  },
+  {
+    "area": "العقيلة",
+    "governorate": "الأحمدي",
+    "blocks": 4
+  },
+  {
+    "area": "الظهر",
+    "governorate": "الأحمدي",
+    "blocks": 6
+  },
+  {
+    "area": "المهبولة",
+    "governorate": "الأحمدي",
+    "blocks": 6
+  },
+  {
+    "area": "الرقة",
+    "governorate": "الأحمدي",
+    "blocks": 7
+  },
+  {
+    "area": "هدية",
+    "governorate": "الأحمدي",
+    "blocks": 5
+  },
+  {
+    "area": "أبو حليفة",
+    "governorate": "الأحمدي",
+    "blocks": 3
+  },
+  {
+    "area": "الصباحية",
+    "governorate": "الأحمدي",
+    "blocks": 5
+  },
+  {
+    "area": "المنقف",
+    "governorate": "الأحمدي",
+    "blocks": 5
+  },
+  {
+    "area": "الفحيحيل",
+    "governorate": "الأحمدي",
+    "blocks": 5
+  },
+  {
+    "area": "ميناء الأحمدي",
+    "governorate": "الأحمدي",
+    "blocks": 2
+  },
+  {
+    "area": "الشعيبة",
+    "governorate": "الأحمدي",
+    "blocks": 2
+  },
+  {
+    "area": "ضاحية جابر العلي",
+    "governorate": "الأحمدي",
+    "blocks": 8
+  },
+  {
+    "area": "ضاحية فهد الأحمد",
+    "governorate": "الأحمدي",
+    "blocks": 4
+  },
+  {
+    "area": "ضاحية علي صباح السالم (أم الهيمان)",
+    "governorate": "الأحمدي",
+    "blocks": 9
+  },
+  {
+    "area": "ميناء عبد الله",
+    "governorate": "الأحمدي",
+    "blocks": 2
+  },
+  {
+    "area": "بنيدر",
+    "governorate": "الأحمدي",
+    "blocks": 1
+  },
+  {
+    "area": "الجليعة",
+    "governorate": "الأحمدي",
+    "blocks": 1
+  },
+  {
+    "area": "الضباعية",
+    "governorate": "الأحمدي",
+    "blocks": 1
+  },
+  {
+    "area": "الخيران",
+    "governorate": "الأحمدي",
+    "blocks": 7
+  },
+  {
+    "area": "مدينة صباح الأحمد",
+    "governorate": "الأحمدي",
+    "blocks": 5
+  },
+  {
+    "area": "مدينة الخيران السكنية",
+    "governorate": "الأحمدي",
+    "blocks": 3
+  },
+  {
+    "area": "الوفره",
+    "governorate": "الأحمدي",
+    "blocks": 7
+  },
+  {
+    "area": "الوفره الزراعية",
+    "governorate": "الأحمدي",
+    "blocks": 4
+  },
+  {
+    "area": "الجهراء",
+    "governorate": "الجهراء",
+    "blocks": 4
+  },
+  {
+    "area": "الواحة",
+    "governorate": "الجهراء",
+    "blocks": 4
+  },
+  {
+    "area": "العيون",
+    "governorate": "الجهراء",
+    "blocks": 5
+  },
+  {
+    "area": "القصر",
+    "governorate": "الجهراء",
+    "blocks": 4
+  },
+  {
+    "area": "النسيم",
+    "governorate": "الجهراء",
+    "blocks": 4
+  },
+  {
+    "area": "تيماء",
+    "governorate": "الجهراء",
+    "blocks": 8
+  },
+  {
+    "area": "النعيم",
+    "governorate": "الجهراء",
+    "blocks": 4
+  },
+  {
+    "area": "مدينة سعد العبد الله",
+    "governorate": "الجهراء",
+    "blocks": 11
+  },
+  {
+    "area": "الجهراء الصناعية",
+    "governorate": "الجهراء",
+    "blocks": 2
+  },
+  {
+    "area": "الجهراء القديمة",
+    "governorate": "الجهراء",
+    "blocks": 3
+  },
+  {
+    "area": "الصليبية",
+    "governorate": "الجهراء",
+    "blocks": 10
+  },
+  {
+    "area": "الصليبية الصناعية",
+    "governorate": "الجهراء",
+    "blocks": 3
+  },
+  {
+    "area": "الصليبية الزراعية",
+    "governorate": "الجهراء",
+    "blocks": 3
+  },
+  {
+    "area": "أمغرة",
+    "governorate": "الجهراء",
+    "blocks": 3
+  },
+  {
+    "area": "مدينة المطلاع",
+    "governorate": "الجهراء",
+    "blocks": 12
+  },
+  {
+    "area": "العبدلي",
+    "governorate": "الجهراء",
+    "blocks": 4
+  },
+  {
+    "area": "كبد",
+    "governorate": "الجهراء",
+    "blocks": 6
+  },
+  {
+    "area": "السالمي",
+    "governorate": "الجهراء",
+    "blocks": 1
+  },
+  {
+    "area": "الصبية",
+    "governorate": "الجهراء",
+    "blocks": 2
+  },
+  {
+    "area": "الروضتين",
+    "governorate": "الجهراء",
+    "blocks": 1
+  },
+  {
+    "area": "مبارك الكبير",
+    "governorate": "مبارك الكبير",
+    "blocks": 8
+  },
+  {
+    "area": "صباح السالم",
+    "governorate": "مبارك الكبير",
+    "blocks": 13
+  },
+  {
+    "area": "القرين",
+    "governorate": "مبارك الكبير",
+    "blocks": 5
+  },
+  {
+    "area": "القصور",
+    "governorate": "مبارك الكبير",
+    "blocks": 5
+  },
+  {
+    "area": "العدان",
+    "governorate": "مبارك الكبير",
+    "blocks": 8
+  },
+  {
+    "area": "المسيلة",
+    "governorate": "مبارك الكبير",
+    "blocks": 5
+  },
+  {
+    "area": "أبو الحصاني",
+    "governorate": "مبارك الكبير",
+    "blocks": 2
+  },
+  {
+    "area": "أبو فطيرة",
+    "governorate": "مبارك الكبير",
+    "blocks": 8
+  },
+  {
+    "area": "الفنيطيس",
+    "governorate": "مبارك الكبير",
+    "blocks": 8
+  },
+  {
+    "area": "المسايل",
+    "governorate": "مبارك الكبير",
+    "blocks": 6
+  },
+  {
+    "area": "صبحان الصناعية",
+    "governorate": "مبارك الكبير",
+    "blocks": 3
+  },
+  {
+    "area": "شريط ساحلي مبارك الكبير",
+    "governorate": "مبارك الكبير",
+    "blocks": 2
+  }
+]
