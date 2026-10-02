@@ -1,293 +1,167 @@
 # Arkan Real Estate CRM
 
-هيكل تأسيسي ينفذ المهمة في [docs/05_CODEX_FIRST_TASK.md](docs/05_CODEX_FIRST_TASK.md).
-الواجهة منفصلة عن الخادم، والبروتوتايب مرجع UI محفوظ دون تعديل.
+Arabic RTL CRM for real estate managers and employees: properties, owners, clients/requests, follow-ups, deals, finance and attendance.
 
-## النطاق الحالي
+**Current stage:** real backend authentication and database foundation, with a substantial frontend mock prototype. Most business submissions are local page state, not database records. Reports/marketing are coming soon. Read [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) before development and [TODO.md](TODO.md) for remaining work.
 
-- Next.js / React / TypeScript: صفحات عربية RTL بسيطة في `/login` و`/manager` و`/employee`.
-- NestJS: إعدادات بيئة، تحقق DTO، تنسيق موحد للاستجابات والأخطاء، Prisma، وBullMQ.
-- JWT guard افتراضي لكل API غير معلّم بـ `@Public()`، و`@Roles(Role.MANAGER)` أو `@Roles(Role.EMPLOYEE)`.
-- وحدات المجالات فارغة عمدًا. تضاف controllers/services/DTOs عند تنفيذ كل مجال.
-- PostgreSQL وRedis وتهيئة migrations عبر Docker Compose.
-- S3: حقول إعدادات ونموذج FileAsset فقط؛ لا رفع ملفات أو اتصالات خارجية في هذه المرحلة.
+## Stack and structure
 
-**المصادقة:** Login وRefresh وLogout منفذة في Backend. كلمات المرور تستخدم scrypt مع salt عشوائي.
-Access token هو JWT متحقق من توقيعه وانتهائه وissuer وaudience والدور والجلسة النشطة.
-Refresh token عشوائي بطول 48 بايت، محفوظ كـSHA-256 hash فقط، بعمر سبعة أيام ومتجدد عند الاستخدام.
-تُسجّل أحداث الدخول والتجديد والخروج في AuditLog ضمن معاملة قاعدة البيانات نفسها.
-صفحة /login متصلة بالـBackend، وقالبا المدير والموظف محميان بتوجيه حسب الدور بعد التحقق من /auth/me.
-الجلسة محفوظة مؤقتًا في sessionStorage للتطوير فقط؛ حماية بيانات API الفعلية تبقى في Backend guards.
+Next.js 16.3.4 / React 19.2.8 / TypeScript 5.9.3 frontend; NestJS 11.2.3 backend; Prisma 6.19.3 / PostgreSQL; Redis / BullMQ. Resolved versions are in package-lock.json.
 
-## المتطلبات
+- apps/frontend: App Router, domain UI/mocks, authentication client and shared components.
+- apps/backend: authentication/health infrastructure, business module scaffolds, Prisma schema/migrations.
+- packages/shared: API contracts and role types; compiled before applications.
+- docs: original scope/architecture decisions and focused implementation notes.
+- scripts: standalone draft/NFC logic tests.
+- docker: application image recipes. Root Compose currently starts **PostgreSQL and Redis only**.
 
-- Node.js 22 أو أحدث وnpm.
-- Docker Desktop مع Linux containers وDocker Compose v2.
-- المنافذ المحلية 3000 و4000 و5432 و6379 متاحة.
+## Clean-machine local setup
 
-## تهيئة البيئة
-
-نفّذ من جذر المشروع في PowerShell:
+Requires Git/access to the repository, Node.js **>=22** with npm, Docker with Compose, and free ports 3000, 4000, 5432, 6379. Examples use Windows PowerShell and npm.cmd; on Linux/macOS use npm and cp instead.
 
 ```powershell
+git clone <repository-url> arkan-crm
+Set-Location arkan-crm
 Copy-Item apps/backend/.env.example apps/backend/.env
-Copy-Item apps/frontend/.env.example apps/frontend/.env.local
+Copy-Item apps/frontend/.env.local.example apps/frontend/.env.local
+```
+
+Copy templates only on a clean checkout; do not overwrite an existing environment. Edit backend .env before starting:
+
+- Set NODE_ENV to development, PORT to 4000 and FRONTEND_ORIGIN to http://localhost:3000.
+- Configure DATABASE_URL for the local PostgreSQL service, matching the development database initialization settings in docker-compose.yml.
+- Set REDIS_HOST to localhost and REDIS_PORT to 6379.
+- Replace JWT_ACCESS_SECRET with an independently generated random secret of at least 32 characters. Configure JWT_ISSUER and JWT_AUDIENCE consistently.
+- JWT_ACCESS_TTL_SECONDS is optional (default 900). JWT_REFRESH_SECRET in the template is unused by current code.
+
+Generate a fresh local secret with the following command and place its output only in your untracked backend .env. Do not share/commit it:
+
+```powershell
 node -e "console.log(require('node:crypto').randomBytes(48).toString('hex'))"
 ```
 
-ضع القيمة العشوائية الناتجة في `JWT_ACCESS_SECRET` داخل `apps/backend/.env`.
-التطبيق يرفض القيمة النموذجية. لا ترسل السر إلى Git.
-في macOS/Linux استخدم `cp` بدلًا من `Copy-Item`.
+Frontend .env.local must contain the public API address:
 
-## تشغيل كل الخدمات في Docker
-
-```powershell
-docker compose up --build -d
-docker compose ps
-docker compose logs -f backend
+```dotenv
+NEXT_PUBLIC_API_URL=http://localhost:4000
 ```
 
-خدمة `migrate` تطبق migrations أولًا ثم تخرج بنجاح، وبعدها يبدأ الخادم والواجهة.
-البيانات تحفظ في volumes. بيانات PostgreSQL المرفقة محلية فقط، والمنافذ مربوطة بـ127.0.0.1.
+Use **.env.local.example**, not frontend .env.example: the latter currently contains a backend-only CORS setting. Never add secrets to NEXT_PUBLIC variables. Full environment requirements are in PROJECT_CONTEXT.md.
 
-- الواجهة: http://localhost:3000/login
-- API liveness: http://localhost:4000/health
-- API readiness: http://localhost:4000/health/ready
+Install and prepare services from the repository root:
+
+```powershell
+npm.cmd ci
+npm.cmd run db:generate
+npm.cmd run build -w @arkan/shared
+docker compose up -d postgres redis
+docker compose ps
+docker compose exec postgres pg_isready -U postgres
+docker compose exec redis redis-cli ping
+```
+
+Wait until PostgreSQL is accepting connections and Redis answers PONG. Then, for this new development database:
+
+```powershell
+npm.cmd run db:deploy -w @arkan/backend
+npm.cmd run db:seed -w @arkan/backend
+npm.cmd run dev
+```
+
+The seed creates a manager, an employee and the employee profile. Development-only seed account definitions are in apps/backend/prisma/seed.cjs; credentials are intentionally not reproduced in this guide. Seed is disabled in production and preserves existing account passwords. It is not a password-reset tool.
+
+Open [login](http://localhost:3000/login). Manager accounts go to /manager; employee accounts go to /employee.
+
+The second migration intentionally fails when existing financial rows need a staged backfill. Do not delete data to bypass it. Check the target database before applying migrations/seed.
+
+## Everyday development
+
+Run both applications:
+
+```powershell
+npm.cmd run dev
+```
+
+Or run these in separate terminals, without also running the combined command:
+
+```powershell
+npm.cmd run dev:backend
+npm.cmd run dev:frontend
+```
+
+Rebuild shared after shared-contract changes:
+
+```powershell
+npm.cmd run build -w @arkan/shared
+```
+
+- Frontend: http://localhost:3000/login
+- Backend liveness: http://localhost:4000/health
+- Backend database/queue readiness: http://localhost:4000/health/ready
+
+Backend success responses wrap content in data; errors wrap statusCode/message/path in error. Real endpoints are GET /health, GET /health/ready, POST /auth/login, POST /auth/refresh, POST /auth/logout and GET /auth/me. Business modules do not yet expose APIs.
+
+For another device, use an API address reachable from that browser, configure the actual frontend origin, and review existing development-origin settings in backend main.ts and frontend next.config.ts. Browser storage is separate for localhost and LAN origins. Restart after environment changes; rebuild frontend production assets after public API URL changes.
+
+Stop development processes with Ctrl+C. Stop data services while preserving volumes:
 
 ```powershell
 docker compose down
 ```
 
-هذا يوقف الخدمات ويحافظ على البيانات. لا تضف `-v` إلا إذا أردت مسح البيانات المحلية.
+Do not delete Docker volumes without explicit approval and an appropriate backup.
 
-## التطوير المحلي مع PostgreSQL وRedis داخل Docker
+## Build and production-mode mechanisms
 
-```powershell
-npm ci
-npm run db:generate
-npm run build -w @arkan/shared
-docker compose up -d postgres redis
-npm run db:deploy
-npm run dev
-```
-
-`npm run dev` يشغّل التطبيقين معًا؛ يمكن أيضًا استخدام `npm run dev:backend` و`npm run dev:frontend` في نافذتين.
-أعد بناء shared بعد تعديله. Prisma CLI يقرأ `apps/backend/.env` لأن أوامره تعمل داخل workspace الخادم.
-عند تغيير مخطط البيانات:
+These are existing build/start commands, not a complete production deployment procedure. Configure the intended environments first; NEXT_PUBLIC_API_URL is embedded during frontend build.
 
 ```powershell
-npm run db:migrate -w @arkan/backend -- --name describe_change
-npm run db:generate
+npm.cmd run db:generate
+npm.cmd run build
 ```
 
-يوجد seed اختياري للمستخدمين التجريبيين كما هو موضح أدناه. `JWT_REFRESH_SECRET` غير مستخدم لأن refresh tokens عشوائية وليست JWT؛ إعدادات S3 مؤجلة.
-عنوان API في المتصفح يحدد بواسطة `NEXT_PUBLIC_API_URL`، ويثبت وقت build؛ عند تشغيل Docker عدله في build args داخل compose.
-داخل Docker يستخدم الخادم أسماء الخدمات postgres وredis، وفي التطوير المحلي يستخدم localhost.
-
-## الجودة والتحقق
+After approved migration deployment to the intended database, start each application in a separate terminal/process with production environment supplied:
 
 ```powershell
-npm run db:generate
-npm run db:validate -w @arkan/backend
-npm run typecheck
-npm run lint
-npm test
-npm run build
-npm run format:check
+npm.cmd run start -w @arkan/backend
+npm.cmd run start -w @arkan/frontend
 ```
 
-الاختبارات تفحص حدود JWT، الصلاحيات لكلا الدورين، validation، الدخول والتجديد والخروج وتخزين hashes،
-وفحص الجاهزية عند نجاح أو فشل التبعيات. تستخدم بدائل اختبار لقاعدة البيانات وRedis؛
-لا تغني عن تشغيل Compose للتحقق من الاتصال الحقيقي.
+Backend start runs node dist/main.js; the frontend start script runs next start. The configured frontend build uses standalone output; the frontend Dockerfile supplies its standalone server and required static/public assets. Validate the chosen runtime before deployment rather than assuming the start script proves standalone packaging works. Set NODE_ENV=production in the process environment. Do not run demo seed in production.
 
-## شكل API
-
-نجاح:
-
-```json
-{ "data": { "status": "ok", "service": "arkan-api" } }
-```
-
-خطأ:
-
-```json
-{ "error": { "statusCode": 401, "message": "Bearer token required", "path": "/auth/me" } }
-```
-
-| Endpoint | الوصول | السلوك |
-| --- | --- | --- |
-| GET /health | عام | حياة الخادم |
-| GET /health/ready | عام | PostgreSQL + Redis، و503 عند عدم الجاهزية |
-| POST /auth/login | بريد وكلمة مرور | إصدار access/refresh tokens، أو 401 |
-| POST /auth/refresh | refreshToken في JSON | إبطال القديم وإصدار زوج جديد، أو 401 |
-| POST /auth/logout | refreshToken في JSON | إبطال الجلسة، ويرجع 200 حتى عند تكرار الطلب |
-| GET /auth/me | Bearer JWT | هوية الحساب النشط بعد التحقق من الجلسة |
-
-قواعد المجال مثل تسجيل المدير للصفقة
-وتغيير حالة العقار وإنشاء الحركات المالية وسجل التدقيق ستنفذ في services بمعاملة واحدة في مرحلة لاحقة.
-
-## الهيكل
-
-```text
-apps/frontend/
-  app/                 routes وlayouts
-  components/layout/   ManagerLayout وEmployeeLayout وWorkspaceShell
-  components/ui/       مكونات عرض صغيرة
-  features/auth/       نموذج الدخول وAuth API وإدارة الجلسة وحماية الدور
-  lib/                 API client
-  styles/              RTL responsive styles
-apps/backend/
-  src/auth/            DTOs وguards وdecorators
-  src/common/          validation وresponse/error formatting
-  src/config/          environment validation
-  src/prisma/          Prisma lifecycle
-  src/health/          liveness/readiness
-  src/jobs/            BullMQ system queue؛ لا workers أو jobs دورية بعد
-  src/<domain>/        وحدات فارغة لكل مجال
-  prisma/              schema وmigration أولي
-  test/                اختبارات HTTP وحدود الصلاحيات والجاهزية
-packages/shared/src/   enums وtypes وDTO contracts مشتركة فقط
-docker/                Dockerfiles
-docs/                  وثائق المشروع الأصلية
-prototype/             مرجع UI الأصلي
-```
-
-Prisma مصدر علاقات قاعدة البيانات؛ shared يحتوي عقود API فقط ولا يصدّر Prisma للواجهة.
-إصدارات التبعيات المحلولة مثبتة في package-lock.json. يستخدم المشروع Prisma 6.19
-مع PostgreSQL datasource داخل schema؛ ترقية Prisma الكبرى خطوة منفصلة.
-
-## حدود المسودة
-
-- مبالغ المال Decimal مع حقل عملة صريح؛ لا استخدام float.
-- لا تُحذف العقارات عند إغلاق صفقة؛ الحالات SOLD وRENTED موجودة.
-- العلاقات المالية والمرجعية المهمة تمنع الحذف المتسلسل.
-- FollowUp يستهدف كيانًا واحدًا: عميلًا أو مالكًا أو عقارًا.
-- قيود CHECK الخاصة بهدف المتابعة ومطابقة مصدر الحركة المالية محفوظة في migration SQL؛ يجب الحفاظ عليها عند تعديل المخطط.
-- sourceType وsourceId إلزاميان للحركة المالية؛ المصدر اليدوي يحمل معرف العملية المحلية.
-- لا توجد قواعد حساب عمولات أو رواتب، ولا تشغيل إشعارات دورية أو AI Parser.
-- Payroll period وAttendance date قيم تاريخية؛ تثبيت منطقة زمنية للشركة وتفاصيل الفترات من أعمال المجال القادمة.
-- سجل التدقيق موجود كهيكل؛ إنفاذ الكتابة لكل حدث مهم يأتي مع تنفيذ الحدث.
-
-قرارات التنفيذ الأصلية: [Stack](docs/01_STACK_DECISION.md)، [MVP](docs/02_MVP_SCOPE.md)،
-[Structure](docs/03_PROJECT_STRUCTURE.md)، [Clean code](docs/04_CLEAN_CODE_RULES.md)،
-[Domain](docs/06_DOMAIN_MODEL_DRAFT.md)، [UI](docs/07_UI_IMPLEMENTATION_NOTES.md).
-
-## Auth + Seed Users
-
-بعد تهيئة ملفات البيئة والسر كما سبق، نفذ من جذر المشروع:
+Application image recipes can be built from repository root:
 
 ```powershell
-npm ci
-npm run db:generate
-npm run build -w @arkan/shared
-docker compose up -d postgres redis
-npm run db:deploy
-npm run db:seed -w @arkan/backend
-npm run dev:backend
+docker build -f docker/backend.Dockerfile -t arkan-backend .
+docker build -f docker/frontend.Dockerfile --build-arg NEXT_PUBLIC_API_URL=<public-api-origin> -t arkan-frontend .
 ```
 
-أمر seed يبني الخادم ويقرأ apps/backend/.env. ينشئ المستخدمين وEmployeeProfile داخل معاملة واحدة.
-يمكن تكراره دون تغيير كلمة مرور أو بيانات حساب موجود؛ يتوقف إذا كان بريد تجريبي موجودًا بدور مختلف.
-يرفض العمل عندما NODE_ENV=production. استخدمه في قاعدة تطوير فقط.
+Replace angle-bracket placeholders before executing. Frontend image runs standalone output; backend image runs compiled Nest. Neither automatically applies migrations or seeds. Current Compose has no application/migration services, so docker compose up does not start the web applications. Runtime networking, secrets, TLS, backups, hosting and CI/CD remain to be configured/reviewed.
 
-| البريد | كلمة المرور التجريبية | الدور |
-| --- | --- | --- |
-| manager@arkan.test | ChangeMe123! | MANAGER |
-| employee@arkan.test | ChangeMe123! | EMPLOYEE + EmployeeProfile |
+## Tests and quality checks
 
-اختبار التسلسل في PowerShell بعد تشغيل الخادم:
+After dependency installation, Prisma generation and shared build:
 
 ```powershell
-$apiBase = 'http://localhost:4000'
-$loginBody = @{ email = 'manager@arkan.test'; password = 'ChangeMe123!' } | ConvertTo-Json
-$session = (Invoke-RestMethod -Method Post -Uri "$apiBase/auth/login" -ContentType 'application/json' -Body $loginBody).data
-
-Invoke-RestMethod -Uri "$apiBase/auth/me" -Headers @{ Authorization = "Bearer $($session.accessToken)" }
-
-$refreshBody = @{ refreshToken = $session.refreshToken } | ConvertTo-Json
-$session = (Invoke-RestMethod -Method Post -Uri "$apiBase/auth/refresh" -ContentType 'application/json' -Body $refreshBody).data
-
-$logoutBody = @{ refreshToken = $session.refreshToken } | ConvertTo-Json
-Invoke-RestMethod -Method Post -Uri "$apiBase/auth/logout" -ContentType 'application/json' -Body $logoutBody
+npm.cmd test
+node scripts/test-form-drafts.cjs
+node scripts/test-nfc-attendance.cjs
+npm.cmd run typecheck
+npm.cmd run lint
+npm.cmd run db:validate -w @arkan/backend
+npm.cmd run format:check
 ```
 
-Login وRefresh يعيدان data.accessToken وdata.refreshToken وdata.expiresIn (ثوانٍ).
-Logout يعيد data.loggedOut=true. لا تطبع tokens في سجلات مشتركة.
-بعد التجديد استخدم الزوج الجديد؛ القديم مرفوض. بعد الخروج ترجع محاولات استخدام access/refresh الخاصين بتلك الجلسة 401.
-يمكن اختبار الموظف بتغيير البريد فقط.
+Jest uses Prisma/queue test doubles; it does not require a live database and does not verify real database concurrency. Standalone scripts check draft lifecycle and mock NFC logic using local harnesses, not a browser/physical tag. No browser E2E/load or business API suite exists yet.
 
-```powershell
-npm test
-npm run typecheck
-npm run lint
-npm run build -w @arkan/backend
-```
+Handoff verification on 2026-10-02: **3 Jest suites / 12 tests passed**, both standalone scripts passed. This documentation-only task did not run production build, live migrations, Docker image deployment, browser/physical NFC checks or load tests.
 
-حدود هذه المرحلة:
-- فحوص HTTP تستخدم Prisma test double؛ لا تثبت معاملات PostgreSQL الحقيقية أو سلوكها تحت الحمل.
-- كل طلب محمي يقرأ الجلسة والحساب من قاعدة البيانات؛ logout وتعطيل الحساب يوقفان الطلبات اللاحقة فورًا.
-- Logout يوقف الجلسة المحددة بالـrefresh token المرسل فقط؛ لا يوجد logout لجميع الأجهزة.
-- إعادة استخدام refresh قديم تُرفض؛ لا يوجد تتبع لعائلة tokens لإبطال الجلسات المتفرعة عند الاشتباه بالسرقة.
-- مدة refresh سبعة أيام من الإصدار/التجديد، دون حد مطلق لعمر الجلسة أو تنظيف دوري للسجلات القديمة بعد.
-- لا توجد rate limiting أو استعادة كلمة مرور أو MFA أو إدارة حسابات بعد. تخزين جلسة الواجهة مؤقت للتطوير، ولا توجد HttpOnly cookies بعد؛ استخدم HTTPS عند النشر.
-- seed مكتوب وقابل للتشغيل، لكن تنفيذ الحسابات فعليًا يتطلب PostgreSQL متاحًا وmigrations مطبقة.
+## Important limitations
 
-## Frontend Login
+- Most business saves update component state only. Draft autosave is temporary recovery, not final-record persistence or database backup.
+- Auth uses sessionStorage and real backend validation; mock NFC uses editable localStorage. Neither is a finished production session/attendance security design.
+- CORS includes hardcoded development origins, Compose has development database credentials and exposes PostgreSQL beyond loopback. Review before deployment.
+- Frontend exchange/floors/budget bundles outpace the database model; money precision also needs reconciliation.
+- Source backup does not include local environment secrets, database contents or browser data.
 
-المتطلبات: إعداد Backend والـJWT secret، وتشغيل PostgreSQL وRedis وتطبيق migrations والـseed كما سبق.
-
-```powershell
-Copy-Item apps/frontend/.env.local.example apps/frontend/.env.local
-npm run build -w @arkan/shared
-npm run dev
-```
-
-يشغّل الأمر الأخير Backend على 4000 وFrontend على 3000. أو افتح نافذتين:
-
-```powershell
-npm run dev:backend
-npm run dev:frontend
-```
-
-افتح http://localhost:3000/login. يجب أن تكون NEXT_PUBLIC_API_URL=http://localhost:4000،
-وFRONTEND_ORIGIN=http://localhost:3000 في إعدادات الخادم. أعد تشغيل Next.js بعد تعديل متغيرات البيئة.
-إذا تغير منفذ الواجهة، عدل FRONTEND_ORIGIN وأعد تشغيل الخادم.
-
-اختبار يدوي:
-1. دون جلسة، افتح /manager أو /employee: يتم تحويلك إلى /login دون عرض محتوى القالب.
-2. ادخل بـmanager@arkan.test وكلمة ChangeMe123!: يتم تحويلك إلى /manager.
-3. افتح /employee بنفس الجلسة: يعود التوجيه إلى /manager.
-4. استخدم تسجيل الخروج، ثم ادخل بـemployee@arkan.test وكلمة ChangeMe123!: يتم تحويلك إلى /employee.
-5. افتح /manager كموظف: يتم توجيهك إلى /employee.
-6. حدّث الصفحة للتحقق من استعادة الجلسة. كلمة مرور خاطئة أو توقف الخادم يعرضان رسالة عربية.
-7. لتجربة التجديد سريعًا، اضبط JWT_ACCESS_TTL_SECONDS=60 في Backend وأعد تشغيله، ثم سجل الدخول وانتظر انتهاء access token وحدّث صفحة محمية.
-
-العميل يوفر login() وgetMe() وrefresh() وlogout() في features/auth/api/auth-api.ts.
-لا تُخزن كلمة المرور؛ يُخزن زوج الرموز والمستخدم في sessionStorage، ويُعاد التحقق من المستخدم عبر API عند تحميل/تغيير المسار.
-يُجرّب refresh مرة واحدة بعد 401 من /auth/me. لا يحدث تجديد دوري أثناء الخمول.
-تُمسح الجلسة محليًا عند الخروج حتى إذا تعذر الاتصال بالخادم؛ عندها قد تبقى الجلسة البعيدة صالحة حتى تنتهي.
-
-حدود الحماية:
-- sessionStorage قابل للقراءة بواسطة JavaScript، وقد ينسخه المتصفح عند نسخ تبويب؛ ليس تخزينًا مناسبًا للإنتاج. استخدم جلسة بـHttpOnly/Secure cookies مع تصميم حماية CSRF لاحقًا.
-- الحماية الحالية في المتصفح؛ لا تستخدمها لإخفاء بيانات سرية ضمن Server Components. قوالب /manager و/employee ما زالت خالية من بيانات النظام، والـBackend يحمي API فعليًا.
-- إغلاق التبويب يمسح التخزين عادة لكنه لا يرسل logout إلى الخادم.
-- لم تُضف صفحات نظام أو CRUD، ولم يتغير البروتوتايب أو Backend.
-
-## Manager UI Shell
-
-مسار /manager يعرض الآن هيكل المدير وDashboard أوليًا: Sidebar على اليمين، Topbar،
-أربع بطاقات إحصائية، مساحة رسم للصفقات والعمولات، وثلاث فئات لأفضل الموظفين.
-كل القيم placeholders معلّمة بوضوح. البحث والفترة والأقسام غير المنفذة معطلة وتظهر كميزات قادمة.
-
-للاختبار بعد تشغيل التطبيقين والـseed:
-
-1. افتح /login وسجّل الدخول بـmanager@arkan.test وكلمة ChangeMe123!.
-2. على شاشة أعرض من 980px راجع Sidebar وTopbar وترتيب البطاقات.
-3. عند 980px أو أقل يختفي Sidebar ويظهر شريط بخمسة عناصر: الرئيسية، العقارات، الصفقات، العملاء، المزيد.
-4. افتح «المزيد»؛ راجع الأقسام الإضافية، ثم أغلق بالزر أو Escape أو النقر خارج النافذة.
-5. اختبر عرض 320px و390px و768px، والتمرير لنهاية المحتوى دون أن يغطيه الشريط السفلي.
-6. جرّب التنقل بـTab ورابط «تخطي إلى المحتوى»، والخروج، وحماية /manager من حساب الموظف.
-
-مكونات الهيكل في components/layout/manager، والبطاقات الأولية في features/manager-dashboard.
-Card وButton وStatCard وSearchBar مشتركة، والقيم البصرية في styles/tokens.css.
-لا توجد بيانات Dashboard حقيقية أو APIs جديدة أو صفحات للأقسام القادمة.
+Preserve the existing architecture/UI; keep mock and real behavior explicit. Never commit secrets, and do not push without the user's request. See PROJECT_CONTEXT.md for security, source references, data flows and deployment unknowns.
