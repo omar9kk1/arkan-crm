@@ -8,6 +8,7 @@ import {
   type RegistryContact,
 } from '../../../lib/contact-registry';
 import { createContact } from '../../../lib/api/contacts-api';
+import { matchesPerson } from '../../../lib/search';
 import { useAuth } from '../../auth/components/auth-provider';
 import { Button } from '../../../components/ui/button';
 import { Toast } from '../../../components/ui/toast';
@@ -20,7 +21,6 @@ import { PropertiesSegmentedTabs as SegmentedTabs } from '../../manager-properti
 import {
   clients,
   owners,
-  matchesPerson,
   type ClientSample,
   type OwnerSample,
   type SuitableProperty,

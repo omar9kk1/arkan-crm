@@ -10,7 +10,7 @@ import { GlassSelect } from '../../../components/ui/glass-select';
 import { useCallback, useEffect, useState } from 'react';
 import { ManagerPageShell } from '../../../components/layout/manager/manager-page-shell';
 import { SearchBar } from '../../../components/ui/search-bar';
-import { matchesPerson } from '../../manager-clients/mock-data';
+import { matchesPerson } from '../../../lib/search';
 import {
   listEmployees,
   setEmployeeActivation,

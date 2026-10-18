@@ -226,15 +226,3 @@ export const owners: readonly OwnerSample[] = [
     ],
   },
 ];
-export function matchesPerson(
-  person: { name: string; phone: string },
-  query: string,
-) {
-  const normalize = (value: string) =>
-    value
-      .trim()
-      .toLocaleLowerCase('ar')
-      .replace(/[٠-٩]/g, (digit) => String(digit.charCodeAt(0) - 1632))
-      .replace(/[\s()+-]/g, '');
-  return normalize(`${person.name} ${person.phone}`).includes(normalize(query));
-}

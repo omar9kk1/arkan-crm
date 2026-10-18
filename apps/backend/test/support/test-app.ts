@@ -22,7 +22,41 @@ import { hashPassword } from '../../src/auth/password';
 
 export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 export const hasTestDatabase = Boolean(TEST_DATABASE_URL);
-export const describeWithDatabase = hasTestDatabase ? describe : describe.skip;
+
+/** Actionable setup hint shown whenever the isolated database is unavailable. */
+export const TEST_DATABASE_HELP = [
+  'TEST_DATABASE_URL is not set, so database integration suites cannot run.',
+  'They are FAILED on purpose (never silently skipped), so a run without the',
+  'isolated test database can never report a misleading success.',
+  '',
+  'Point it ONLY at the dedicated test database — never at arkan_crm or any',
+  'shared/production database — then re-run. PowerShell example:',
+  '',
+  '  $env:TEST_DATABASE_URL="postgresql://postgres:postgres@localhost:5433/arkan_crm_api_test?schema=public"',
+  '  npm run test -w @arkan/backend',
+].join('\n');
+
+function describeMissingDatabase(name: string, _fn: () => void): void {
+  describe(name, () => {
+    it('requires the isolated TEST_DATABASE_URL to be set', () => {
+      throw new Error(TEST_DATABASE_HELP);
+    });
+  });
+}
+
+/**
+ * `describe` for suites that require the isolated test database.
+ *
+ * When TEST_DATABASE_URL is missing the suite registers ONE loudly failing
+ * test instead of being skipped, so a full run (or a directly invoked
+ * integration suite) FAILS with an actionable hint rather than passing with
+ * quietly skipped security, privacy, authentication, property and
+ * notification coverage. Pure unit suites use plain `describe` and stay
+ * runnable on their own.
+ */
+export const describeWithDatabase: typeof describe = hasTestDatabase
+  ? describe
+  : (describeMissingDatabase as typeof describe);
 
 export interface TestContext {
   app: INestApplication;

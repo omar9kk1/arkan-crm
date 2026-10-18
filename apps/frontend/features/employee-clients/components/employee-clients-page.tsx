@@ -26,7 +26,7 @@ import {
   type RegistryContact,
 } from '../../../lib/contact-registry';
 import { useAuth } from '../../auth/components/auth-provider';
-import { matchesPerson } from '../../manager-clients/mock-data';
+import { matchesPerson } from '../../../lib/search';
 import { ContactCard } from '../../manager-clients/components/contact-card';
 import { ContactDetailsDrawer } from '../../manager-clients/components/contact-details-drawer';
 import styles from './clients.module.css';
