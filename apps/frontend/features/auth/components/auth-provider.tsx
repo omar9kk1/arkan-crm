@@ -11,7 +11,7 @@ import {
 import { usePathname } from 'next/navigation';
 import type { AuthUser } from '@arkan/shared';
 import type { LoginInput } from '../api/auth-api';
-import { restoreSession, signIn, signOut } from '../session';
+import { restoreSession, signIn, signOut, SESSION_EXPIRED_EVENT } from '../session';
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -53,6 +53,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       active = false;
     };
   }, [pathname, attempt]);
+  // When a refresh the backend refuses clears the stored session, drop the
+  // in-memory user so `RequireRole` sends the browser back to the login screen
+  // (and every screen clears any private data it was showing).
+  useEffect(() => {
+    const onExpired = () => {
+      setUser(null);
+      setError('انتهت الجلسة. الرجاء تسجيل الدخول من جديد.');
+    };
+    window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
+  }, []);
   const login = useCallback(async (input: LoginInput) => {
     const session = await signIn(input);
     setUser(session.user);

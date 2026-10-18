@@ -9,6 +9,7 @@ import { UsersModule } from './users/users.module';
 import { EmployeesModule } from './employees/employees.module';
 import { ClientsModule } from './clients/clients.module';
 import { OwnersModule } from './owners/owners.module';
+import { ContactsModule } from './contacts/contacts.module';
 import { PropertiesModule } from './properties/properties.module';
 import { DealsModule } from './deals/deals.module';
 import { CommissionsModule } from './commissions/commissions.module';
@@ -34,6 +35,7 @@ import { SmartPasteModule } from './smart-paste/smart-paste.module';
     EmployeesModule,
     ClientsModule,
     OwnersModule,
+    ContactsModule,
     PropertiesModule,
     DealsModule,
     CommissionsModule,

@@ -2,64 +2,73 @@ import { Toast } from '../../../components/ui/toast';
 import { useState } from 'react';
 import { PropertyOverlay } from '../../manager-properties/components/property-overlay';
 import { Button } from '../../../components/ui/button';
-import {
-  categories,
-  displayDate,
-  type ManagerNotification,
-} from '../notifications-model';
-import { NotificationPriorityBadge } from './notification-priority-badge';
+import type { NotificationDto } from '../../../lib/api/notification-types';
+import { displayDate, notificationTypeLabel } from '../../notifications/view';
 import styles from './notifications.module.css';
+
+/**
+ * The notification detail drawer, rebuilt on the LIVE notification shape.
+ *
+ * It shows only what the backend actually stores — the type, message, timestamp
+ * and read state — plus a real action: opening the linked property through the
+ * existing authorized details experience. The mock-only "source", "employee",
+ * "person", "suggested action" and priority fields are gone rather than faked.
+ */
 export function NotificationDetailsDrawer({
   item,
   onClose,
   onRead,
+  onOpenProperty,
 }: {
-  item: ManagerNotification;
+  item: NotificationDto;
   onClose: () => void;
   onRead: () => void;
+  onOpenProperty: (propertyId: string) => void;
 }) {
   return (
     <PropertyOverlay title={item.title} drawer onClose={onClose}>
-      <NotificationPriorityBadge priority={item.priority} />
-      <p>{item.description}</p>
+      <div className={styles.badges}>
+        <span className={styles.badge}>
+          {notificationTypeLabel(item.type)}
+        </span>
+        <span className={styles.badge}>
+          {item.read ? 'مقروء' : 'غير مقروء'}
+        </span>
+      </div>
+      <p>{item.message}</p>
       <dl className={styles.facts}>
-        {[
-          ['النوع', categories[item.category]],
-          ['المصدر', item.source],
-          ['التاريخ', displayDate(item.date)],
-          ['الحالة', item.read ? 'مقروء' : 'غير مقروء'],
-          ['الموظف', item.employee || 'غير مرتبط'],
-          ['العقار', item.property || 'غير مرتبط'],
-          ['العميل / المالك', item.person || 'غير مرتبط'],
-        ].map(([label, value]) => (
+        {(
+          [
+            ['النوع', notificationTypeLabel(item.type)],
+            ['التاريخ', displayDate(item.createdAt)],
+            ['الحالة', item.read ? 'مقروء' : 'غير مقروء'],
+          ] as const
+        ).map(([label, value]) => (
           <div key={label}>
             <dt>{label}</dt>
             <dd>{value}</dd>
           </div>
         ))}
       </dl>
-      <h3>تفاصيل الإشعار</h3>
-      <p>{item.detail}</p>
-      <h3>الإجراء المقترح</h3>
-      <p>{item.action}</p>
       <DrawerActions
-        read={item.read}
-        source={item.source}
+        item={item}
         onRead={onRead}
+        onOpenProperty={onOpenProperty}
         onClose={onClose}
       />
     </PropertyOverlay>
   );
 }
+
 function DrawerActions({
-  read,
-  source,
+  item,
   onRead,
+  onOpenProperty,
   onClose,
 }: {
-  read: boolean;
-  source: string;
+  item: NotificationDto;
   onRead: () => void;
+  onOpenProperty: (propertyId: string) => void;
   onClose: () => void;
 }) {
   const [notice, setNotice] = useState('');
@@ -67,7 +76,7 @@ function DrawerActions({
     <>
       <div className={styles.actions}>
         <Button
-          disabled={read}
+          disabled={item.read}
           onClick={() => {
             onRead();
             setNotice('تم تعليم الإشعار كمقروء');
@@ -76,11 +85,12 @@ function DrawerActions({
           تعليم كمقروء
         </Button>
         <Button
-          onClick={() =>
-            setNotice(`معاينة المصدر: ${source} — الفتح تجريبي فقط`)
-          }
+          disabled={!item.propertyId}
+          onClick={() => {
+            if (item.propertyId) onOpenProperty(item.propertyId);
+          }}
         >
-          فتح المصدر
+          فتح العقار
         </Button>
         <Button onClick={onClose}>إغلاق</Button>
       </div>

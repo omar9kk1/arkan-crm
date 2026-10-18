@@ -1,16 +1,15 @@
 import { Card } from '../../../components/ui/card';
 import { Button } from '../../../components/ui/button';
-import type { EmployeeSample } from '../mock-data';
+import { UNAVAILABLE, type EmployeeRecord } from '../model';
 import { EmployeeStats } from './employee-stats';
 import styles from './employees.module.css';
+
 export function EmployeeCard({
   employee,
-  assignedCount,
   onDetails,
   onAssign,
 }: {
-  employee: EmployeeSample;
-  assignedCount: number;
+  employee: EmployeeRecord;
   onDetails: () => void;
   onAssign: () => void;
 }) {
@@ -22,14 +21,14 @@ export function EmployeeCard({
         </span>
         <div>
           <h2>{employee.name}</h2>
-          <p>{employee.jobRole || 'موظف مبيعات'}</p>
-          <bdi>{employee.phone}</bdi>
+          <p>{employee.roleLabel}</p>
+          <bdi>{employee.phone || UNAVAILABLE}</bdi>
         </div>
         <span className={styles.badge}>
           {employee.active ? 'نشط' : 'غير نشط'}
         </span>
       </div>
-      <EmployeeStats employee={employee} assignedCount={assignedCount} />
+      <EmployeeStats employee={employee} />
       <div className={styles.actions}>
         <Button
           onClick={(event) => {

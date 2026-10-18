@@ -172,6 +172,43 @@
   font-size: var(--text-caption);
   color: var(--muted);
 }
+.form {
+  display: grid;
+  gap: var(--space-3);
+}
+.field {
+  display: grid;
+  gap: var(--space-1);
+  font-size: var(--text-small);
+  color: var(--muted);
+}
+.field input,
+.field textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+}
+.field textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+.formActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+.formError {
+  color: #b00020;
+  font-size: var(--text-small);
+}
 @media (max-width: 1180px) {
   .stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));

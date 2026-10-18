@@ -5,21 +5,20 @@ import { useState, useRef } from 'react';
 import { PropertyOverlay } from '../../manager-properties/components/property-overlay';
 import { Button } from '../../../components/ui/button';
 import {
-  employees,
   assignmentProperties,
   assignmentTypes,
   type Assignment,
-  type EmployeeSample,
-} from '../mock-data';
+} from '../assignment-trial';
+import type { EmployeeRecord } from '../model';
 import styles from './employees.module.css';
 export function AssignPropertyModal({
   employeeId,
-  items = employees,
+  items = [],
   onClose,
   onSave,
 }: {
   employeeId: string;
-  items?: readonly EmployeeSample[];
+  items?: readonly EmployeeRecord[];
   onClose: () => void;
   onSave: (value: Assignment) => void;
 }) {
@@ -41,7 +40,7 @@ export function AssignPropertyModal({
           event.preventDefault();
           if (submitted.current) return;
           if (
-            !employees.some((item) => item.id === draft.employeeId) ||
+            !items.some((item) => item.id === draft.employeeId) ||
             !assignmentProperties.some((item) => item.id === draft.propertyId)
           )
             return;

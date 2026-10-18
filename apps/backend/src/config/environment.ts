@@ -36,4 +36,7 @@ export const environmentSchema = Joi.object({
   JWT_ACCESS_TTL_SECONDS: Joi.number().integer().min(60).max(3600).default(900),
   JWT_ISSUER: Joi.string().required(),
   JWT_AUDIENCE: Joi.string().required(),
+  // Optional private storage root for uploaded property images. When unset the
+  // StorageService falls back to `<home>/.arkan-crm/storage` (outside the repo).
+  STORAGE_ROOT: Joi.string().optional(),
 });

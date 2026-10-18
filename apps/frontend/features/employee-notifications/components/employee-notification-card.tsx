@@ -1,15 +1,12 @@
-import { displayDate } from '../../manager-notifications/notifications-model';
-import { labels, type EmployeeNotification } from '../model';
-import shared from '../../manager-notifications/components/notifications.module.css';
+import type { NotificationDto } from '../../../lib/api/notification-types';
+import { displayDate, notificationTypeLabel } from '../../notifications/view';
 import styles from './employee-notifications.module.css';
-export function NotificationStatusBadge({ read }: { read: boolean }) {
-  return <span className={shared.badge}>{read ? 'مقروء' : 'غير مقروء'}</span>;
-}
+
 export function EmployeeNotificationCard({
   item,
   onOpen,
 }: {
-  item: EmployeeNotification;
+  item: NotificationDto;
   onOpen: () => void;
 }) {
   return (
@@ -28,16 +25,13 @@ export function EmployeeNotificationCard({
       />
       <span className={styles.body}>
         <span className={styles.title}>{item.title}</span>
-        <span className={styles.description}>{item.description}</span>
+        <span className={styles.description}>{item.message}</span>
         <span className={styles.category}>
-          {labels[item.category]}
-          {item.priority === 'عاجل' && (
-            <span className={styles.urgent}>عاجل</span>
-          )}
+          {notificationTypeLabel(item.type)}
         </span>
       </span>
-      <time className={styles.date} dateTime={item.date}>
-        {displayDate(item.date)}
+      <time className={styles.date} dateTime={item.createdAt}>
+        {displayDate(item.createdAt)}
       </time>
     </button>
   );

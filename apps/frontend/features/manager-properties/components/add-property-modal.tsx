@@ -1,4 +1,5 @@
 import { AddPropertyModal as PropertyForm } from '../../employee-properties/components/add-property-modal';
+import { formatPropertyDescription } from '../../../lib/property-description';
 import type { PreviewProperty } from '../preview-data';
 export function AddPropertyModal({
   onClose,
@@ -25,10 +26,13 @@ export function AddPropertyModal({
             status: 'معتمد',
             requestDraft: property.requestDraft,
             owner: property.owner,
+            imageUrl: property.imageUrl,
+            ownerUserId: property.ownerUserId,
+            responsibleName: property.responsibleName,
+            contactType: property.contactType,
             description: [
-              property.description,
+              formatPropertyDescription(property.description),
               `العنوان: ${property.address}`,
-              `هاتف المالك: ${property.phone}`,
               property.ownerNotes,
             ]
               .filter(Boolean)

@@ -6,8 +6,11 @@ export interface Session extends TokenPair {
   user: AuthUser;
 }
 const STORAGE_KEY = 'arkan.auth.v1';
+/** Broadcast by `session.ts` when the browser session stops being usable. */
+export const SESSION_EXPIRED_EVENT = 'arkan:session-expired';
 let revision = 0;
 let pending: Promise<Session | null> | null = null;
+let refreshing: Promise<string | null> | null = null;
 
 function readTokens(): TokenPair | null {
   try {
@@ -61,6 +64,50 @@ function clearStoredSession() {
     /* Clear only this app's session, preserving unrelated preferences. */
   }
 }
+function announceSessionExpired() {
+  try {
+    window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+  } catch {
+    /* Non-browser environment (SSR/unit tests) has no window to notify. */
+  }
+}
+
+/** Access token of the current browser session, or `null` when signed out. */
+export function getStoredAccessToken(): string | null {
+  return readTokens()?.accessToken ?? null;
+}
+
+/**
+ * Rotates the refresh token (single-flight so concurrent requests share one
+ * rotation) and returns a fresh access token. A refresh that the backend
+ * refuses clears the session so the app cannot keep retrying with a dead token.
+ */
+export function refreshAccessToken(): Promise<string | null> {
+  if (!refreshing) {
+    refreshing = (async () => {
+      const tokens = readTokens();
+      if (!tokens) return null;
+      try {
+        const next = await api.refresh(tokens.refreshToken);
+        save(next);
+        return next.accessToken;
+      } catch (error) {
+        if (
+          error instanceof ApiError &&
+          (error.status === 401 || error.status === 403)
+        ) {
+          clearStoredSession();
+          announceSessionExpired();
+        }
+        return null;
+      }
+    })().finally(() => {
+      refreshing = null;
+    });
+  }
+  return refreshing;
+}
+
 async function restore(): Promise<Session | null> {
   const expected = revision;
   let tokens = readTokens();

@@ -7,11 +7,14 @@ import { Toast } from '../../../components/ui/toast';
 
 import { GlassSelect } from '../../../components/ui/glass-select';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ManagerPageShell } from '../../../components/layout/manager/manager-page-shell';
 import { SearchBar } from '../../../components/ui/search-bar';
 import { matchesPerson } from '../../manager-clients/mock-data';
-import { employees, initialAssignments } from '../mock-data';
+import { listEmployees, updateEmployeeName } from '../../../lib/api/employees-api';
+import { ApiError } from '../../../lib/api-client';
+import { mapEmployee, type EmployeeRecord } from '../model';
+import type { Assignment } from '../assignment-trial';
 import { EmployeeCard } from './employee-card';
 import { EmployeeStats } from './employee-stats';
 import { EmployeeDetailsDrawer } from './employee-details-drawer';
@@ -20,19 +23,60 @@ import styles from './employees.module.css';
 type Overlay = { kind: 'details' | 'assign'; employeeId: string };
 type SortKey = 'clientsCount' | 'propertiesCount' | 'dealsCount';
 export function EmployeesPage() {
-  const [items, setItems] = useState([...employees]);
+  const [items, setItems] = useState<EmployeeRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [nonce, setNonce] = useState(0);
   const [adding, setAdding] = useDraftState(
     'ui:features/manager-employees/components/employees-page.tsx:adding',
     false,
   );
+  const [justCreated, setJustCreated] = useState(false);
   const [newestId, setNewestId] = useState('');
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('all');
   const [sort, setSort] = useState<SortKey>('clientsCount');
-  const [assignments, setAssignments] = useState(initialAssignments);
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [overlay, setOverlay] = useState<Overlay | null>(null);
   const [notice, setNotice] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError('');
+    listEmployees()
+      .then((page) => {
+        if (active) setItems(page.items.map(mapEmployee));
+      })
+      .catch((cause) => {
+        if (!active) return;
+        setError(
+          cause instanceof ApiError ? cause.message : 'تعذر تحميل الموظفين.',
+        );
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [nonce]);
+
+  const reload = useCallback(() => setNonce((value) => value + 1), []);
+
+  const rename = useCallback(async (id: string, name: string) => {
+    const updated = await updateEmployeeName(id, name);
+    setItems((previous) =>
+      previous.map((item) => (item.id === id ? mapEmployee(updated) : item)),
+    );
+    setNotice('تم تحديث اسم الموظف');
+  }, []);
+
   const selected = items.find((item) => item.id === overlay?.employeeId);
+  const sortValue = (employee: EmployeeRecord, key: SortKey) => {
+    if (key === 'propertiesCount') return employee.propertyCount;
+    return employee[key] ?? Number.NEGATIVE_INFINITY;
+  };
   const visible = items
     .filter(
       (item) =>
@@ -41,7 +85,11 @@ export function EmployeesPage() {
           (status === 'active' ? item.active : !item.active)),
     )
     .sort((a, b) =>
-      a.id === newestId ? -1 : b.id === newestId ? 1 : b[sort] - a[sort],
+      a.id === newestId
+        ? -1
+        : b.id === newestId
+          ? 1
+          : sortValue(b, sort) - sortValue(a, sort),
     );
   return (
     <ManagerPageShell
@@ -61,7 +109,8 @@ export function EmployeesPage() {
     >
       <div className={styles.scope}>
         <p className={styles.muted}>
-          بيانات تجريبية فقط • التخصيصات مؤقتة وتختفي عند تحديث الصفحة.
+          القائمة من سجلات الخادم الفعلية • «—» تعني أن القيمة غير متوفرة من
+          الخادم بعد • التخصيصات تجريبية محليًا فقط.
         </p>
         <EmployeeStats items={items} />
         <div className={styles.filters}>
@@ -99,10 +148,6 @@ export function EmployeesPage() {
             <EmployeeCard
               key={employee.id}
               employee={employee}
-              assignedCount={
-                assignments.filter((item) => item.employeeId === employee.id)
-                  .length
-              }
               onDetails={() =>
                 setOverlay({ kind: 'details', employeeId: employee.id })
               }
@@ -113,8 +158,21 @@ export function EmployeesPage() {
             />
           ))}
         </div>
-        {!visible.length && (
-          <p className={styles.notice}>لا يوجد موظفون مطابقون للفلاتر.</p>
+        {loading && <p className={styles.notice}>جارٍ تحميل الموظفين…</p>}
+        {!loading && error && (
+          <p className={styles.notice}>
+            {error}{' '}
+            <Button type="button" variant="ghost" onClick={reload}>
+              إعادة المحاولة
+            </Button>
+          </p>
+        )}
+        {!loading && !error && !visible.length && (
+          <p className={styles.notice}>
+            {items.length
+              ? 'لا يوجد موظفون مطابقون للفلاتر.'
+              : 'لم يُسجّل الخادم أي موظف حتى الآن.'}
+          </p>
         )}
         {overlay?.kind === 'details' && selected && (
           <EmployeeDetailsDrawer
@@ -123,6 +181,7 @@ export function EmployeesPage() {
             assignments={assignments.filter(
               (item) => item.employeeId === selected.id,
             )}
+            onRename={(name) => rename(selected.id, name)}
             onClose={() => setOverlay(null)}
           />
         )}
@@ -143,21 +202,24 @@ export function EmployeesPage() {
                 assignment,
               ]);
               setOverlay(null);
-              setNotice('تم تخصيص العقار للموظف');
+              setNotice('تم تخصيص العقار للموظف (تجريبي محليًا)');
             }}
           />
         )}
         {adding && (
           <AddEmployeeModal
             existing={items}
-            onClose={() => setAdding(false)}
-            onSave={(employee) => {
+            onClose={() => {
               setAdding(false);
-              setItems((previous) => [employee, ...previous]);
-              setNewestId(employee.id);
-              setQuery('');
-              setStatus('all');
-              setNotice('تم إضافة الموظف مؤقتًا');
+              if (justCreated) {
+                setJustCreated(false);
+                setNotice('تم إنشاء حساب الموظف');
+              }
+            }}
+            onCreated={(id) => {
+              setJustCreated(true);
+              setNewestId(id);
+              reload();
             }}
           />
         )}

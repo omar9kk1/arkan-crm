@@ -27,7 +27,10 @@
 }
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr));
+  /* `auto-fill` (not `auto-fit`) keeps the empty tracks, so a lone employee
+     card keeps ONE normal column at the RTL start instead of stretching across
+     the whole row. With 4+ employees the two behave identically. */
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 270px), 1fr));
   gap: var(--employee-gap);
 }
 .employeeCard {
@@ -115,6 +118,7 @@
   font-size: var(--text-small);
   min-width: 0;
 }
+.field input,
 .field select,
 .field textarea {
   font: inherit;
@@ -127,6 +131,7 @@
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-control);
 }
+.field input:focus-visible,
 .field select:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 2px;

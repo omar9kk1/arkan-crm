@@ -1,12 +1,8 @@
 import { LogoutButton } from '../../../features/auth/components/logout-button';
-import { Button } from '../../ui/button';
-import { Icon } from '../../ui/icon';
+import { NotificationBell } from '../../../features/notifications/components/notification-bell';
 import styles from '../manager/manager-shell.module.css';
-export function EmployeeTopbar({
-  onPreview,
-}: {
-  onPreview: (label: string) => void;
-}) {
+
+export function EmployeeTopbar() {
   return (
     <header className={`${styles.topbar} ${styles.employeeTopbar}`}>
       <div className={styles.topbarTitle}>
@@ -17,14 +13,7 @@ export function EmployeeTopbar({
       </div>
       <div className={styles.account}>
         <span>موظف مبيعات</span>
-        <Button
-          className={styles.notificationButton}
-          aria-label="الإشعارات"
-          title="الإشعارات"
-          onClick={() => onPreview('الإشعارات')}
-        >
-          <Icon name="bell" />
-        </Button>
+        <NotificationBell className={styles.notificationButton} />
         <LogoutButton />
       </div>
     </header>

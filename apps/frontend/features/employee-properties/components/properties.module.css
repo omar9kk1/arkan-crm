@@ -25,6 +25,128 @@
 .region h2 {
   font-size: var(--text-heading);
 }
+/* Employee cards only; shared manager cards and detail drawers stay unchanged. */
+.imageCard {
+  position: relative;
+  isolation: isolate;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  aspect-ratio: 16 / 21;
+  align-self: start;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--property-radius, 23px);
+  background: #514b40;
+  color: #fff;
+  font: inherit;
+  text-align: start;
+  direction: rtl;
+  cursor: pointer;
+  box-shadow: var(--shadow-control);
+  transition: box-shadow var(--motion-fast);
+}
+.cardPhoto,
+.cardPhoto img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.cardPhoto {
+  display: grid;
+  place-items: center;
+}
+.cardPhoto img {
+  display: block;
+  object-fit: cover;
+}
+.imageFallback {
+  color: #ded2bc;
+  margin-bottom: 32px;
+}
+.imageCard::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    transparent 30%,
+    rgba(19, 17, 13, 0.32) 58%,
+    rgba(19, 17, 13, 0.86)
+  );
+  pointer-events: none;
+}
+.imageCardOverlay {
+  position: absolute;
+  inset-inline: 16px;
+  bottom: 14px;
+  z-index: 1;
+  display: grid;
+  gap: 2px;
+  pointer-events: none;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+/* Top overlay row: the status pill sits at the right and the responsible-person
+   pill at the left — the same layout as the shared manager card. Flex keeps
+   them in one row, so a long name ellipsizes instead of overflowing or sliding
+   under the status pill, and neither pill intercepts clicks. */
+.cardPills {
+  position: absolute;
+  top: 12px;
+  inset-inline: 12px;
+  z-index: 1;
+  direction: rtl;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+  pointer-events: none;
+}
+.cardStatus,
+.cardResponsible {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: var(--radius-pill);
+  background: rgba(255, 253, 248, 0.78);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #25241f;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+.cardDistrict,
+.cardPrice {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.6;
+}
+.cardDistrict {
+  font-size: var(--text-small);
+  font-weight: 500;
+}
+.cardPrice {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.imageCard:hover {
+  box-shadow: 0 6px 20px rgba(41, 28, 14, 0.2);
+}
+.imageCard:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 4px;
+}
 .photo {
   background-image:
     linear-gradient(
@@ -35,6 +157,13 @@
     url('/backgrounds/manager-architecture.jpg');
   background-size: cover;
   background-position: center;
+  overflow: hidden;
+}
+.photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 .badge {
   display: inline-flex;
@@ -118,4 +247,11 @@
     flex-basis: 100%;
     width: 100%;
   }
+}
+
+/* Cursor pagination control under the property groups */
+.loadMore {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-3) 0;
 }

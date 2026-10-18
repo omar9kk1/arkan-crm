@@ -1,8 +1,8 @@
-import type { ComponentPropsWithoutRef } from 'react';
+import type { ComponentPropsWithRef } from 'react';
 import styles from './card.module.css';
 export function Card({
   className = '',
   ...props
-}: ComponentPropsWithoutRef<'section'>) {
+}: ComponentPropsWithRef<'section'>) {
   return <section className={`${styles.card} ${className}`} {...props} />;
 }

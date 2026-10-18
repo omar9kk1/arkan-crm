@@ -1,14 +1,16 @@
 import { PropertiesSegmentedTabs as SegmentedTabs } from '../../manager-properties/components/properties-segmented-tabs';
-import { tabs, filterNotifications, type EmployeeNotification } from '../model';
+import type { NotificationDto } from '../../../lib/api/notification-types';
+import { tabs, filterNotifications, type EmployeeFilter } from '../model';
 import styles from '../../manager-notifications/components/notifications.module.css';
+
 export function EmployeeNotificationFilters({
   items,
   value,
   onChange,
 }: {
-  items: EmployeeNotification[];
-  value: string;
-  onChange: (value: string) => void;
+  items: readonly NotificationDto[];
+  value: EmployeeFilter;
+  onChange: (value: EmployeeFilter) => void;
 }) {
   return (
     <div className={styles.filters}>
@@ -16,9 +18,10 @@ export function EmployeeNotificationFilters({
         id="employee-notifications"
         label="فلترة الإشعارات"
         value={value}
-        onChange={onChange}
+        onChange={(value) => onChange(value as EmployeeFilter)}
         items={tabs.map((tab) => ({
           ...tab,
+          // Real counts: a bucket without backend events is genuinely zero.
           count: filterNotifications(items, tab.id).length,
         }))}
       />

@@ -2,6 +2,13 @@
 import { useDraftState } from '../../../lib/drafts/use-form-draft';
 
 import { useState } from 'react';
+import {
+  canViewContact,
+  useRegistryContacts,
+  type RegistryContact,
+} from '../../../lib/contact-registry';
+import { createContact } from '../../../lib/api/contacts-api';
+import { useAuth } from '../../auth/components/auth-provider';
 import { Button } from '../../../components/ui/button';
 import { Toast } from '../../../components/ui/toast';
 import { AddClientModal } from './add-client-modal';
@@ -16,28 +23,108 @@ import {
   matchesPerson,
   type ClientSample,
   type OwnerSample,
+  type SuitableProperty,
 } from '../mock-data';
 import { ClientCard } from './client-card';
 import { OwnerCard } from './owner-card';
+import { ContactCard } from './contact-card';
 import { ClientDetailsDrawer } from './client-details-drawer';
 import { OwnerDetailsDrawer } from './owner-details-drawer';
+import { ContactDetailsDrawer } from './contact-details-drawer';
+import { ContactFormModal } from './contact-form-modal';
 import styles from './clients.module.css';
 type OpenFile =
   | { kind: 'client'; person: ClientSample }
-  | { kind: 'owner'; person: OwnerSample };
+  | { kind: 'owner'; person: OwnerSample }
+  | { kind: 'contact'; contact: RegistryContact };
+
+/** Adapts an employee-registered owner registry record to the owner file UI. */
+function ownerFromContact(
+  contact: RegistryContact,
+  propertiesByCode: Map<string, SuitableProperty>,
+): OwnerSample {
+  return {
+    id: contact.id,
+    name: contact.name,
+    phone: contact.phone,
+    lastFollowUp: contact.createdAt || '—',
+    status: 'جديد',
+    properties: contact.propertyCodes.map(
+      (code) =>
+        propertiesByCode.get(code) ?? {
+          code,
+          title: code,
+          summary: 'عقار مسجّل من الموظف (بيانات الجلسة فقط).',
+        },
+    ),
+    employees: contact.ownerName
+      ? [
+          {
+            id: contact.ownerUserId || contact.id,
+            name: contact.ownerName,
+            timeline: [],
+          },
+        ]
+      : [],
+  };
+}
 export function ClientsPage() {
+  const { user } = useAuth();
+  // Owner/broker records come from `GET /contacts` (the Clients list itself is
+  // still the local mock area and is intentionally untouched).
+  const {
+    contacts: registry,
+    loading: contactsLoading,
+    error: contactsError,
+    refresh: refreshContacts,
+  } = useRegistryContacts();
   const [items, setItems] = useState<ClientSample[]>([...clients]);
   const [adding, setAdding] = useDraftState(
     'ui:features/manager-clients/components/clients-page.tsx:adding',
     false,
   );
+  const [addingType, setAddingType] = useState<null | 'OWNER' | 'BROKER'>(null);
   const [notice, setNotice] = useState('');
   const clientCount = 28 + items.length - clients.length;
   const [tab, setTab] = useState('clients');
   const [query, setQuery] = useState('');
   const [file, setFile] = useState<OpenFile | null>(null);
+  // The manager is authorized to see every owner/broker record.
+  const visibleContacts = registry.filter((contact) =>
+    canViewContact(user, contact),
+  );
+  const brokerCount = visibleContacts.filter(
+    (contact) => contact.type === 'BROKER',
+  ).length;
+  const ownerCount =
+    owners.length +
+    visibleContacts.filter(
+      (contact) => contact.type === 'OWNER' && contact.scope === 'EMPLOYEE',
+    ).length;
+  const propertiesByCode = new Map<string, SuitableProperty>();
+  for (const owner of owners) {
+    for (const property of owner.properties) {
+      propertiesByCode.set(property.code, property);
+    }
+  }
   const visibleClients = items.filter((person) => matchesPerson(person, query));
-  const visibleOwners = owners.filter((person) => matchesPerson(person, query));
+  const visibleOwners: OwnerSample[] = [
+    ...owners,
+    ...visibleContacts
+      .filter(
+        (contact) => contact.type === 'OWNER' && contact.scope === 'EMPLOYEE',
+      )
+      .map((contact) => ownerFromContact(contact, propertiesByCode)),
+  ].filter((person) => matchesPerson(person, query));
+  const visibleBrokers = visibleContacts.filter(
+    (contact) => contact.type === 'BROKER' && matchesPerson(contact, query),
+  );
+  const searchLabel =
+    tab === 'clients'
+      ? 'البحث باسم العميل أو الهاتف'
+      : tab === 'owners'
+        ? 'البحث باسم المالك أو الهاتف'
+        : 'البحث باسم الوسيط أو الهاتف';
   return (
     <ManagerPageShell
       title="العملاء"
@@ -52,7 +139,7 @@ export function ClientsPage() {
           إضافة عميل
         </Button>
       }
-      description="إدارة ملفات العملاء والملاك، ومعرفة الموظفين المسؤولين وسجل المتابعات."
+      description="إدارة ملفات العملاء والملاك والوسطاء، ومعرفة الموظفين المسؤولين وسجل المتابعات."
     >
       <div className={styles.scope}>
         <p className={styles.secondary}>
@@ -62,8 +149,8 @@ export function ClientsPage() {
         <div className={styles.stats}>
           {[
             { title: 'عملاء نشطين', value: clientCount },
-            { title: 'ملاك مسجلين', value: 16 },
-            { title: 'متابعات متأخرة', value: 7 },
+            { title: 'ملاك مسجلين', value: ownerCount },
+            { title: 'وسطاء مسجلين', value: brokerCount },
             { title: 'متابعة هذا الأسبوع', value: 54 },
           ].map((item) => (
             <StatCard
@@ -77,29 +164,39 @@ export function ClientsPage() {
         <div className={styles.toolbar}>
           <SegmentedTabs
             id="people"
-            label="العملاء والملاك"
+            label="العملاء والملاك والوسطاء"
             items={[
               { id: 'clients', label: 'العملاء', count: clientCount },
-              { id: 'owners', label: 'الملاك', count: 16 },
+              { id: 'owners', label: 'الملاك', count: ownerCount },
+              { id: 'brokers', label: 'الوسطاء', count: brokerCount },
             ]}
             value={tab}
             onChange={setTab}
           />
           <SearchBar
-            label={
-              tab === 'clients'
-                ? 'البحث باسم العميل أو الهاتف'
-                : 'البحث باسم المالك أو الهاتف'
-            }
-            placeholder="ابحث باسم العميل أو الهاتف..."
+            label={searchLabel}
+            placeholder="ابحث بالاسم أو الهاتف..."
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
         </div>
         <SectionHeader
-          title={tab === 'clients' ? 'ملفات العملاء' : 'ملفات الملاك'}
+          title={
+            tab === 'clients'
+              ? 'ملفات العملاء'
+              : tab === 'owners'
+                ? 'ملفات الملاك'
+                : 'ملفات الوسطاء'
+          }
           description="اضغط على الملف للاطلاع على التفاصيل والمتابعات."
         />
+        {tab !== 'clients' && (contactsLoading || contactsError) && (
+          <p className={styles.secondary} role="status" aria-live="polite">
+            {contactsLoading
+              ? 'جارٍ تحميل سجل الملاك والوسطاء…'
+              : `تعذر تحميل السجل: ${contactsError}`}
+          </p>
+        )}
         <section
           role="tabpanel"
           tabIndex={0}
@@ -127,6 +224,19 @@ export function ClientsPage() {
           aria-labelledby="people-tab-owners"
           hidden={tab !== 'owners'}
         >
+          <div className={styles.row}>
+            <span>
+              الملاك المسجلون من الموظفين يظهرون هنا تلقائيًا عند إنشاء عقار
+              جديد.
+            </span>
+            <Button
+              variant="ghost"
+              compactOnMobile
+              onClick={() => setAddingType('OWNER')}
+            >
+              إضافة مالك
+            </Button>
+          </div>
           <div className={styles.peopleList}>
             {visibleOwners.map((owner) => (
               <OwnerCard
@@ -138,6 +248,38 @@ export function ClientsPage() {
           </div>
           {!visibleOwners.length && (
             <p className={styles.empty}>لا يوجد ملاك مطابقون للبحث.</p>
+          )}
+        </section>
+        <section
+          role="tabpanel"
+          tabIndex={0}
+          id="people-panel-brokers"
+          aria-labelledby="people-tab-brokers"
+          hidden={tab !== 'brokers'}
+        >
+          <div className={styles.row}>
+            <span>
+              سجل الوسطاء مشترك مع خطوة اختيار الوسيط في إنشاء العقار.
+            </span>
+            <Button
+              variant="ghost"
+              compactOnMobile
+              onClick={() => setAddingType('BROKER')}
+            >
+              إضافة وسيط
+            </Button>
+          </div>
+          <div className={styles.peopleList}>
+            {visibleBrokers.map((contact) => (
+              <ContactCard
+                key={contact.id}
+                contact={contact}
+                onOpen={() => setFile({ kind: 'contact', contact })}
+              />
+            ))}
+          </div>
+          {!visibleBrokers.length && (
+            <p className={styles.empty}>لا يوجد وسطاء مطابقون للبحث.</p>
           )}
         </section>
         {adding && (
@@ -156,6 +298,31 @@ export function ClientsPage() {
             }}
           />
         )}
+        {addingType && (
+          <ContactFormModal
+            type={addingType}
+            onClose={() => setAddingType(null)}
+            onSave={async ({ name, phone, notes }) => {
+              // Ownership is derived server-side from the signed-in manager, so
+              // only the entered fields are posted.
+              try {
+                await createContact({ type: addingType, name, phone, notes });
+                refreshContacts();
+                setAddingType(null);
+                setQuery('');
+                setNotice(
+                  `تم إضافة ${addingType === 'BROKER' ? 'الوسيط' : 'المالك'} إلى السجل`,
+                );
+              } catch (cause) {
+                setNotice(
+                  cause instanceof Error
+                    ? cause.message
+                    : 'تعذر إضافة السجل. حاول مرة أخرى.',
+                );
+              }
+            }}
+          />
+        )}
         <Toast message={notice} onDismiss={() => setNotice('')} />
         {file?.kind === 'client' && (
           <ClientDetailsDrawer
@@ -168,6 +335,13 @@ export function ClientsPage() {
           <OwnerDetailsDrawer
             key={file.person.id}
             owner={file.person}
+            onClose={() => setFile(null)}
+          />
+        )}
+        {file?.kind === 'contact' && (
+          <ContactDetailsDrawer
+            key={file.contact.id}
+            contact={file.contact}
             onClose={() => setFile(null)}
           />
         )}

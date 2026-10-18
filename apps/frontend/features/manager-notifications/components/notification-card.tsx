@@ -1,17 +1,14 @@
 import { Card } from '../../../components/ui/card';
 import { Button } from '../../../components/ui/button';
-import {
-  categories,
-  displayDate,
-  type ManagerNotification,
-} from '../notifications-model';
-import { NotificationPriorityBadge } from './notification-priority-badge';
+import type { NotificationDto } from '../../../lib/api/notification-types';
+import { displayDate, notificationTypeLabel } from '../../notifications/view';
 import styles from './notifications.module.css';
+
 export function NotificationCard({
   item,
   onOpen,
 }: {
-  item: ManagerNotification;
+  item: NotificationDto;
   onOpen: () => void;
 }) {
   return (
@@ -21,17 +18,18 @@ export function NotificationCard({
     >
       <div>
         <h3>{item.title}</h3>
-        <p>{item.description}</p>
+        <p>{item.message}</p>
         <div className={styles.badges}>
-          <span className={styles.badge}>{categories[item.category]}</span>
+          <span className={styles.badge}>
+            {notificationTypeLabel(item.type)}
+          </span>
           <span className={styles.badge}>
             {item.read ? 'مقروء' : 'غير مقروء'}
           </span>
-          <NotificationPriorityBadge priority={item.priority} />
         </div>
       </div>
       <div className={styles.meta}>
-        <time dateTime={item.date}>{displayDate(item.date)}</time>
+        <time dateTime={item.createdAt}>{displayDate(item.createdAt)}</time>
         <Button
           aria-label={`تفاصيل: ${item.title}`}
           onClick={(e) => {

@@ -1,27 +1,20 @@
 import { PropertiesSegmentedTabs as SegmentedTabs } from '../../manager-properties/components/properties-segmented-tabs';
+import type { NotificationDto } from '../../../lib/api/notification-types';
 import {
-  filterNotifications,
-  type ManagerNotification,
-  type NotificationFilter,
+  filterManagerNotifications,
+  notificationFilters,
+  type ManagerFilter,
 } from '../notifications-model';
 import styles from './notifications.module.css';
-export const notificationFilters: { id: NotificationFilter; label: string }[] =
-  [
-    { id: 'all', label: 'الكل' },
-    { id: 'unread', label: 'غير مقروء' },
-    { id: 'property', label: 'عقارات' },
-    { id: 'followup', label: 'متابعات' },
-    { id: 'deal', label: 'صفقات وعمولات' },
-    { id: 'attendance', label: 'حضور وانصراف' },
-  ];
+
 export function NotificationFilters({
   items,
   value,
   onChange,
 }: {
-  items: readonly ManagerNotification[];
-  value: NotificationFilter;
-  onChange: (value: NotificationFilter) => void;
+  items: readonly NotificationDto[];
+  value: ManagerFilter;
+  onChange: (value: ManagerFilter) => void;
 }) {
   return (
     <div className={styles.filters}>
@@ -29,10 +22,11 @@ export function NotificationFilters({
         id="notifications"
         label="فلترة الإشعارات"
         value={value}
-        onChange={(value) => onChange(value as NotificationFilter)}
+        onChange={(value) => onChange(value as ManagerFilter)}
         items={notificationFilters.map((filter) => ({
           ...filter,
-          count: filterNotifications(items, filter.id).length,
+          // Real counts: a bucket without backend events is genuinely zero.
+          count: filterManagerNotifications(items, filter.id).length,
         }))}
       />
     </div>

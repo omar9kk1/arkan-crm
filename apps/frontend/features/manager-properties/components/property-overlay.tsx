@@ -10,6 +10,7 @@ export function PropertyOverlay({
   onCloseButton,
   children,
   className = '',
+  headerDetails,
 }: {
   title: string;
   drawer?: boolean;
@@ -17,6 +18,7 @@ export function PropertyOverlay({
   onCloseButton?: () => void;
   children: ReactNode;
   className?: string;
+  headerDetails?: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const id = useId();
@@ -53,7 +55,12 @@ export function PropertyOverlay({
       }}
     >
       <header className={styles.overlayHeader}>
-        <h2 id={id}>{title}</h2>
+        {headerDetails ? (
+          <div>
+            <h2 id={id}>{title}</h2>
+            {headerDetails}
+          </div>
+        ) : <h2 id={id}>{title}</h2>}
         <Button
           onClick={() => {
             onCloseButton?.();

@@ -1,4 +1,5 @@
 export interface Property {
+  details?: import('../../lib/property-details').PropertyDetails;
   requestDraft?: import('./components/property-request-model').PropertyRequestDraft;
   id: string;
   code: string;
@@ -18,6 +19,36 @@ export interface Property {
   assignment: string;
   managerNotes: string;
   followers: { name: string; entries: { date: string; note: string }[] }[];
+  /** Object URL of the single mandatory image (frontend-only; not persistent). */
+  imageUrl?: string;
+  /** Stable AuthUser.id of the employee who registered the property contact. */
+  ownerUserId?: string;
+  /** Display name of the responsible employee (shown when contact is private). */
+  responsibleName?: string;
+  /**
+   * Server-derived role of the property creator (`null` when unknown); drives
+   * the top-left responsible pill together with `responsibleName`.
+   */
+  responsibleRole?: import('../../lib/api/property-types').ResponsibleRoleApi | null;
+  /** Whether the private contact is a direct owner or a broker. */
+  contactType?: 'OWNER' | 'BROKER';
+  /** Backend status enum; present when the row came from the API. */
+  apiStatus?: import('../../lib/api/property-types').PropertyStatusApi;
+  /**
+   * Latest review state; present only on the authorized private response. Lets
+   * the UI tell an ordinary PENDING row apart from a CHANGES_REQUESTED one.
+   */
+  reviewStatus?: import('../../lib/api/property-types').ApprovalStatusApi | null;
+  /** Optimistic-concurrency token required by PATCH / approve / reject. */
+  version?: number;
+  /** Storage key of the single stored image, or null when the row has none. */
+  primaryImageUrl?: string | null;
+  /**
+   * True only when the *authorized backend response* carried the private
+   * owner/broker contact. Server-authoritative: the UI must not show contact
+   * fields for another employee's AVAILABLE property.
+   */
+  hasPrivateContact?: boolean;
 }
 export const empty: Property = {
   id: '',
@@ -94,6 +125,56 @@ export const samples: Property[] = Array.from({ length: 6 }, (_, i) => ({
     },
   ],
 }));
+/**
+ * Approved per-tab visibility rules (frontend filtering only).
+ *
+ * The server already returns, for an employee: every AVAILABLE property plus the
+ * employee's OWN `PENDING`/`REJECTED` rows (never another employee's pending
+ * work — those are authorized only to their creator and the manager). These
+ * rules then narrow the loaded rows per tab:
+ *
+ * - `all`      → AVAILABLE only (approved inventory; review items excluded).
+ * - `mine`     → AVAILABLE rows created by the viewer (`isMine`).
+ * - `review`   → every authorized unapproved row of the viewer: PENDING (with
+ *                any review state, so CHANGES_REQUESTED counts as unapproved
+ *                too) and REJECTED. Approved rows never belong here.
+ * - `changes`  → unchanged: the narrower subset the viewer still has to correct.
+ * - `assigned` → unchanged (the backend has no assignment field yet).
+ *
+ * The rules key off the backend `status` enum (`apiStatus`) — never the
+ * localized `status` label — and off `reviewStatus`, which distinguishes an
+ * ordinary PENDING row from one the manager sent back for changes. This does NOT
+ * change authorization: a manager keeps seeing (and acting on) the same pending
+ * rows through the manager approvals workflow.
+ */
+export function matchesTab(p: Property, tab: string): boolean {
+  switch (tab) {
+    case 'all':
+      return p.apiStatus === 'AVAILABLE';
+    case 'mine':
+      return p.apiStatus === 'AVAILABLE' && p.mine === true;
+    case 'assigned':
+      return !!p.assignment;
+    case 'review':
+      // Every authorized unapproved row: still awaiting a decision, sent back
+      // for changes, or rejected — the status badge on each card keeps telling
+      // them apart, so nothing here is relabelled as pending again.
+      return (
+        p.mine === true &&
+        (p.apiStatus === 'PENDING' || p.apiStatus === 'REJECTED')
+      );
+    case 'changes':
+      return (
+        p.mine === true &&
+        (p.apiStatus === 'REJECTED' ||
+          (p.apiStatus === 'PENDING' &&
+            p.reviewStatus === 'CHANGES_REQUESTED'))
+      );
+    default:
+      return false;
+  }
+}
+
 export function filterProperties(
   items: Property[],
   tab: string,
@@ -102,11 +183,7 @@ export function filterProperties(
   const q = query.trim().toLocaleLowerCase('ar');
   return items.filter(
     (p) =>
-      (tab === 'all' ||
-        (tab === 'mine' && p.mine) ||
-        (tab === 'assigned' && !!p.assignment) ||
-        (tab === 'review' && p.status === 'بانتظار الموافقة') ||
-        (tab === 'changes' && p.status === 'مطلوب تعديل')) &&
+      matchesTab(p, tab) &&
       `${p.title} ${p.region} ${p.code}`.toLocaleLowerCase('ar').includes(q),
   );
 }

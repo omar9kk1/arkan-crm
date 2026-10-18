@@ -19,7 +19,7 @@ export function EmployeeLayout({ children }: { children: ReactNode }) {
       </a>
       <EmployeeSidebar onPreview={preview} />
       <div className={styles.content}>
-        <EmployeeTopbar onPreview={preview} />
+        <EmployeeTopbar />
         <main id="employee-content" tabIndex={-1}>
           {children}
         </main>

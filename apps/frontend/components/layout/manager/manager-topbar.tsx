@@ -1,7 +1,7 @@
-import { Button } from '../../ui/button';
-import { Icon } from '../../ui/icon';
 import { LogoutButton } from '../../../features/auth/components/logout-button';
+import { NotificationBell } from '../../../features/notifications/components/notification-bell';
 import styles from './manager-shell.module.css';
+
 export function ManagerTopbar() {
   return (
     <header className={styles.topbar}>
@@ -13,14 +13,7 @@ export function ManagerTopbar() {
       </div>
       <div className={styles.account}>
         <span className={styles.role}>مدير النظام</span>
-        <Button
-          className={styles.notificationButton}
-          disabled
-          aria-label="الإشعارات — قريبًا"
-          title="الإشعارات — قريبًا"
-        >
-          <Icon name="bell" />
-        </Button>
+        <NotificationBell className={styles.notificationButton} />
         <LogoutButton />
       </div>
     </header>

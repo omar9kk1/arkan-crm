@@ -9,16 +9,21 @@ import { PropertyOverlay } from '../../manager-properties/components/property-ov
 import { Card } from '../../../components/ui/card';
 import { Button } from '../../../components/ui/button';
 import { GlassSelect } from '../../../components/ui/glass-select';
-import type { EmployeeSample } from '../mock-data';
+import { createEmployee } from '../../../lib/api/employees-api';
+import type {
+  CreateEmployeePayload,
+  EmployeeRoleApi,
+} from '../../../lib/api/employee-types';
+import type { EmployeeRecord } from '../model';
 import styles from './add-employee.module.css';
 export function AddEmployeeModal({
   existing,
   onClose,
-  onSave,
+  onCreated,
 }: {
-  existing: readonly EmployeeSample[];
+  existing: readonly EmployeeRecord[];
   onClose: () => void;
-  onSave: (employee: EmployeeSample) => void;
+  onCreated: (id: string) => void;
 }) {
   const formKey = 'add-employee';
   const { clear: clearFormDraft } = useDraftScope(formKey);
@@ -39,10 +44,10 @@ export function AddEmployeeModal({
     >
       {result ? (
         <Card className={styles.result}>
-          <h3>تم إضافة الموظف مؤقتًا</h3>
+          <h3>تم إنشاء حساب الموظف</h3>
           <p>
-            احتفظ بهذه البيانات وأرسلها للموظف. سيتم ربط إنشاء الحساب الحقيقي في
-            مرحلة الـ API.
+            أُنشئ الحساب فعليًا في قاعدة البيانات. احتفظ بهذه البيانات وأرسلها
+            للموظف.
           </p>
           <label>
             البريد الإلكتروني
@@ -75,24 +80,28 @@ export function AddEmployeeModal({
         </Card>
       ) : (
         <>
-          <p>أدخل بيانات الموظف وجهّز بيانات دخوله التجريبية.</p>
+          <p>أدخل بيانات الموظف وجهّز بيانات دخوله.</p>
           <div className={styles.layout}>
             <>
               <DraftTools formKey={formKey} />{' '}
               <form
-                onSubmit={(event) => {
+                onSubmit={async (event) => {
                   event.preventDefault();
                   if (saved.current) return;
-                  const data = new FormData(event.currentTarget);
+                  const form = event.currentTarget;
+                  const data = new FormData(form);
                   const text = (key: string) =>
                     String(data.get(key) || '').trim();
                   const email = text('email').toLowerCase();
                   if (
                     !text('name') ||
                     !text('phone') ||
-                    existing.some((item) => item.email?.toLowerCase() === email)
+                    existing.some(
+                      (item) => item.email.toLowerCase() === email,
+                    ) ||
+                    !text('hiredAt')
                   ) {
-                    setMessage('راجع الاسم والهاتف، وتأكد أن البريد غير مكرر.');
+                    setMessage('راجع الاسم والهاتف وتاريخ التعيين والبريد.');
                     return;
                   }
                   const salary = Number(text('salary'));
@@ -105,30 +114,33 @@ export function AddEmployeeModal({
                     setMessage('كلمة المرور لا تقل عن 8 أحرف.');
                     return;
                   }
-                  saved.current = true;
-                  onSave({
-                    id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                  const role: EmployeeRoleApi =
+                    text('jobRole') === 'مدير' ? 'MANAGER' : 'EMPLOYEE';
+                  const payload: CreateEmployeePayload = {
                     name: text('name'),
-                    phone: text('phone'),
                     email,
-                    jobRole: text('jobRole') as 'موظف مبيعات' | 'مدير',
-                    salary,
+                    password,
+                    role,
+                    phone: text('phone'),
                     hiredAt: text('hiredAt'),
-                    active: text('status') === 'active',
-                    notes: text('notes'),
-                    clientsCount: 0,
-                    propertiesCount: 0,
-                    dealsCount: 0,
-                    commission: 0,
-                    lateCount: 0,
-                    clients: [],
-                    enteredProperties: [],
-                    deals: [],
-                    followups: [],
-                  });
-                  clearFormDraft();
-                  setMessage('');
-                  setResult({ email, password });
+                    baseSalary: salary,
+                    isActive: text('status') === 'active',
+                  };
+                  saved.current = true;
+                  try {
+                    const created = await createEmployee(payload);
+                    clearFormDraft();
+                    setMessage('');
+                    setResult({ email, password });
+                    onCreated(created.id);
+                  } catch (cause) {
+                    saved.current = false;
+                    setMessage(
+                      cause instanceof Error
+                        ? cause.message
+                        : 'تعذر إنشاء الحساب.',
+                    );
+                  }
                 }}
               >
                 <Card className={styles.fields}>
@@ -249,9 +261,13 @@ export function AddEmployeeModal({
               <h3>بيانات الدخول</h3>
               <p>بعد الحفظ يظهر البريد وكلمة المرور لتتمكن من نسخهما.</p>
               <p>
-                هذه معاينة فقط؛ لن يتم إنشاء حساب حقيقي أو إرسال رسالة للموظف.
+                يُنشأ الحساب فعليًا في قاعدة البيانات بكلمة مرور مُشفّرة؛ ولا
+                تُرسل رسالة للموظف.
               </p>
-              <p>اختيار «مدير» هنا لا يمنح صلاحيات فعلية.</p>
+              <p>اختيار «مدير» يُنشئ حساب مدير فعلي ولا يظهر في قائمة الموظفين.</p>
+              <p>
+                الملاحظات لا تُحفظ: لا يوجد حقل لها في قاعدة البيانات بعد.
+              </p>
             </Card>
           </div>
         </>

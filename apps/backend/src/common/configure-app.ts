@@ -1,4 +1,5 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { ApiExceptionFilter } from './filters/api-exception.filter';
 import { ResponseInterceptor } from './interceptors/response.interceptor';
 export function configureApp(app: INestApplication) {
@@ -10,5 +11,5 @@ export function configureApp(app: INestApplication) {
     }),
   );
   app.useGlobalFilters(new ApiExceptionFilter());
-  app.useGlobalInterceptors(new ResponseInterceptor());
+  app.useGlobalInterceptors(new ResponseInterceptor(app.get(Reflector)));
 }

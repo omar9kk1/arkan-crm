@@ -1,71 +1,92 @@
 'use client';
-import { Toast } from '../../../components/ui/toast';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Toast } from '../../../components/ui/toast';
 import { ManagerPageShell } from '../../../components/layout/manager/manager-page-shell';
 import { Button } from '../../../components/ui/button';
 import { Card } from '../../../components/ui/card';
 import { StatCard } from '../../../components/ui/stat-card';
+import type { NotificationDto } from '../../../lib/api/notification-types';
+import { requestOpenProperty } from '../../notifications/open-property';
+import { useNotifications } from '../../notifications/store';
 import {
-  filterNotifications,
-  markRead,
-  mockNotifications,
-  type NotificationFilter,
+  awaitingReviewCount,
+  filterManagerNotifications,
+  notificationFilters,
+  type ManagerFilter,
 } from '../notifications-model';
 import { NotificationCard } from './notification-card';
-import {
-  NotificationFilters,
-  notificationFilters,
-} from './notification-filters';
+import { NotificationFilters } from './notification-filters';
 import { NotificationDetailsDrawer } from './notification-details-drawer';
 import styles from './notifications.module.css';
+
+/**
+ * The manager Notifications page. Every row, count and empty state comes from
+ * the shared notification store (the same 15s poll as the header bell), so it
+ * shows exactly the signed-in manager's real notifications — never a mock list.
+ */
 export function NotificationsPage() {
-  const [items, setItems] = useState(mockNotifications);
-  const [filter, setFilter] = useState<NotificationFilter>('all');
+  const router = useRouter();
+  const {
+    items,
+    unreadCount,
+    status,
+    refresh,
+    markRead,
+    markAllRead,
+    loadMore,
+    loadingMore,
+    nextCursor,
+  } = useNotifications();
+  const [filter, setFilter] = useState<ManagerFilter>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
-  const selected = items.find((item) => item.id === selectedId);
-  const counts = [
-    ['إشعارات جديدة', items.filter((item) => !item.read).length],
-    [
-      'عقارات بانتظار الموافقة',
-      items.filter((item) => item.category === 'property' && item.needsReview)
-        .length,
-    ],
-    [
-      'متابعات متأخرة',
-      items.filter((item) => item.category === 'followup' && item.needsReview)
-        .length,
-    ],
-    [
-      'صفقات/عمولات تحتاج مراجعة',
-      items.filter((item) => item.category === 'deal' && item.needsReview)
-        .length,
-    ],
+
+  const selected = items.find((item) => item.id === selectedId) ?? null;
+
+  // Real counters derived from the persisted rows. Follow-ups and deals have no
+  // backend events, so those two stay at a genuine zero.
+  const counts: [string, number, string][] = [
+    ['إشعارات جديدة', unreadCount, 'غير مقروء'],
+    ['عقارات بانتظار الموافقة', awaitingReviewCount(items), 'بانتظار المراجعة'],
+    ['متابعات متأخرة', 0, 'لا توجد أحداث مدعومة'],
+    ['صفقات/عمولات تحتاج مراجعة', 0, 'لا توجد أحداث مدعومة'],
   ];
+
+  const openNotification = (item: NotificationDto) => {
+    setSelectedId(item.id);
+    if (!item.read) void markRead(item.id);
+  };
+
+  const openProperty = (propertyId: string) => {
+    setSelectedId(null);
+    requestOpenProperty(propertyId);
+    router.push('/manager/properties');
+  };
+
+  const markAll = () => {
+    void markAllRead();
+    setNotice('تم تعليم كل الإشعارات كمقروءة');
+  };
+
+  const visible = filterManagerNotifications(items, filter);
+  const firstLoad = status !== 'ready' && items.length === 0;
+
   return (
     <ManagerPageShell
       title="الإشعارات"
       description="متابعة تنبيهات المدير المهمة: العقارات بانتظار الموافقة، المتابعات المتأخرة، الصفقات، العمولات، والحضور."
-      actions={
-        <Button
-          onClick={() => {
-            setItems((previous) => markRead(previous));
-            setNotice('تم تعليم كل الإشعارات كمقروءة');
-          }}
-        >
-          تعليم الكل كمقروء
-        </Button>
-      }
+      actions={<Button onClick={markAll}>تعليم الكل كمقروء</Button>}
     >
       <div className={styles.scope}>
         <div className={styles.stats}>
-          {counts.map(([title, value]) => (
+          {counts.map(([title, value, hint]) => (
             <StatCard
               key={title}
-              title={String(title)}
+              title={title}
               value={value}
-              hint="ضمن العينة التجريبية"
+              hint={hint}
               icon="bell"
             />
           ))}
@@ -76,8 +97,7 @@ export function NotificationsPage() {
           onChange={setFilter}
         />
         <p className={styles.muted}>
-          إشعارات تجريبية مستقلة عن الصفحات الأخرى. قراءة الإشعار لا تعني إنهاء
-          المراجعة المطلوبة.
+          قراءة الإشعار لا تعني إنهاء المراجعة المطلوبة.
         </p>
         {notificationFilters.map((tab) => (
           <section
@@ -90,15 +110,39 @@ export function NotificationsPage() {
           >
             {filter === tab.id && (
               <div className={styles.list}>
-                {filterNotifications(items, filter).map((item) => (
-                  <NotificationCard
-                    key={item.id}
-                    item={item}
-                    onOpen={() => setSelectedId(item.id)}
-                  />
-                ))}
-                {!filterNotifications(items, filter).length && (
+                {firstLoad ? (
+                  <Card>
+                    {status === 'error' ? (
+                      <>
+                        تعذّر تحميل الإشعارات.{' '}
+                        <Button onClick={() => void refresh()}>
+                          إعادة المحاولة
+                        </Button>
+                      </>
+                    ) : (
+                      'جارٍ تحميل الإشعارات…'
+                    )}
+                  </Card>
+                ) : visible.length === 0 ? (
                   <Card>لا توجد إشعارات في هذا التصنيف.</Card>
+                ) : (
+                  visible.map((item) => (
+                    <NotificationCard
+                      key={item.id}
+                      item={item}
+                      onOpen={() => openNotification(item)}
+                    />
+                  ))
+                )}
+                {!firstLoad && nextCursor && (
+                  <div className={styles.pagination}>
+                    <Button
+                      disabled={loadingMore}
+                      onClick={() => void loadMore()}
+                    >
+                      {loadingMore ? 'جارٍ التحميل…' : 'تحميل المزيد'}
+                    </Button>
+                  </div>
                 )}
               </div>
             )}
@@ -109,9 +153,8 @@ export function NotificationsPage() {
             key={selected.id}
             item={selected}
             onClose={() => setSelectedId(null)}
-            onRead={() =>
-              setItems((previous) => markRead(previous, selected.id))
-            }
+            onRead={() => void markRead(selected.id)}
+            onOpenProperty={openProperty}
           />
         )}
         <Toast message={notice} onDismiss={() => setNotice('')} />

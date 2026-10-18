@@ -1,0 +1,184 @@
+/* Keeps the header bell where it already was; the badge is anchored here. */
+.anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.badge {
+  position: absolute;
+  top: -5px;
+  inset-inline-end: -5px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--danger, #c0392b);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  direction: ltr;
+}
+
+/* The panel is a popover (top layer): it can never be clipped by the topbar and
+   never pushes the header layout around. */
+.panel {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 0;
+  width: min(380px, calc(100vw - 24px));
+  max-height: min(72vh, 540px);
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+  direction: rtl;
+  text-align: right;
+  color: var(--ink);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: rgba(255, 253, 248, 0.97);
+  backdrop-filter: blur(var(--glass-blur));
+  box-shadow: var(--shadow-card);
+}
+
+.panel:popover-open {
+  display: flex;
+}
+
+/* Transparent and click-through so an outside click reaches the page (which the
+   component uses to close the panel). */
+.panel::backdrop {
+  background: transparent;
+  pointer-events: none;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.headerTitle {
+  font-size: var(--text-body);
+}
+
+.markAll {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--text-caption);
+  cursor: pointer;
+}
+
+.markAll:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.state {
+  margin: 0;
+  padding: var(--space-5) var(--space-4);
+  text-align: center;
+  color: var(--muted);
+  font-size: var(--text-small);
+  line-height: 1.8;
+}
+
+.retry {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--manager-accent, #0b6b53);
+  font: inherit;
+  font-size: var(--text-small);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  border-bottom: 1px solid var(--glass-border);
+  font: inherit;
+  text-align: right;
+  color: var(--ink);
+  background: transparent;
+  cursor: pointer;
+}
+
+.item:hover,
+.item:focus-visible {
+  background: rgba(15, 23, 42, 0.05);
+}
+
+.itemUnread {
+  background: rgba(11, 107, 83, 0.07);
+}
+
+.itemRead {
+  background: transparent;
+}
+
+.itemTop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.itemTitle {
+  font-size: var(--text-small);
+  font-weight: 600;
+}
+
+.dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-inline-end: 6px;
+  border-radius: 50%;
+  background: var(--danger, #c0392b);
+  vertical-align: middle;
+}
+
+.itemTime {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.itemMessage {
+  color: var(--muted);
+  font-size: var(--text-caption);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+  .panel {
+    max-height: min(78vh, 560px);
+  }
+}

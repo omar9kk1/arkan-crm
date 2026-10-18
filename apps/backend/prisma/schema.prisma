@@ -24,6 +24,29 @@ enum PropertyStatus {
 enum DealType {
   SALE
   RENT
+  EXCHANGE
+}
+
+enum ContactType {
+  OWNER
+  BROKER
+}
+
+enum FloorType {
+  GROUND
+  FIRST
+  SECOND
+  THIRD
+  FOURTH
+  FIFTH
+  SIXTH
+  SEVENTH
+  ROOF
+  MEZZANINE
+  BASEMENT
+  HALF
+  QUARTER
+  CUSTOM
 }
 
 enum AssignmentPurpose {
@@ -76,6 +99,19 @@ enum AttendanceStatus {
   LEAVE
 }
 
+// In-app notification events. One value per business event so a notification can
+// never be mistaken for another; `SYSTEM` is the reserved default for legacy or
+// generic rows that predate the event catalogue.
+enum NotificationType {
+  PROPERTY_SUBMITTED
+  PROPERTY_CHANGES_REQUESTED
+  PROPERTY_REJECTED
+  PROPERTY_RESUBMITTED
+  PROPERTY_APPROVED
+  PROPERTY_AVAILABLE
+  SYSTEM
+}
+
 model User {
   id                      String                    @id @default(uuid()) @db.Uuid
   email                   String                    @unique
@@ -97,6 +133,10 @@ model User {
   createdPayrollEntries   PayrollEntry[]
   createdFinanceMovements FinanceMovement[]
   createdManualExpenses   ManualExpense[]
+  responsibleContacts     Contact[]                 @relation("ContactResponsible")
+  createdProperties       Property[]                @relation("PropertyCreatedByUser")
+  requestedRevisions      PropertyRevision[]        @relation("RevisionRequester")
+  reviewedRevisions       PropertyRevision[]        @relation("RevisionReviewer")
 }
 
 model RefreshToken {
@@ -177,37 +217,121 @@ model Owner {
 }
 
 model Property {
-  id             String                    @id @default(uuid()) @db.Uuid
-  reference      String                    @unique
-  title          String
-  area           String
-  address        String?
-  sizeSqm        Decimal?                  @db.Decimal(14, 2)
-  bedrooms       Int?
-  bathrooms      Int?
-  block          String?
-  street         String?
-  description    String?
-  askingPrice    Decimal?                  @db.Decimal(14, 2)
-  currency       String                    @db.Char(3)
-  status         PropertyStatus            @default(PENDING)
-  listingType    DealType
-  ownerId        String                    @db.Uuid
-  owner          Owner                     @relation(fields: [ownerId], references: [id], onDelete: Restrict)
-  createdById    String?                   @db.Uuid
-  createdBy      EmployeeProfile?          @relation(fields: [createdById], references: [id], onDelete: Restrict)
-  createdAt      DateTime                  @default(now())
-  updatedAt      DateTime                  @updatedAt
-  assignments    PropertyAssignment[]
-  approvals      PropertyApprovalRequest[]
-  deals          Deal[]
-  followups      FollowUp[]
-  notifications  Notification[]
-  files          FileAsset[]
-  manualExpenses ManualExpense[]
+  id                String                    @id @default(uuid()) @db.Uuid
+  reference         String                    @unique
+  title             String
+  area              String
+  address           String?
+  governorate       String?
+  district          String?
+  plotNumber        String?
+  sizeSqm           Decimal?                  @db.Decimal(14, 2)
+  bedrooms          Int?
+  bathrooms         Int?
+  floorCount        Int?
+  block             String?
+  street            String?
+  description       String?
+  askingPrice       Decimal?                  @db.Decimal(14, 2)
+  negotiable        Boolean?
+  currency          String                    @db.Char(3)
+  status            PropertyStatus            @default(PENDING)
+  listingType       DealType
+  version           Int                       @default(1)
+  ownerId           String?                   @db.Uuid
+  owner             Owner?                    @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  createdById       String?                   @db.Uuid
+  createdBy         EmployeeProfile?          @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  createdByUserId   String?                   @db.Uuid
+  createdByUser     User?                     @relation("PropertyCreatedByUser", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  contactId         String?                   @db.Uuid
+  contact           Contact?                  @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  primaryImageId    String?                   @unique @db.Uuid
+  primaryImage      FileAsset?                @relation("PropertyPrimaryImage", fields: [primaryImageId], references: [id], onDelete: Restrict)
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+  assignments       PropertyAssignment[]
+  approvals         PropertyApprovalRequest[]
+  deals             Deal[]
+  followups         FollowUp[]
+  notifications     Notification[]
+  files             FileAsset[]               @relation("PropertyFiles")
+  manualExpenses    ManualExpense[]
+  floors            PropertyFloor[]
+  requestedProperty RequestedProperty?
+  revisions         PropertyRevision[]
 
   @@index([area, status])
   @@index([ownerId])
+  @@index([contactId])
+  @@index([createdByUserId])
+  @@index([governorate, district])
+}
+
+model Contact {
+  id                String      @id @default(uuid()) @db.Uuid
+  type              ContactType
+  name              String
+  phone             String
+  notes             String?
+  responsibleUserId String?     @db.Uuid
+  responsibleUser   User?       @relation("ContactResponsible", fields: [responsibleUserId], references: [id], onDelete: Restrict)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  properties        Property[]
+
+  @@index([type, responsibleUserId])
+  @@index([phone])
+}
+
+model PropertyFloor {
+  id          String    @id @default(uuid()) @db.Uuid
+  propertyId  String    @db.Uuid
+  property    Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  type        FloorType
+  customLabel String?
+  details     String?
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+
+  @@index([propertyId, sortOrder])
+}
+
+model RequestedProperty {
+  id                String   @id @default(uuid()) @db.Uuid
+  propertyId        String   @unique @db.Uuid
+  property          Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  governorate       String?
+  district          String?
+  block             String?
+  plotNumber        String?
+  sizeSqm           Decimal? @db.Decimal(14, 2)
+  floorRequirements String?
+  notes             String?
+  budgetMin         Decimal? @db.Decimal(14, 2)
+  budgetMax         Decimal? @db.Decimal(14, 2)
+
+  @@index([governorate, district])
+}
+
+model PropertyRevision {
+  id            String         @id @default(uuid()) @db.Uuid
+  propertyId    String         @db.Uuid
+  property      Property       @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  status        ApprovalStatus @default(PENDING)
+  payload       Json
+  baseVersion   Int
+  requestedById String         @db.Uuid
+  requestedBy   User           @relation("RevisionRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  reviewedById  String?        @db.Uuid
+  reviewedBy    User?          @relation("RevisionReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+  reviewNotes   String?
+  createdAt     DateTime       @default(now())
+  reviewedAt    DateTime?
+
+  @@index([propertyId, status])
+  @@index([status, createdAt])
+  @@index([requestedById])
 }
 
 model PropertyAssignment {
@@ -398,8 +522,15 @@ model Notification {
   id             String        @id @default(uuid()) @db.Uuid
   userId         String        @db.Uuid
   user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // `body` is the short, privacy-safe message shown under `title` in the bell.
+  type           NotificationType @default(SYSTEM)
   title          String
   body           String
+  // Deduplication key for the originating business event, e.g.
+  // `PROPERTY_SUBMITTED:<propertyId>`. Combined with `userId` in a database
+  // unique index so a repeated/duplicated/retried event can never create two
+  // notifications for the same recipient.
+  eventKey       String?
   readAt         DateTime?
   createdAt      DateTime      @default(now())
   propertyId     String?       @db.Uuid
@@ -415,6 +546,9 @@ model Notification {
   payrollEntryId String?       @db.Uuid
   payrollEntry   PayrollEntry? @relation(fields: [payrollEntryId], references: [id], onDelete: Restrict)
 
+  // Recipient + read state + chronological listing (the bell's hot path), plus
+  // the per-recipient event deduplication guarantee.
+  @@unique([userId, eventKey])
   @@index([userId, readAt, createdAt])
 }
 
@@ -434,16 +568,17 @@ model AuditLog {
 }
 
 model FileAsset {
-  id           String    @id @default(uuid()) @db.Uuid
-  bucket       String
-  key          String    @unique
-  mimeType     String
-  sizeBytes    BigInt
-  uploadedById String    @db.Uuid
-  uploadedBy   User      @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
-  propertyId   String?   @db.Uuid
-  property     Property? @relation(fields: [propertyId], references: [id], onDelete: Restrict)
-  createdAt    DateTime  @default(now())
+  id              String    @id @default(uuid()) @db.Uuid
+  bucket          String
+  key             String    @unique
+  mimeType        String
+  sizeBytes       BigInt
+  uploadedById    String    @db.Uuid
+  uploadedBy      User      @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
+  propertyId      String?   @db.Uuid
+  property        Property? @relation("PropertyFiles", fields: [propertyId], references: [id], onDelete: Restrict)
+  primaryImageFor Property? @relation("PropertyPrimaryImage")
+  createdAt       DateTime  @default(now())
 
   @@index([propertyId])
 }

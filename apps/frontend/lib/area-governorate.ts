@@ -20,7 +20,7 @@ export function blocksForArea(area: string): string[] {
   return Array.from({ length: count }, (_, index) => String(index + 1));
 }
 export function governorateForArea(area: string): string {
-  const areas = area.split(/\s+أو\s+|\s+او\s+|[،,\/]/);
+  const areas = area.split(/\s+أو\s+|\s+او\s+|[،,]/);
   const values = areas.map((value) => {
     const matches = districts.filter(
       (row) => normalize(row.area) === normalize(value),

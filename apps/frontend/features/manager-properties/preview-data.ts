@@ -1,13 +1,27 @@
-// UI fixtures only. No domain records or persistence are created here.
+// Type definitions for the manager property surfaces.
+//
+// The former `programProperties` / `approvalProperties` UI fixtures were removed
+// once the manager screens read real rows from `GET /properties`; nothing here
+// creates or represents a domain record.
 export type PropertyStatus =
-  'معتمد' | 'بيع' | 'إيجار' | 'تم البيع' | 'تم التأجير' | 'بانتظار الموافقة';
+  | 'معتمد'
+  | 'بانتظار الموافقة'
+  | 'مطلوب تعديل'
+  | 'مؤرشف'
+  | 'تم البيع'
+  | 'تم التأجير';
+
 export interface EmployeeFollowups {
   id: string;
   name: string;
   entries: readonly { date: string; note: string }[];
 }
+
 export interface PreviewProperty {
+  details?: import('../../lib/property-details').PropertyDetails;
   requestDraft?: import('../employee-properties/components/property-request-model').PropertyRequestDraft;
+  /** Backend id; present when the row came from the API. */
+  id?: string;
   code: string;
   title: string;
   region: string;
@@ -18,116 +32,35 @@ export interface PreviewProperty {
   owner: string;
   description: string;
   employees: readonly EmployeeFollowups[];
+  /** Object URL of the single image (frontend-only; not persistent). */
+  imageUrl?: string;
+  /** Stable AuthUser.id of the employee who registered the contact. */
+  ownerUserId?: string;
+  /** Display name of the responsible employee. */
+  responsibleName?: string;
+  /**
+   * Server-derived role of the property creator (`null` when unknown); drives
+   * the top-left responsible pill together with `responsibleName`.
+   */
+  responsibleRole?: import('../../lib/api/property-types').ResponsibleRoleApi | null;
+  /** Whether the private contact is a direct owner or a broker. */
+  contactType?: 'OWNER' | 'BROKER';
+  /** Storage key of the single stored image, or null when the row has none. */
+  primaryImageUrl?: string | null;
+  /** True only when the authorized backend response carried private contact. */
+  hasPrivateContact?: boolean;
+  /** Backend status enum; present when the row came from the API. */
+  apiStatus?: import('../../lib/api/property-types').PropertyStatusApi;
+  /**
+   * Latest review state; present only on the authorized private response. Lets
+   * the manager queue exclude a PENDING row whose changes were requested.
+   */
+  reviewStatus?: import('../../lib/api/property-types').ApprovalStatusApi | null;
+  /** Optimistic-concurrency token required by approve / reject. */
+  version?: number;
 }
-const followers = [
-  {
-    id: 'ahmad',
-    name: 'أحمد محمد',
-    entries: [
-      {
-        date: '2026-09-07',
-        note: 'تم التواصل مع المالك وتأكيد السعر وإمكانية المعاينة.',
-      },
-      {
-        date: '2026-09-05',
-        note: 'طلب صورًا محدثة للعقار ومراجعة بيانات المساحة.',
-      },
-    ],
-  },
-  {
-    id: 'sara',
-    name: 'سارة أحمد',
-    entries: [
-      {
-        date: '2026-09-08',
-        note: 'متابعة مع المالك لتنسيق موعد زيارة العميل.',
-      },
-    ],
-  },
-] as const satisfies readonly EmployeeFollowups[];
-export const programProperties = [
-  {
-    code: 'K0331',
-    title: 'غرناطة - قطعة 2',
-    region: 'غرناطة',
-    price: '2,000 د.ك',
-    area: 420,
-    rooms: 'دور ونصف',
-    status: 'إيجار',
-    owner: 'أبو عبدالله',
-    description:
-      'عقار على شارع هادئ، مدخل مستقل ومساحات واسعة. بيانات توضيحية للمعاينة فقط.',
-    employees: followers,
-  },
-  {
-    code: 'K0334',
-    title: 'غرناطة - قطعة 4',
-    region: 'غرناطة',
-    price: '320,000 د.ك',
-    area: 375,
-    rooms: '4 غرف',
-    status: 'بيع',
-    owner: 'أبو خالد',
-    description: 'بيت على شارعين مع مواقف خاصة. بيانات تجريبية.',
-    employees: [followers[1]],
-  },
-  {
-    code: 'K0335',
-    title: 'غرناطة - شارع رئيسي',
-    region: 'غرناطة',
-    price: '1,800 د.ك',
-    area: 500,
-    rooms: '4 غرف',
-    status: 'تم التأجير',
-    owner: 'أبو فهد',
-    description: 'عقار مؤجر، يظهر في البرنامج للاطلاع على حالته وسجل المتابعة.',
-    employees: followers,
-  },
-  {
-    code: 'K029',
-    title: 'مدينة المطلاع - N12',
-    region: 'مدينة المطلاع',
-    price: '290,000 د.ك',
-    area: 400,
-    rooms: '3 أدوار',
-    status: 'بيع',
-    owner: 'أبو فهد',
-    description:
-      'بيت في مدينة المطلاع، موقع مميز ومساحات عائلية. بيانات تجريبية.',
-    employees: followers,
-  },
-  {
-    code: 'K030',
-    title: 'مدينة المطلاع - N8',
-    region: 'مدينة المطلاع',
-    price: '350,000 د.ك',
-    area: 400,
-    rooms: 'دور واحد',
-    status: 'تم البيع',
-    owner: 'أبو محمد',
-    description: 'عقار تم بيعه، مع الاحتفاظ بالسجل للاطلاع فقط.',
-    employees: [followers[0]],
-  },
-] as const satisfies readonly PreviewProperty[];
+
 export interface ApprovalProperty extends PreviewProperty {
   submittedBy: string;
   submissionNote: string;
 }
-export const approvalProperties: readonly ApprovalProperty[] = [
-  {
-    ...programProperties[3],
-    code: 'R201',
-    title: 'بيت في المطلاع - قطعة 8',
-    status: 'بانتظار الموافقة',
-    submittedBy: 'أحمد محمد',
-    submissionNote: 'مراجعة بيانات المالك والمساحة قبل الاعتماد.',
-  },
-  {
-    ...programProperties[0],
-    code: 'R202',
-    title: 'غرناطة - قطعة 3',
-    status: 'بانتظار الموافقة',
-    submittedBy: 'سارة أحمد',
-    submissionNote: 'مراجعة السعر والصور قبل الاعتماد.',
-  },
-];
