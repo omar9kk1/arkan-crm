@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -10,6 +11,13 @@ import { PrismaModule } from '../prisma/prisma.module';
 @Module({
   imports: [
     PrismaModule,
+    ThrottlerModule.forRoot([
+      {
+        name: 'default',
+        limit: 10,
+        ttl: 60_000,
+      },
+    ]),
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -32,6 +40,7 @@ import { PrismaModule } from '../prisma/prisma.module';
   controllers: [AuthController],
   providers: [
     AuthService,
+    ThrottlerGuard,
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
   ],

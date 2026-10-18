@@ -12,6 +12,7 @@ import { configureApp } from '../src/common/configure-app';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { hashPassword, verifyPassword } from '../src/auth/password';
 import { hashRefreshToken } from '../src/auth/auth.service';
+import { ThrottlerStorage } from '@nestjs/throttler';
 
 @Controller('test')
 class RestrictedController {
@@ -139,6 +140,16 @@ describe('Auth HTTP flow (Prisma test double)', () => {
     users.forEach((user) => {
       user.isActive = true;
     });
+    // The auth suite performs far more than 10 login attempts per minute by
+    // design; clear the in-memory rate-limit counters so it exercises the
+    // limiter itself in auth-rate-limit.spec.ts instead of tripping it here.
+    const storage = app.get(ThrottlerStorage);
+    const map = storage.storage;
+    map.clear();
+    const internal = storage as unknown as {
+      hitExpirations?: { clear?: () => void };
+    };
+    internal.hitExpirations?.clear?.();
   });
   const login = async (role = Role.EMPLOYEE as Role) => {
     const response = await request(app.getHttpServer())

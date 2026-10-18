@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, PropertyStatus, Role } from '@prisma/client';
+import type { AuthUser } from '@arkan/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { hashPassword } from '../auth/password';
 import type {
@@ -72,9 +73,10 @@ export class EmployeesService {
   /**
    * `POST /employees` — creates a real `User` + `EmployeeProfile` so the new
    * account can log in with the password-hashing convention already used by the
-   * seed and `AuthService`. Rejects a duplicate email rather than overwriting.
+   * seed and `AuthService`. Rejects a duplicate email rather than overwriting,
+   * and records the creation in the audit trail without the password.
    */
-  async create(dto: CreateEmployeeDto): Promise<EmployeeDto> {
+  async create(viewer: AuthUser, dto: CreateEmployeeDto): Promise<EmployeeDto> {
     const email = dto.email.trim().toLowerCase();
     const existing = await this.prisma.user.findUnique({
       where: { email },
@@ -84,41 +86,134 @@ export class EmployeesService {
       throw new ConflictException('this email is already registered');
 
     const passwordHash = await hashPassword(dto.password);
-    const created = await this.prisma.user.create({
-      data: {
-        email,
-        name: dto.name.trim(),
-        role: dto.role,
-        isActive: dto.isActive ?? true,
-        passwordHash,
-        employee: {
-          create: {
-            phone: dto.phone?.trim() || null,
-            hiredAt: dto.hiredAt ? new Date(dto.hiredAt) : null,
-            baseSalary: dto.baseSalary ?? null,
+    const created = await this.prisma
+      .$transaction(async (tx) => {
+        const user = await tx.user.create({
+          data: {
+            email,
+            name: dto.name.trim(),
+            role: dto.role,
+            isActive: dto.isActive ?? true,
+            passwordHash,
+            employee: {
+              create: {
+                phone: dto.phone?.trim() || null,
+                hiredAt: dto.hiredAt ? new Date(dto.hiredAt) : null,
+                baseSalary: dto.baseSalary ?? null,
+              },
+            },
           },
-        },
-      },
-      select: { id: true },
-    });
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+            isActive: true,
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            actorId: viewer.id,
+            action: 'EMPLOYEE_CREATE',
+            entityType: 'User',
+            entityId: user.id,
+            // The audit trail records WHO and WHAT, never the chosen password.
+            after: {
+              name: user.name,
+              email: user.email,
+              role: user.role,
+              isActive: user.isActive,
+            },
+          },
+        });
+        return user;
+      })
+      .catch((cause: unknown) => {
+        // Two concurrent creations of the same email race past the pre-check;
+        // the unique index turns that into a 409, never a 500.
+        if (
+          cause instanceof Prisma.PrismaClientKnownRequestError &&
+          cause.code === 'P2002'
+        )
+          throw new ConflictException('this email is already registered');
+        throw cause;
+      });
     return this.readOne(created.id);
   }
 
   /**
    * `PATCH /employees/:id` — renames an EMPLOYEE account. Any other id (manager,
    * unknown) answers 404, so this endpoint can only ever touch the employee
-   * directory the manager sees.
+   * directory the manager sees. The rename and its audit record are written in
+   * one transaction.
    */
-  async update(id: string, dto: UpdateEmployeeDto): Promise<EmployeeDto> {
-    const target = await this.prisma.user.findFirst({
-      where: { id, role: Role.EMPLOYEE },
-      select: { id: true },
-    });
-    if (!target) throw new NotFoundException('employee not found');
+  async update(
+    viewer: AuthUser,
+    id: string,
+    dto: UpdateEmployeeDto,
+  ): Promise<EmployeeDto> {
+    const name = dto.name.trim();
+    await this.prisma.$transaction(async (tx) => {
+      const target = await tx.user.findFirst({
+        where: { id, role: Role.EMPLOYEE },
+        select: { id: true, name: true },
+      });
+      if (!target) throw new NotFoundException('employee not found');
 
-    await this.prisma.user.update({
-      where: { id },
-      data: { name: dto.name.trim() },
+      await tx.user.update({ where: { id }, data: { name } });
+      await tx.auditLog.create({
+        data: {
+          actorId: viewer.id,
+          action: 'EMPLOYEE_RENAME',
+          entityType: 'User',
+          entityId: id,
+          before: { name: target.name },
+          after: { name },
+        },
+      });
+    });
+    return this.readOne(id);
+  }
+
+  /**
+   * `PATCH /employees/:id/activation` — flips `User.isActive` for an EMPLOYEE
+   * account. Managers are refused with 404, the body carries the desired state
+   * only (a role field is rejected by validation), and repeating the current
+   * state is a safe idempotent no-op.
+   *
+   * Deactivating revokes every existing session, so a disable → enable cycle
+   * can never resurrect tokens issued before the deactivation. Nothing else
+   * moves: `User.id`, email, password, role and every linked record stay in
+   * place, keeping property statistics and responsible-name pills intact.
+   */
+  async setActivation(
+    viewer: AuthUser,
+    id: string,
+    isActive: boolean,
+  ): Promise<EmployeeDto> {
+    await this.prisma.$transaction(async (tx) => {
+      const target = await tx.user.findFirst({
+        where: { id, role: Role.EMPLOYEE },
+        select: { id: true, isActive: true },
+      });
+      if (!target) throw new NotFoundException('employee not found');
+      if (target.isActive === isActive) return;
+
+      await tx.user.update({ where: { id }, data: { isActive } });
+      if (!isActive)
+        await tx.refreshToken.updateMany({
+          where: { userId: id, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+      await tx.auditLog.create({
+        data: {
+          actorId: viewer.id,
+          action: isActive ? 'EMPLOYEE_ACTIVATE' : 'EMPLOYEE_DEACTIVATE',
+          entityType: 'User',
+          entityId: id,
+          after: { isActive },
+        },
+      });
     });
     return this.readOne(id);
   }

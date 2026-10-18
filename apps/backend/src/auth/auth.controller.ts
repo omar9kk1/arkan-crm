@@ -6,7 +6,9 @@ import {
   HttpCode,
   Post,
   Req,
+  UseGuards,
 } from '@nestjs/common';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { AuthUser } from '@arkan/shared';
 import { AuthService } from './auth.service';
 import { Public } from './decorators/public.decorator';
@@ -16,6 +18,7 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
   @Public()
+  @UseGuards(ThrottlerGuard)
   @Post('login')
   @Header('Cache-Control', 'no-store')
   @HttpCode(200)
@@ -23,6 +26,8 @@ export class AuthController {
     return this.auth.login(body);
   }
   @Public()
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Post('refresh')
   @Header('Cache-Control', 'no-store')
   @HttpCode(200)

@@ -11,7 +11,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { ManagerPageShell } from '../../../components/layout/manager/manager-page-shell';
 import { SearchBar } from '../../../components/ui/search-bar';
 import { matchesPerson } from '../../manager-clients/mock-data';
-import { listEmployees, updateEmployeeName } from '../../../lib/api/employees-api';
+import {
+  listEmployees,
+  setEmployeeActivation,
+  updateEmployeeName,
+} from '../../../lib/api/employees-api';
 import { ApiError } from '../../../lib/api-client';
 import { mapEmployee, type EmployeeRecord } from '../model';
 import type { Assignment } from '../assignment-trial';
@@ -70,6 +74,18 @@ export function EmployeesPage() {
       previous.map((item) => (item.id === id ? mapEmployee(updated) : item)),
     );
     setNotice('تم تحديث اسم الموظف');
+  }, []);
+
+  const changeActivation = useCallback(async (id: string, isActive: boolean) => {
+    const updated = await setEmployeeActivation(id, isActive);
+    setItems((previous) =>
+      previous.map((item) => (item.id === id ? mapEmployee(updated) : item)),
+    );
+    setNotice(
+      isActive
+        ? 'تمت إعادة تفعيل حساب الموظف'
+        : 'تم تعطيل حساب الموظف بنجاح',
+    );
   }, []);
 
   const selected = items.find((item) => item.id === overlay?.employeeId);
@@ -182,6 +198,9 @@ export function EmployeesPage() {
               (item) => item.employeeId === selected.id,
             )}
             onRename={(name) => rename(selected.id, name)}
+            onToggleActivation={(isActive) =>
+              changeActivation(selected.id, isActive)
+            }
             onClose={() => setOverlay(null)}
           />
         )}

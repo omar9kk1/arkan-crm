@@ -1,4 +1,5 @@
 import { Role } from '@arkan/shared';
+import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import {
   auth,
@@ -320,5 +321,277 @@ describeWithDatabase('Employees directory API', () => {
     const twins = items.filter((item) => item.name === 'Employee B');
     expect(twins).toHaveLength(2);
     expect(new Set(twins.map((item) => item.id)).size).toBe(2);
+  });
+
+  it('activates and deactivates an account through a manager-only, state-only endpoint', async () => {
+    // A dedicated account so the earlier directory tests keep their data.
+    const created = await api()
+      .post('/employees')
+      .set(auth(managerToken))
+      .send({
+        name: 'Activation Cycle',
+        email: 'activation-cycle@employees.local',
+        password: 'TempPass123!',
+        role: 'EMPLOYEE',
+      });
+    expect(created.status).toBe(201);
+    const target = created.body.data as EmployeeDto;
+
+    // Sign in BEFORE deactivation and keep both tokens.
+    const signIn = await api().post('/auth/login').send({
+      email: 'activation-cycle@employees.local',
+      password: 'TempPass123!',
+    });
+    expect(signIn.status).toBe(200);
+    const accessToken = signIn.body.data.accessToken as string;
+    const refreshToken = signIn.body.data.refreshToken as string;
+
+    // An employee must never flip accounts; unauthenticated is refused too.
+    const employeeBToken = await login(
+      ctx.app,
+      'employee.b@employees.local',
+    );
+    expect(
+      (
+        await api()
+          .patch(`/employees/${target.id}/activation`)
+          .set(auth(employeeBToken))
+          .send({ isActive: false })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await api()
+          .patch(`/employees/${target.id}/activation`)
+          .send({ isActive: false })
+      ).status,
+    ).toBe(401);
+
+    // The desired state is the ONLY accepted field — a role change is a 400,
+    // so activation can never escalate an account.
+    expect(
+      (
+        await api()
+          .patch(`/employees/${target.id}/activation`)
+          .set(auth(managerToken))
+          .send({ isActive: false, role: 'MANAGER' })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await api()
+          .patch(`/employees/${target.id}/activation`)
+          .set(auth(managerToken))
+          .send({})
+      ).status,
+    ).toBe(400);
+
+    // Managers, unknown ids and malformed ids are refused.
+    expect(
+      (
+        await api()
+          .patch(`/employees/${managerId}/activation`)
+          .set(auth(managerToken))
+          .send({ isActive: false })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await api()
+          .patch(`/employees/${randomUUID()}/activation`)
+          .set(auth(managerToken))
+          .send({ isActive: false })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await api()
+          .patch('/employees/not-a-uuid/activation')
+          .set(auth(managerToken))
+          .send({ isActive: false })
+      ).status,
+    ).toBe(400);
+
+    // The same email with different casing is still a duplicate — 409, never
+    // a 500 from the unique index.
+    const duplicate = await api()
+      .post('/employees')
+      .set(auth(managerToken))
+      .send({
+        name: 'Duplicate',
+        email: 'ACTIVATION-CYCLE@employees.local',
+        password: 'TempPass123!',
+        role: 'EMPLOYEE',
+      });
+    expect(duplicate.status).toBe(409);
+
+    // Deactivate → the API answers with the updated account, and repeating
+    // the same state is a safe idempotent no-op.
+    const off = await api()
+      .patch(`/employees/${target.id}/activation`)
+      .set(auth(managerToken))
+      .send({ isActive: false });
+    expect(off.status).toBe(200);
+    expect((off.body.data as EmployeeDto).isActive).toBe(false);
+    const repeated = await api()
+      .patch(`/employees/${target.id}/activation`)
+      .set(auth(managerToken))
+      .send({ isActive: false });
+    expect(repeated.status).toBe(200);
+    expect((repeated.body.data as EmployeeDto).isActive).toBe(false);
+
+    // Immediately enforced: no fresh login, the old access token is dead and
+    // the old refresh session cannot mint a new one.
+    expect(
+      (
+        await api()
+          .post('/auth/login')
+          .send({
+            email: 'activation-cycle@employees.local',
+            password: 'TempPass123!',
+          })
+      ).status,
+    ).toBe(401);
+    expect((await api().get('/auth/me').set(auth(accessToken))).status).toBe(
+      401,
+    );
+    expect(
+      (
+        await api()
+          .post('/auth/refresh')
+          .send({ refreshToken })
+      ).status,
+    ).toBe(401);
+
+    // Reactivate → the old session stays dead (revoked at deactivation), so a
+    // disable→enable cycle can never resurrect it; only a fresh login works.
+    const on = await api()
+      .patch(`/employees/${target.id}/activation`)
+      .set(auth(managerToken))
+      .send({ isActive: true });
+    expect(on.status).toBe(200);
+    expect((on.body.data as EmployeeDto).isActive).toBe(true);
+    expect((await api().get('/auth/me').set(auth(accessToken))).status).toBe(
+      401,
+    );
+    expect(
+      (
+        await api()
+          .post('/auth/refresh')
+          .send({ refreshToken })
+      ).status,
+    ).toBe(401);
+    expect(
+      (
+        await api()
+          .post('/auth/login')
+          .send({
+            email: 'activation-cycle@employees.local',
+            password: 'TempPass123!',
+          })
+      ).status,
+    ).toBe(200);
+
+    // Identity never moved and the audit trail records the whole cycle
+    // without ever carrying a credential.
+    const stored = await ctx.prisma.user.findUniqueOrThrow({
+      where: { id: target.id },
+      select: { email: true, role: true, passwordHash: true },
+    });
+    expect(stored.email).toBe('activation-cycle@employees.local');
+    expect(stored.role).toBe('EMPLOYEE');
+    expect(stored.passwordHash.startsWith('scrypt-v1$')).toBe(true);
+
+    // The 1:1 profile row survives the whole deactivate/reactivate cycle.
+    expect(
+      await ctx.prisma.employeeProfile.findUnique({
+        where: { userId: target.id },
+      }),
+    ).not.toBeNull();
+
+    const audits = await ctx.prisma.auditLog.findMany({
+      where: { entityId: target.id, entityType: 'User' },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(audits.map((row) => row.action)).toEqual([
+      'EMPLOYEE_CREATE',
+      'EMPLOYEE_DEACTIVATE',
+      'EMPLOYEE_ACTIVATE',
+    ]);
+    expect(audits.every((row) => row.actorId === managerId)).toBe(true);
+    const auditTrail = JSON.stringify(audits);
+    expect(auditTrail).not.toContain('scrypt');
+    expect(auditTrail).not.toContain('TempPass123!');
+    expect(auditTrail).not.toContain('passwordHash');
+  });
+
+  it('keeps properties, profile and statistics intact across a deactivation cycle', async () => {
+    // Self-sufficient fixture: this employee owns a real property created here,
+    // so the assertions do not depend on any earlier test having run.
+    await createProperty(employeeAToken, { district: 'الجهراء' });
+    const before = (await list(managerToken)).find(
+      (item) => item.id === employeeAId,
+    )!;
+    expect(before.propertyCount).toBeGreaterThan(0);
+
+    const off = await api()
+      .patch(`/employees/${employeeAId}/activation`)
+      .set(auth(managerToken))
+      .send({ isActive: false });
+    expect(off.status).toBe(200);
+    expect((off.body.data as EmployeeDto).isActive).toBe(false);
+    expect((off.body.data as EmployeeDto).propertyCount).toBe(
+      before.propertyCount,
+    );
+
+    // No property or creator link was deleted or reassigned…
+    expect(
+      await ctx.prisma.property.count({
+        where: { createdByUserId: employeeAId },
+      }),
+    ).toBe(before.propertyCount);
+
+    // …and property cards still show the correct creator name for this user.
+    const property = await ctx.prisma.property.findFirstOrThrow({
+      where: { createdByUserId: employeeAId },
+      select: { id: true },
+    });
+    const ownerName = (
+      await ctx.prisma.user.findUniqueOrThrow({
+        where: { id: employeeAId },
+        select: { name: true },
+      })
+    ).name;
+    const read = await api()
+      .get(`/properties/${property.id}`)
+      .set(auth(managerToken));
+    expect(read.status).toBe(200);
+    expect(read.body.data.responsibleName).toBe(ownerName);
+
+    // The directory still lists the inactive employee with real statistics.
+    const listed = (await list(managerToken)).find(
+      (item) => item.id === employeeAId,
+    )!;
+    expect(listed.isActive).toBe(false);
+    expect(listed.propertyCount).toBe(before.propertyCount);
+
+    // Reactivation restores normal login, and the audit rows for this user
+    // record the rename and both state changes under the acting manager.
+    const back = await api()
+      .patch(`/employees/${employeeAId}/activation`)
+      .set(auth(managerToken))
+      .send({ isActive: true });
+    expect(back.status).toBe(200);
+    expect((back.body.data as EmployeeDto).isActive).toBe(true);
+    expect(await login(ctx.app, 'employee.a@employees.local')).toBeTruthy();
+
+    const audits = await ctx.prisma.auditLog.findMany({
+      where: { entityId: employeeAId, entityType: 'User' },
+    });
+    const actions = audits.map((row) => row.action);
+    expect(actions).toContain('EMPLOYEE_RENAME');
+    expect(actions).toContain('EMPLOYEE_DEACTIVATE');
+    expect(actions).toContain('EMPLOYEE_ACTIVATE');
+    expect(audits.every((row) => row.actorId === managerId)).toBe(true);
   });
 });

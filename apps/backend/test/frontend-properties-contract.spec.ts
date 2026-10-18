@@ -32,6 +32,7 @@ import {
   login,
   pngBytes,
   resetDatabase,
+  resetRateLimiting,
   type TestContext,
 } from './support/test-app';
 import request from 'supertest';
@@ -170,6 +171,15 @@ describeWithDatabase('Phase 4A frontend API contract', () => {
     server.closeAllConnections?.();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await context.close();
+  });
+
+  beforeEach(() => {
+    // Every test re-authenticates (some switch roles several times), so this
+    // file alone performs far more than 10 POST /auth/login calls per minute
+    // from the same IP — exactly what the production limiter is meant to do.
+    // Reset the shared in-memory counters per test so the suite is never
+    // throttled; the limiter itself is covered by auth-rate-limit.spec.ts.
+    resetRateLimiting(context.app);
   });
 
   it('signs in through the frontend session stack and stores a token', async () => {

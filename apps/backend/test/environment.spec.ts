@@ -26,7 +26,38 @@ describe('Environment validation', () => {
       }).error,
     ).toBeDefined();
     expect(
+      environmentSchema.validate({
+        ...valid,
+        JWT_ACCESS_SECRET: 'dev_access_secret_change_later_please_make_it_long',
+      }).error,
+    ).toBeDefined();
+    expect(
+      environmentSchema.validate({
+        ...valid,
+        JWT_ACCESS_SECRET: 'change-me-later-at-least-32-characters',
+      }).error,
+    ).toBeDefined();
+    expect(
       environmentSchema.validate({ ...valid, PORT: 99999 }).error,
     ).toBeDefined();
+  });
+  it('rejects placeholder secrets from .env.example and allows valid random secrets', () => {
+    const exampleSecret = 'dev_access_secret_change_later_please_make_it_long';
+    expect(
+      environmentSchema.validate({ ...valid, JWT_ACCESS_SECRET: exampleSecret })
+        .error,
+    ).toBeDefined();
+    expect(
+      environmentSchema.validate({
+        ...valid,
+        JWT_ACCESS_SECRET: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      }).error,
+    ).toBeDefined();
+    expect(
+      environmentSchema.validate({
+        ...valid,
+        JWT_ACCESS_SECRET: 'a'.repeat(32) + 'b'.repeat(32),
+      }).error,
+    ).toBeUndefined();
   });
 });

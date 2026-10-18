@@ -8,6 +8,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import request from 'supertest';
+import { ThrottlerStorage } from '@nestjs/throttler';
 import { environmentSchema } from '../../src/config/environment';
 import { AuthModule } from '../../src/auth/auth.module';
 import { ContactsModule } from '../../src/contacts/contacts.module';
@@ -133,6 +134,25 @@ export async function login(
 export const auth = (token: string): { Authorization: string } => ({
   Authorization: `Bearer ${token}`,
 });
+
+/**
+ * Clears the shared in-memory auth rate-limit counters before a test.
+ *
+ * Integration suites authenticate far more often per minute from a single
+ * address than a real user ever would (every test signs in again, sometimes
+ * several times per test), so the production POST /auth/login limiter
+ * (10/60s per IP) would otherwise 429 the middle of a suite. This only resets
+ * shared state between tests — the limits themselves are untouched, and the
+ * limiter's behaviour is asserted in auth-rate-limit.spec.ts.
+ */
+export function resetRateLimiting(app: INestApplication): void {
+  const storage = app.get(ThrottlerStorage);
+  storage.storage.clear();
+  const internal = storage as unknown as {
+    hitExpirations?: { clear?: () => void };
+  };
+  internal.hitExpirations?.clear?.();
+}
 
 // --- image fixtures -----------------------------------------------------------
 // Genuine, decodable 40x30 JPEG/PNG/WebP images (a blue rectangle with a yellow

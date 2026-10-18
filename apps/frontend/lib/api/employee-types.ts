@@ -58,3 +58,11 @@ export interface CreateEmployeePayload {
 export interface UpdateEmployeePayload {
   name: string;
 }
+
+/**
+ * Body of `PATCH /employees/:id/activation` — the desired account state is the
+ * only accepted field; role, email and password stay untouched by the backend.
+ */
+export interface SetEmployeeActivationPayload {
+  isActive: boolean;
+}

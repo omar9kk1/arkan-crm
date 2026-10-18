@@ -23,12 +23,15 @@ export function EmployeeDetailsDrawer({
   employee,
   assignments,
   onRename,
+  onToggleActivation,
   onClose,
 }: {
   employee: EmployeeRecord;
   assignments: Assignment[];
   /** Persists a new display name, then the page refreshes this card. */
   onRename: (name: string) => Promise<void>;
+  /** Activates/deactivates the account; the page updates after API success. */
+  onToggleActivation: (isActive: boolean) => Promise<void>;
   onClose: () => void;
 }) {
   const tag = employeeAttendanceTags.find((t) =>
@@ -39,6 +42,9 @@ export function EmployeeDetailsDrawer({
   const [name, setName] = useState(employee.name);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [confirmingActivation, setConfirmingActivation] = useState(false);
+  const [activationBusy, setActivationBusy] = useState(false);
+  const [activationError, setActivationError] = useState('');
   const panel = (id: string, content: ReactNode) => (
     <section
       key={id}
@@ -64,6 +70,21 @@ export function EmployeeDetailsDrawer({
       setError(cause instanceof Error ? cause.message : 'تعذر حفظ الاسم.');
     } finally {
       setSaving(false);
+    }
+  };
+  const confirmActivation = async () => {
+    if (activationBusy) return;
+    setActivationBusy(true);
+    setActivationError('');
+    try {
+      await onToggleActivation(!employee.active);
+      setConfirmingActivation(false);
+    } catch (cause) {
+      setActivationError(
+        cause instanceof Error ? cause.message : 'تعذر تحديث حالة الحساب.',
+      );
+    } finally {
+      setActivationBusy(false);
     }
   };
   return (
@@ -146,6 +167,59 @@ export function EmployeeDetailsDrawer({
                     }}
                   >
                     تعديل
+                  </Button>
+                </div>
+              </>
+            )}
+          </Card>
+          <Card>
+            <h3>حساب الدخول</h3>
+            <p>الحالة: {employee.active ? 'نشط' : 'معطّل'}</p>
+            {confirmingActivation ? (
+              <>
+                <p>
+                  {employee.active
+                    ? 'سيفقد الموظف القدرة على تسجيل الدخول وتُلغى جلساته الحالية. هل أنت متأكد؟'
+                    : 'سيُسمح للموظف بتسجيل الدخول من جديد. هل أنت متأكد؟'}
+                </p>
+                {activationError && <p role="alert">{activationError}</p>}
+                <div className={styles.actions}>
+                  <Button
+                    type="button"
+                    disabled={activationBusy}
+                    onClick={confirmActivation}
+                  >
+                    {activationBusy
+                      ? 'جارٍ التنفيذ…'
+                      : employee.active
+                        ? 'تأكيد التعطيل'
+                        : 'تأكيد إعادة التفعيل'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    disabled={activationBusy}
+                    onClick={() => {
+                      setConfirmingActivation(false);
+                      setActivationError('');
+                    }}
+                  >
+                    إلغاء
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                {activationError && <p role="alert">{activationError}</p>}
+                <div className={styles.actions}>
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      setActivationError('');
+                      setConfirmingActivation(true);
+                    }}
+                  >
+                    {employee.active ? 'تعطيل الحساب' : 'إعادة تفعيل الحساب'}
                   </Button>
                 </div>
               </>
