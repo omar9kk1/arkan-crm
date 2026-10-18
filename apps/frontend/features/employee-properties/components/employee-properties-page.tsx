@@ -8,7 +8,7 @@ import { EmployeePageShell } from '../../../components/layout/employee/employee-
 import { Button } from '../../../components/ui/button';
 import { SearchBar } from '../../../components/ui/search-bar';
 import { Card } from '../../../components/ui/card';
-import { PropertiesSegmentedTabs as SegmentedTabs } from '../../manager-properties/components/properties-segmented-tabs';
+import { PropertiesSegmentedTabs as SegmentedTabs } from '../../../components/ui/properties-segmented-tabs';
 import { tabs, filterProperties, type Property } from '../model';
 import { listProperties, getProperty } from '../../../lib/api/properties-api';
 import { mapPropertyFromApi } from '../../../lib/property-adapter';

@@ -2,7 +2,7 @@ import { useDraftState } from '../../../lib/drafts/use-form-draft';
 import { Toast } from '../../../components/ui/toast';
 import { useState } from 'react';
 import { PropertyOverlay } from '../../manager-properties/components/property-overlay';
-import { PropertiesSegmentedTabs as SegmentedTabs } from '../../manager-properties/components/properties-segmented-tabs';
+import { PropertiesSegmentedTabs as SegmentedTabs } from '../../../components/ui/properties-segmented-tabs';
 import { Button } from '../../../components/ui/button';
 import { type EmployeeClient, type FollowUp } from '../client-model';
 import {

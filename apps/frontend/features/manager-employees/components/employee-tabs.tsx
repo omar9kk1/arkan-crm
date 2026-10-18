@@ -1,4 +1,4 @@
-import { PropertiesSegmentedTabs } from '../../manager-properties/components/properties-segmented-tabs';
+import { PropertiesSegmentedTabs } from '../../../components/ui/properties-segmented-tabs';
 export const employeeTabs = [
   { id: 'summary', label: 'الملخص' },
   { id: 'clients', label: 'العملاء' },

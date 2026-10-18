@@ -20,7 +20,7 @@ import {
 import { mapPreviewFromApi } from '../../../lib/property-adapter';
 import type { PropertyViewDto } from '../../../lib/api/property-types';
 import type { PreviewProperty } from '../preview-data';
-import { PropertiesSegmentedTabs } from './properties-segmented-tabs';
+import { PropertiesSegmentedTabs } from '../../../components/ui/properties-segmented-tabs';
 import { PropertyCard } from './property-card';
 import { PropertyDetailsDrawer } from './property-details-drawer';
 import { ReviewActionDialog } from './review-action-dialog';

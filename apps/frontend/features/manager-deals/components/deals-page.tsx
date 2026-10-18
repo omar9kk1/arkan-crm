@@ -8,7 +8,7 @@ import { ManagerPageShell } from '../../../components/layout/manager/manager-pag
 import { Button } from '../../../components/ui/button';
 import { Card } from '../../../components/ui/card';
 import { StatCard } from '../../../components/ui/stat-card';
-import { PropertiesSegmentedTabs as SegmentedTabs } from '../../manager-properties/components/properties-segmented-tabs';
+import { PropertiesSegmentedTabs as SegmentedTabs } from '../../../components/ui/properties-segmented-tabs';
 import { useMockDeals } from '../use-mock-deals';
 import { money, type MockDeal } from '../mock-data';
 import { DealCard } from './deal-card';

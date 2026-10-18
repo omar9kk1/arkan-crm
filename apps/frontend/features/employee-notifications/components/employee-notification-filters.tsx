@@ -1,4 +1,4 @@
-import { PropertiesSegmentedTabs as SegmentedTabs } from '../../manager-properties/components/properties-segmented-tabs';
+import { PropertiesSegmentedTabs as SegmentedTabs } from '../../../components/ui/properties-segmented-tabs';
 import type { NotificationDto } from '../../../lib/api/notification-types';
 import { tabs, filterNotifications, type EmployeeFilter } from '../model';
 import styles from '../../manager-notifications/components/notifications.module.css';

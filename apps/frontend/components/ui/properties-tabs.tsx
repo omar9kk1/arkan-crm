@@ -1,6 +1,6 @@
 'use client';
 import { useRef } from 'react';
-import styles from './properties.module.css';
+import styles from './properties-tabs.module.css';
 export function PropertiesTabs({
   id,
   label,

@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { PropertyOverlay } from '../../manager-properties/components/property-overlay';
-import { PropertiesSegmentedTabs as SegmentedTabs } from '../../manager-properties/components/properties-segmented-tabs';
+import { PropertiesSegmentedTabs as SegmentedTabs } from '../../../components/ui/properties-segmented-tabs';
 import type { ClientSample } from '../mock-data';
 import { FollowUpTimeline } from './follow-up-timeline';
 import { PersonProperties } from './person-properties';

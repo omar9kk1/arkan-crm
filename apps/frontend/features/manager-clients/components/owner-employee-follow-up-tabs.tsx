@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { PropertiesSegmentedTabs as SegmentedTabs } from '../../manager-properties/components/properties-segmented-tabs';
+import { PropertiesSegmentedTabs as SegmentedTabs } from '../../../components/ui/properties-segmented-tabs';
 import type { OwnerEmployee } from '../mock-data';
 import { FollowUpTimeline } from './follow-up-timeline';
 export function OwnerEmployeeFollowUpTabs({

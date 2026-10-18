@@ -1,0 +1,31 @@
+/* Base tab list styling, moved verbatim out of manager-properties/properties.module.css
+   when the shared tabs component was relocated into components/ui. */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.tabs button {
+  font: inherit;
+  font-size: var(--text-small);
+  padding: var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  background: var(--manager-button-surface);
+  cursor: pointer;
+}
+.tabs button[aria-selected='true'] {
+  background: var(--manager-button-hover);
+  box-shadow: var(--shadow-control);
+  border-color: var(--focus);
+}
+@media (max-width: 600px) {
+  .tabs {
+    width: 100%;
+  }
+  .tabs button {
+    flex: 1;
+  }
+}

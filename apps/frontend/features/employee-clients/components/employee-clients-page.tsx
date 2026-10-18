@@ -10,7 +10,7 @@ import { StatCard } from '../../../components/ui/stat-card';
 import { SearchBar } from '../../../components/ui/search-bar';
 import { Button } from '../../../components/ui/button';
 import { Card } from '../../../components/ui/card';
-import { PropertiesSegmentedTabs as SegmentedTabs } from '../../manager-properties/components/properties-segmented-tabs';
+import { PropertiesSegmentedTabs as SegmentedTabs } from '../../../components/ui/properties-segmented-tabs';
 import {
   createClients,
   filterClients,

@@ -17,7 +17,7 @@ import { ManagerPageShell } from '../../../components/layout/manager/manager-pag
 import { StatCard } from '../../../components/ui/stat-card';
 import { SearchBar } from '../../../components/ui/search-bar';
 import { SectionHeader } from '../../../components/ui/section-header';
-import { PropertiesSegmentedTabs as SegmentedTabs } from '../../manager-properties/components/properties-segmented-tabs';
+import { PropertiesSegmentedTabs as SegmentedTabs } from '../../../components/ui/properties-segmented-tabs';
 import {
   clients,
   owners,

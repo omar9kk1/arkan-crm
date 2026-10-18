@@ -3,7 +3,7 @@ import { useState } from 'react';
 import type { PreviewProperty } from '../preview-data';
 import { Button } from '../../../components/ui/button';
 import { PropertyOverlay } from './property-overlay';
-import { PropertiesSegmentedTabs } from './properties-segmented-tabs';
+import { PropertiesSegmentedTabs } from '../../../components/ui/properties-segmented-tabs';
 import {
   PropertyDetailHeader,
   PropertyDetailSections,
