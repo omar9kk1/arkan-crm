@@ -1,0 +1,223 @@
+'use client';
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { Dispatch, SetStateAction } from 'react';
+import type { AuthUser } from '@arkan/shared';
+import { getProperty, listProperties } from './api/properties-api';
+import type { PropertyViewDto } from './api/property-types';
+import {
+  consumeOpenProperty,
+  useOpenPropertyRequest,
+} from '../features/notifications/open-property';
+import { usePropertyRefreshSignal } from '../features/notifications/property-refresh';
+
+/**
+ * The shared fetching/refresh core behind the property LISTS (the manager
+ * approvals surface and the employee «my/assigned properties» surface).
+ *
+ * Both pages rendered the same machinery by copy: a cursor-paginated read of
+ * `GET /properties` guarded by a monotonic request id (a late page can never
+ * overwrite a newer load), a SILENT mode so a notification-driven re-read keeps
+ * the rows already on screen until the fresh ones replace them, a load-more
+ * continuation, and the two notification channels (the refresh signal and the
+ * deep-link that opens one property in the page's EXISTING details drawer).
+ *
+ * What genuinely differs per surface is CONFIGURED, never copied:
+ * - `pageSize` / `maxPagesPerLoad` — the manager pulls a few pages per load so
+ *   its headline counts cover a sensible window; the employee reads one page;
+ * - `mapProperty` — each page keeps its own existing display model
+ *   (`PreviewProperty` vs `Property`) through the shared adapter;
+ * - `onOpenError` — a failed deep-link is reported through the page's own
+ *   notice/toast.
+ *
+ * Everything user-visible stays in the calling pages: permissions, tab
+ * filtering, counts, review actions and the exact Astra markup are untouched —
+ * this module only owns the rows, the cursor, the loading/error flags and the
+ * two refresh channels.
+ */
+export interface UsePropertyListOptions<T> {
+  /** Rows requested per page (the calling surface's `PAGE_SIZE`). */
+  pageSize: number;
+  /**
+   * Pages pulled per load so the headline counts cover a sensible window.
+   * Defaults to `1` (exactly one page per load, the employee list's behaviour).
+   */
+  maxPagesPerLoad?: number;
+  /** `PropertyViewDto` → the page's existing display model. */
+  mapProperty: (dto: PropertyViewDto, viewer: AuthUser | null) => T;
+  /** Reports a failed notification deep-link; the page owns the wording/UI. */
+  onOpenError?: (message: string) => void;
+  /** Viewer from `useAuth()`; re-reads the list whenever the session changes. */
+  viewer: AuthUser | null;
+}
+
+export interface PropertyListResult<T> {
+  items: T[];
+  nextCursor: string | null;
+  loading: boolean;
+  loadingMore: boolean;
+  error: string | null;
+  /** Re-reads the list through the existing request guard (never loops). */
+  refetch: () => void;
+  loadMore: () => void;
+  /** Row the details drawer is open on (also set by the notification deep-link). */
+  selected: T | null;
+  setSelected: Dispatch<SetStateAction<T | null>>;
+}
+
+export function usePropertyList<T>({
+  pageSize,
+  maxPagesPerLoad = 1,
+  mapProperty,
+  onOpenError,
+  viewer,
+}: UsePropertyListOptions<T>): PropertyListResult<T> {
+  const [items, setItems] = useState<T[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<T | null>(null);
+  // Monotonic id: a late page can never overwrite a newer load.
+  const requestId = useRef(0);
+  // Set by a notification-driven re-read so it can update in the background.
+  const silentRef = useRef(false);
+  const [nonce, setNonce] = useState(0);
+
+  // The mapper and the error reporter may be re-created by a render, but the
+  // effects below re-run only for the data/channel deps (exactly as the pages
+  // did before), so the latest references are kept in refs.
+  const mapPropertyRef = useRef(mapProperty);
+  const onOpenErrorRef = useRef(onOpenError);
+  useEffect(() => {
+    mapPropertyRef.current = mapProperty;
+    onOpenErrorRef.current = onOpenError;
+  });
+
+  const refetch = useCallback(() => setNonce((value) => value + 1), []);
+
+  // The notification poll re-reads this list whenever it learns of a genuinely
+  // new property notification, so the OTHER user's screen updates without a
+  // browser refresh. It goes through `refetch`, so it reuses the existing
+  // request guard, tab filtering and headline counts, and it can never loop:
+  // this list publishes nothing back.
+  const refreshSignal = usePropertyRefreshSignal();
+  useEffect(() => {
+    if (refreshSignal === 0) return;
+    silentRef.current = true;
+    refetch();
+  }, [refreshSignal, refetch]);
+
+  // Opens the property a notification deep-linked to, using the EXISTING details
+  // drawer. The backend re-authorizes the property on read, so a stale link
+  // answers 404 and is reported instead of opening an empty drawer.
+  const openRequest = useOpenPropertyRequest();
+  useEffect(() => {
+    if (!openRequest || !viewer) return;
+    const propertyId = openRequest.propertyId;
+    let cancelled = false;
+    (async () => {
+      try {
+        const dto = await getProperty(propertyId);
+        if (cancelled) return;
+        setSelected(mapPropertyRef.current(dto, viewer));
+      } catch (cause) {
+        if (cancelled) return;
+        onOpenErrorRef.current?.(
+          cause instanceof Error ? cause.message : 'تعذّر فتح العقار.',
+        );
+      } finally {
+        consumeOpenProperty(propertyId);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [openRequest, viewer]);
+
+  useEffect(() => {
+    const id = ++requestId.current;
+    // A notification-driven re-read is SILENT: the rows already on screen stay
+    // until the fresh ones replace them, so the panel never blinks away.
+    const silent = silentRef.current;
+    silentRef.current = false;
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
+    (async () => {
+      const rows: PropertyViewDto[] = [];
+      let cursor: string | null = null;
+      let pages = 0;
+      do {
+        const page = await listProperties(
+          cursor ? { limit: pageSize, cursor } : { limit: pageSize },
+        );
+        if (id !== requestId.current) return;
+        rows.push(...page.items);
+        cursor = page.nextCursor;
+        pages += 1;
+      } while (cursor && pages < maxPagesPerLoad);
+      if (id !== requestId.current) return;
+      setItems(
+        rows.map((dto: PropertyViewDto) => mapPropertyRef.current(dto, viewer)),
+      );
+      setNextCursor(cursor);
+      setLoading(false);
+    })().catch((cause: unknown) => {
+      if (id !== requestId.current) return;
+      if (silent) {
+        // Keep the rows on screen; the next poll retries.
+        setLoading(false);
+        return;
+      }
+      setItems([]);
+      setNextCursor(null);
+      setLoading(false);
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : 'تعذر تحميل العقارات من الخادم.',
+      );
+    });
+  }, [nonce, viewer, pageSize, maxPagesPerLoad]);
+
+  const loadMore = useCallback(() => {
+    if (!nextCursor || loadingMore) return;
+    const id = requestId.current;
+    setLoadingMore(true);
+    listProperties({ limit: pageSize, cursor: nextCursor })
+      .then((page) => {
+        if (id !== requestId.current) return;
+        setItems((previous) => [
+          ...previous,
+          ...page.items.map((dto: PropertyViewDto) =>
+            mapPropertyRef.current(dto, viewer),
+          ),
+        ]);
+        setNextCursor(page.nextCursor);
+        setLoadingMore(false);
+      })
+      .catch((cause: unknown) => {
+        if (id !== requestId.current) return;
+        setLoadingMore(false);
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : 'تعذر تحميل المزيد من العقارات.',
+        );
+      });
+  }, [nextCursor, loadingMore, pageSize, viewer]);
+
+  return {
+    items,
+    nextCursor,
+    loading,
+    loadingMore,
+    error,
+    refetch,
+    loadMore,
+    selected,
+    setSelected,
+  };
+}

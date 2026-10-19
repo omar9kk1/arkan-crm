@@ -3,7 +3,7 @@ import { useDraftState } from '../../../lib/drafts/use-form-draft';
 
 import { Toast } from '../../../components/ui/toast';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { ManagerPageShell } from '../../../components/layout/manager/manager-page-shell';
 import { Button } from '../../../components/ui/button';
 import { StatCard } from '../../../components/ui/stat-card';
@@ -12,13 +12,11 @@ import { SectionHeader } from '../../../components/ui/section-header';
 import { ApiError } from '../../../lib/api-client';
 import {
   approveProperty,
-  getProperty,
-  listProperties,
   rejectProperty,
   requestChangesProperty,
 } from '../../../lib/api/properties-api';
 import { mapPreviewFromApi } from '../../../lib/property-adapter';
-import type { PropertyViewDto } from '../../../lib/api/property-types';
+import { usePropertyList } from '../../../lib/use-property-list';
 import type { PreviewProperty } from '../preview-data';
 import { PropertiesSegmentedTabs } from '../../../components/ui/properties-segmented-tabs';
 import { PropertyCard } from './property-card';
@@ -26,11 +24,6 @@ import { PropertyDetailsDrawer } from './property-details-drawer';
 import { ReviewActionDialog } from './review-action-dialog';
 import { AddPropertyModal } from './add-property-modal';
 import { useAuth } from '../../auth/components/auth-provider';
-import {
-  consumeOpenProperty,
-  useOpenPropertyRequest,
-} from '../../notifications/open-property';
-import { usePropertyRefreshSignal } from '../../notifications/property-refresh';
 import styles from './properties.module.css';
 
 const PAGE_SIZE = 100;
@@ -39,19 +32,8 @@ const MAX_PAGES_PER_LOAD = 3;
 
 export function ManagerProperties() {
   const { user } = useAuth();
-  const [items, setItems] = useState<PreviewProperty[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // Monotonic id: a late page can never overwrite a newer load.
-  const requestId = useRef(0);
-  // Set by a notification-driven re-read so it can update in the background.
-  const silentRef = useRef(false);
-  const [nonce, setNonce] = useState(0);
   const [tab, setTab] = useState('program');
   const [query, setQuery] = useState('');
-  const [selected, setSelected] = useState<PreviewProperty | null>(null);
   const [adding, setAdding] = useDraftState(
     'ui:features/manager-properties/components/manager-properties.tsx:adding',
     false,
@@ -71,116 +53,27 @@ export function ManagerProperties() {
     [],
   );
 
-  const refetch = useCallback(() => setNonce((value) => value + 1), []);
-
-  // The notification poll re-reads this list whenever it learns of a genuinely
-  // new property notification, so the OTHER user's screen updates without a
-  // browser refresh. It goes through `refetch`, so it reuses the existing
-  // request guard, tab filtering and headline counts, and it can never loop:
-  // this list publishes nothing back.
-  const refreshSignal = usePropertyRefreshSignal();
-  useEffect(() => {
-    if (refreshSignal === 0) return;
-    silentRef.current = true;
-    refetch();
-  }, [refreshSignal, refetch]);
-
-  // Opens the property a notification deep-linked to, using the EXISTING details
-  // drawer. The backend re-authorizes the property on read, so a stale link
-  // answers 404 and is reported instead of opening an empty drawer.
-  const openRequest = useOpenPropertyRequest();
-  useEffect(() => {
-    if (!openRequest || !user) return;
-    const propertyId = openRequest.propertyId;
-    let cancelled = false;
-    (async () => {
-      try {
-        const dto = await getProperty(propertyId);
-        if (cancelled) return;
-        setSelected(mapPreviewFromApi(dto, user));
-      } catch (cause) {
-        if (cancelled) return;
-        notify(cause instanceof Error ? cause.message : 'تعذّر فتح العقار.');
-      } finally {
-        consumeOpenProperty(propertyId);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [openRequest, user, notify]);
-
-  useEffect(() => {
-    const id = ++requestId.current;
-    // A notification-driven re-read is SILENT: the rows already on screen stay
-    // until the fresh ones replace them, so the panel never blinks away.
-    const silent = silentRef.current;
-    silentRef.current = false;
-    if (!silent) {
-      setLoading(true);
-      setError(null);
-    }
-    (async () => {
-      const rows: PropertyViewDto[] = [];
-      let cursor: string | null = null;
-      let pages = 0;
-      do {
-        const page = await listProperties(
-          cursor ? { limit: PAGE_SIZE, cursor } : { limit: PAGE_SIZE },
-        );
-        if (id !== requestId.current) return;
-        rows.push(...page.items);
-        cursor = page.nextCursor;
-        pages += 1;
-      } while (cursor && pages < MAX_PAGES_PER_LOAD);
-      if (id !== requestId.current) return;
-      setItems(rows.map((dto: PropertyViewDto) => mapPreviewFromApi(dto, user)));
-      setNextCursor(cursor);
-      setLoading(false);
-    })().catch((cause: unknown) => {
-      if (id !== requestId.current) return;
-      if (silent) {
-        // Keep the rows on screen; the next poll retries.
-        setLoading(false);
-        return;
-      }
-      setItems([]);
-      setNextCursor(null);
-      setLoading(false);
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : 'تعذر تحميل العقارات من الخادم.',
-      );
-    });
-  }, [nonce, user]);
-
-  const loadMore = useCallback(() => {
-    if (!nextCursor || loadingMore) return;
-    const id = requestId.current;
-    setLoadingMore(true);
-    listProperties({ limit: PAGE_SIZE, cursor: nextCursor })
-      .then((page) => {
-        if (id !== requestId.current) return;
-        setItems((previous) => [
-          ...previous,
-          ...page.items.map((dto: PropertyViewDto) =>
-            mapPreviewFromApi(dto, user),
-          ),
-        ]);
-        setNextCursor(page.nextCursor);
-        setLoadingMore(false);
-      })
-      .catch((cause: unknown) => {
-        if (id !== requestId.current) return;
-        setLoadingMore(false);
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : 'تعذر تحميل المزيد من العقارات.',
-        );
-      });
-  }, [nextCursor, loadingMore, user]);
+  // The rows, the cursor, the loading/error flags, the notification refresh
+  // signal and the notification deep-link all come from the shared list core.
+  // This page keeps the review decisions, the tab filtering, the headline
+  // counts and the exact markup.
+  const {
+    items,
+    nextCursor,
+    loading,
+    loadingMore,
+    error,
+    refetch,
+    loadMore,
+    selected,
+    setSelected,
+  } = usePropertyList<PreviewProperty>({
+    pageSize: PAGE_SIZE,
+    maxPagesPerLoad: MAX_PAGES_PER_LOAD,
+    mapProperty: mapPreviewFromApi,
+    viewer: user,
+    onOpenError: notify,
+  });
 
   const matches = (property: PreviewProperty) =>
     `${property.title} ${property.region} ${property.code}`
