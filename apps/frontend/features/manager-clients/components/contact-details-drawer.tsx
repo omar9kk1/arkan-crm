@@ -29,7 +29,7 @@ export function ContactDetailsDrawer({
           ['النطاق', contact.scope === 'COMPANY' ? 'سجل مشترك' : 'سجل موظف'],
           [
             'الموظف المسؤول',
-            contact.ownerName || 'سجل الشركة (بدون موظف محدد)',
+            contact.ownerName || 'غير مُسند',
           ],
           ['عدد العقارات المرتبطة', String(contact.propertyCodes.length)],
         ].map(([label, value]) => (

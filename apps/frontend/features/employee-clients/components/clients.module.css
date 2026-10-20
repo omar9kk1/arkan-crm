@@ -27,10 +27,16 @@
 }
 .client {
   display: grid;
-  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
   gap: var(--space-4);
   align-items: center;
   cursor: pointer;
+}
+/* Visible keyboard focus state for the whole-card button (acts like a button
+   but keeps the card's exact markup, grid and Astra surface). */
+.client:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: -3px;
 }
 .client h3 {
   margin: 0;
@@ -93,6 +99,52 @@
 }
 .facts dt {
   color: var(--muted);
+}
+/* A whole card used as a deep-link button (client interest → property). */
+.propertyLink {
+  display: block;
+  width: 100%;
+  text-align: start;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+/* Property interest mini card: the title, its code, district, price, reason
+   and notes EACH sit on their own line with calm vertical rhythm. Long
+   Arabic text and long Latin codes wrap safely inside the narrow drawer —
+   no clipping, no overlap, no horizontal overflow (RTL right-aligned). */
+.interestCard {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.interestCard.propertyLink {
+  padding-block-end: var(--space-4);
+}
+.interestCard h3 {
+  margin: 0 0 var(--space-2);
+}
+.interestCode {
+  display: inline-flex;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--manager-button-surface);
+  border: 1px solid var(--glass-border);
+  font-size: var(--text-caption);
+  margin: 0 0 var(--space-2);
+}
+.interestCard strong {
+  display: block;
+  margin: 0 0 var(--space-2);
+}
+.interestCard p {
+  margin: 0 0 var(--space-2);
+}
+.interestCard > :last-child {
+  margin-bottom: 0;
 }
 .actions {
   display: flex;

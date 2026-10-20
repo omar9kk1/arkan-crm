@@ -1,4 +1,6 @@
 import styles from './clients.module.css';
+import type { OwnerTypePill } from '../client-model';
+
 export function PersonCard({
   name,
   phone,
@@ -7,6 +9,7 @@ export function PersonCard({
   lastFollowUp,
   status,
   late,
+  typePills,
   onOpen,
 }: {
   name: string;
@@ -16,8 +19,16 @@ export function PersonCard({
   lastFollowUp: string;
   status: string;
   late: boolean;
+  /** Compact transaction-type pills; when present they sit directly above the
+   * status badge in the same grid cell, so the card layout never changes. */
+  typePills?: readonly OwnerTypePill[];
   onOpen: () => void;
 }) {
+  const badge = (
+    <span className={`${styles.badge} ${late ? styles.warning : ''}`}>
+      {status}
+    </span>
+  );
   return (
     <button
       type="button"
@@ -43,9 +54,26 @@ export function PersonCard({
         <span className={styles.secondary}>آخر متابعة</span>
         <time dateTime={lastFollowUp}>{lastFollowUp}</time>
       </span>
-      <span className={`${styles.badge} ${late ? styles.warning : ''}`}>
-        {status}
-      </span>
+      {typePills?.length ? (
+        // Same grid cell as the bare badge below: the pills stack above it and
+        // the card's columns and dimensions stay exactly as they were.
+        <span className={styles.pillStack}>
+          <span className={styles.typePills}>
+            {typePills.map((pill) => (
+              <span
+                key={pill.type}
+                className={styles.typePill}
+                aria-label={`${pill.count} ${pill.label}`}
+              >
+                {pill.count} {pill.label}
+              </span>
+            ))}
+          </span>
+          {badge}
+        </span>
+      ) : (
+        badge
+      )}
       {late && (
         <span className={styles.lateMessage}>
           توجد متابعة متأخرة تحتاج مراجعة من المدير

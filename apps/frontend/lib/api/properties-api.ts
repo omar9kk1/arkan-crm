@@ -13,6 +13,8 @@ const BASE = '/properties';
 export interface ListPropertiesQuery {
   status?: PropertyStatusApi;
   listingType?: DealType;
+  /** Free-text search over public listing fields (code, title, area...). */
+  q?: string;
   limit?: number;
   cursor?: string;
 }
@@ -21,6 +23,7 @@ function queryString(query: ListPropertiesQuery): string {
   const params = new URLSearchParams();
   if (query.status) params.set('status', query.status);
   if (query.listingType) params.set('listingType', query.listingType);
+  if (query.q?.trim()) params.set('q', query.q.trim());
   if (query.limit) params.set('limit', String(query.limit));
   if (query.cursor) params.set('cursor', query.cursor);
   const value = params.toString();

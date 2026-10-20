@@ -190,6 +190,7 @@ model Client {
   deals                 Deal[]
   followups             FollowUp[]
   notifications         Notification[]
+  propertyInterests     ClientPropertyInterest[]
 
   @@index([responsibleEmployeeId])
   @@index([phone])
@@ -260,6 +261,7 @@ model Property {
   floors            PropertyFloor[]
   requestedProperty RequestedProperty?
   revisions         PropertyRevision[]
+  propertyInterests ClientPropertyInterest[]
 
   @@index([area, status])
   @@index([ownerId])
@@ -312,6 +314,33 @@ model RequestedProperty {
   budgetMax         Decimal? @db.Decimal(14, 2)
 
   @@index([governorate, district])
+}
+
+/**
+ * Interest of an EXISTING program property from one client (a recorded inquiry
+ * — "هذا العميل يسأل عن هذا العقار"), NOT a generic property-request table:
+ * rows can only attach to real `Property.id` values validated at write time.
+ *
+ * Referential actions:
+ * - `clientId` Cascade — an interest belongs to its client's lifecycle.
+ * - `propertyId` Restrict — deleting a property must never silently destroy
+ *   the interest history; any removal path must face the count first.
+ * The (client, property) pair is unique, so a repeated submission can never
+ * create a duplicate link.
+ */
+model ClientPropertyInterest {
+  id         String   @id @default(uuid()) @db.Uuid
+  clientId   String   @db.Uuid
+  client     Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  propertyId String   @db.Uuid
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  reason     String?
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([clientId, propertyId])
+  @@index([propertyId])
 }
 
 model PropertyRevision {

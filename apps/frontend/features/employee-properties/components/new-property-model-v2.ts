@@ -1,6 +1,7 @@
 'use client';
 import type { Property } from '../model';
 import type { ContactMode, ContactType } from '../../../lib/contact-registry';
+import { keepsExistingContact } from '../../../lib/property-adapter';
 
 export type EntryMethod = 'SMART_PASTE' | 'MANUAL';
 export type ListingOperation = 'بيع' | 'إيجار' | 'بدل';
@@ -132,6 +133,60 @@ export const initialNewPropertyFormV2: NewPropertyFormV2 = {
   contactPhone: '',
 };
 
+/**
+ * The linked contact of the property being edited, resolved against the current
+ * form: `undefined` when the row has no authorized linked contact, the contact
+ * id while the form still targets it (or the user re-selects it), and `null`
+ * once the user explicitly switches to entering a new person.
+ */
+export function linkedContactSelection(
+  property: Property | undefined,
+  form: NewPropertyFormV2,
+): string | null | undefined {
+  const linked = property?.linkedContactId;
+  if (!linked) return undefined;
+  if (form.contactType === 'BROKER') {
+    return form.brokerMode === 'EXISTING' && form.brokerId === linked
+      ? linked
+      : null;
+  }
+  return form.ownerMode === 'EXISTING' && form.ownerId === linked
+    ? linked
+    : null;
+}
+
+/**
+ * Seeds the contact step of the edit draft from the row's LINKED contact.
+ *
+ * The structured description carries no contact data, so the stored
+ * owner/broker values are restored separately — and when the authorized
+ * response also carried the linked `Contact.id`, the draft opens on EXISTING
+ * targeting that exact record. This is what stops an untouched edit/resubmit
+ * from sending `newContact` and creating a duplicate person on every save.
+ *
+ * Returns the form untouched when there is no authorized linked contact: the
+ * wizard then keeps its explicit NEW flow and never invents a selection.
+ */
+export function applyLinkedContact(
+  form: NewPropertyFormV2,
+  property: Property | undefined,
+): NewPropertyFormV2 {
+  const linked = property?.linkedContactId;
+  if (!linked) return form;
+  const isBroker = form.contactType === 'BROKER';
+  return isBroker
+    ? {
+        ...form,
+        brokerMode: 'EXISTING',
+        brokerId: linked,
+      }
+    : {
+        ...form,
+        ownerMode: 'EXISTING',
+        ownerId: linked,
+      };
+}
+
 export function toPropertyFromNewV2(
   form: NewPropertyFormV2,
   manager: boolean,
@@ -254,6 +309,11 @@ export function toPropertyFromNewV2(
     imageUrl: form.image?.preview || previous?.imageUrl || '',
     ownerUserId: owner?.ownerUserId ?? previous?.ownerUserId ?? '',
     responsibleName: owner?.responsibleName || previous?.responsibleName || '',
+    linkedContactId: keepsExistingContact(form, {
+      contactId: previous?.linkedContactId ?? null,
+    })
+      ? (previous?.linkedContactId ?? null)
+      : null,
   };
 }
 

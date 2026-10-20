@@ -7,13 +7,14 @@
 // decided by the authorized response — never by a client-side filter.
 //
 // The mapping to `RegistryContact` keeps the existing Clients/Wizard screens
-// working unchanged. Two fields are deliberately left empty because the
-// contract does not expose them: the responsible employee's display name, and
-// the list of properties linked to a contact. See docs/reports.
+// working unchanged. The responsible employee's display name comes from the
+// backend (`responsibleEmployeeName`, derived from the related `User.name`);
+// linked properties come from the backend, already filtered by property
+// visibility.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Role, type AuthUser } from '@arkan/shared';
 import { listContacts } from './api/contacts-api';
-import type { ContactDto, ContactTypeApi } from './api/property-types';
+import type { ContactDto, ContactTypeApi, DealType } from './api/property-types';
 
 export type ContactType = ContactTypeApi;
 export type ContactMode = 'EXISTING' | 'NEW';
@@ -28,13 +29,64 @@ export interface RegistryContact {
   scope: ContactScope;
   /** `responsibleUserId`, '' when the record carries none. */
   ownerUserId: string;
-  /** Not exposed by the API; kept empty rather than filled with a guess. */
+  /** Responsible employee's display name from the backend; '' when unassigned. */
   ownerName: string;
-  /** Not exposed by the API; kept empty rather than filled with a guess. */
+  /** Linked property ids (`Property.contactId`) the viewer is authorized to see. */
   propertyIds: string[];
+  /** References of the same linked properties, in backend order. */
   propertyCodes: string[];
+  /**
+   * Transaction type (`DealType`) of each linked property, index-parallel with
+   * `propertyIds`/`propertyCodes`. Every `Property` row carries one, so these
+   * grouped counts are always complete — never guessed client-side.
+   */
+  dealTypes: DealType[];
   notes: string;
   createdAt: string;
+}
+
+/** Arabic pill label per owner transaction type. */
+export const OWNER_TYPE_LABEL: Record<DealType, string> = {
+  SALE: 'بايع',
+  RENT: 'مؤجّر',
+  EXCHANGE: 'مبدّل',
+};
+
+/** One compact pill on an owner card: the Arabic label plus its real count. */
+export interface OwnerTypePill {
+  type: DealType;
+  label: string;
+  count: number;
+}
+
+/**
+ * Groups the linked properties' transaction types into one pill per type.
+ * Counts are of DISTINCT properties: `Property.contactId` links each property
+ * row once, and the backend already dedupes by property id, so each row counts
+ * exactly once. A type with zero properties never produces a pill, and when all
+ * linked properties are classified (always — `listingType` is required) the sum
+ * of the counts equals the card's linked-property count.
+ */
+export function ownerTypePills(
+  properties: readonly { id: string; listingType: DealType }[],
+): OwnerTypePill[] {
+  const seen = new Set<string>();
+  const counts = new Map<DealType, number>();
+  for (const property of properties) {
+    if (!property.id) continue; // never count an unattached row twice
+    if (seen.has(property.id)) continue;
+    seen.add(property.id);
+    counts.set(property.listingType, (counts.get(property.listingType) ?? 0) + 1);
+  }
+  // Stable display order: sale, rent, exchange; zero types stay hidden.
+  const order: DealType[] = ['SALE', 'RENT', 'EXCHANGE'];
+  return order
+    .filter((type) => (counts.get(type) ?? 0) > 0)
+    .map((type) => ({
+      type,
+      label: OWNER_TYPE_LABEL[type],
+      count: counts.get(type) ?? 0,
+    }));
 }
 
 /** Maps one authorized backend row onto the shape the existing screens read. */
@@ -46,9 +98,10 @@ export function toRegistryContact(dto: ContactDto): RegistryContact {
     phone: dto.phone,
     scope: dto.responsibleUserId ? 'EMPLOYEE' : 'COMPANY',
     ownerUserId: dto.responsibleUserId ?? '',
-    ownerName: '',
-    propertyIds: [],
-    propertyCodes: [],
+    ownerName: dto.responsibleEmployeeName ?? '',
+    propertyIds: dto.properties.map((property) => property.id),
+    propertyCodes: dto.properties.map((property) => property.reference),
+    dealTypes: dto.properties.map((property) => property.listingType),
     notes: dto.notes ?? '',
     createdAt: dto.createdAt ? dto.createdAt.slice(0, 10) : '',
   };

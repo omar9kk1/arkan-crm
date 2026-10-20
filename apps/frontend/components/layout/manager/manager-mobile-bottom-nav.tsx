@@ -21,7 +21,16 @@ export function ManagerMobileBottomNav() {
     if (!open) return;
     const previous = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    // Some environments never dispatch the native `close` event: the always-
+    // firing `toggle` event resets the state when the dialog reports closed
+    // by any mechanism, releasing the lock through this effect's cleanup.
+    const dialogElement = dialog.current;
+    const handleToggle = () => {
+      if (dialogElement && !dialogElement.open) setOpen(false);
+    };
+    dialogElement?.addEventListener('toggle', handleToggle);
     return () => {
+      dialogElement?.removeEventListener('toggle', handleToggle);
       document.body.style.overflow = previous;
     };
   }, [open]);

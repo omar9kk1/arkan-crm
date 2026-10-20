@@ -1,4 +1,4 @@
-import type { ClientSample } from '../mock-data';
+import type { ClientSample } from '../client-model';
 import { PersonCard } from './person-card';
 export function ClientCard({
   client,

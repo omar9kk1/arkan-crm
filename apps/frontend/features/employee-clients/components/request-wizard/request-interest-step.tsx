@@ -1,11 +1,12 @@
-import { GlassCombobox } from '../../../../components/ui/glass-combobox';
 import { Button } from '../../../../components/ui/button';
 import { GlassSelect } from '../../../../components/ui/glass-select';
 import {
+  linkedPropertyPreview,
+  normalizeLinkedProperty,
   placeholders,
-  properties,
   type ClientRequestDraft,
 } from './client-request-model';
+import { GlassPropertySearch } from './glass-property-search';
 import styles from './unified-request.module.css';
 export function RequestInterestStep({
   draft,
@@ -16,9 +17,7 @@ export function RequestInterestStep({
   onChange: (draft: ClientRequestDraft) => void;
   onAnalyze: () => void;
 }) {
-  const property = properties.find(
-    (p) => p.id === draft.linkedProperty.propertyId,
-  );
+  const linked = normalizeLinkedProperty(draft.linkedProperty);
   return (
     <>
       <div className={styles.grid}>
@@ -58,29 +57,43 @@ export function RequestInterestStep({
           <h3>ربط عقار من البرنامج</h3>
           <label className={styles.field}>
             العقار
-            <GlassCombobox
+            <GlassPropertySearch
               label="العقار"
               placeholder="ابحث بالكود أو المنطقة واختر العقار..."
-              value={draft.linkedProperty.propertyId}
-              options={properties.map((p) => ({
-                value: p.id,
-                label: `${p.id} · ${p.name} · ${p.area}`,
-              }))}
-              onChange={(value) =>
+              snapshot={linked.property}
+              onSelect={(snapshot) =>
                 onChange({
                   ...draft,
                   linkedProperty: {
                     ...draft.linkedProperty,
-                    propertyId: value,
+                    propertyId: snapshot.id,
+                    property: snapshot,
                   },
                 })
               }
             />
           </label>
-          {property && (
+          {linked.property && (
             <p className={styles.preview}>
-              {property.id} · {property.area} · {property.price} ·{' '}
-              {property.type} · {property.status}
+              <span data-linked-property="selected">
+                {linkedPropertyPreview(linked.property)}
+              </span>
+              <Button
+                type="button"
+                aria-label="إلغاء ربط العقار المحدد"
+                onClick={() =>
+                  onChange({
+                    ...draft,
+                    linkedProperty: {
+                      ...draft.linkedProperty,
+                      propertyId: '',
+                      property: null,
+                    },
+                  })
+                }
+              >
+                إلغاء الربط
+              </Button>
             </p>
           )}
           <div className={styles.grid}>

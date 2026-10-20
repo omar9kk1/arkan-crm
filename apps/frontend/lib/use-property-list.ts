@@ -2,14 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import type { AuthUser } from '@arkan/shared';
 import { getProperty, listProperties } from './api/properties-api';
 import type { PropertyViewDto } from './api/property-types';
 import {
   consumeOpenProperty,
+  peekOpenPropertyRequest,
   useOpenPropertyRequest,
 } from '../features/notifications/open-property';
 import { usePropertyRefreshSignal } from '../features/notifications/property-refresh';
+import { PROPERTY_QUERY_PARAM, readPropertyParam } from './property-reveal';
 
 /**
  * The shared fetching/refresh core behind the property LISTS (the manager
@@ -35,7 +38,9 @@ import { usePropertyRefreshSignal } from '../features/notifications/property-ref
  * this module only owns the rows, the cursor, the loading/error flags and the
  * two refresh channels.
  */
-export interface UsePropertyListOptions<T> {
+export interface UsePropertyListOptions<
+  T extends { id?: string | undefined },
+> {
   /** Rows requested per page (the calling surface's `PAGE_SIZE`). */
   pageSize: number;
   /**
@@ -51,7 +56,7 @@ export interface UsePropertyListOptions<T> {
   viewer: AuthUser | null;
 }
 
-export interface PropertyListResult<T> {
+export interface PropertyListResult<T extends { id?: string | undefined }> {
   items: T[];
   nextCursor: string | null;
   loading: boolean;
@@ -60,12 +65,23 @@ export interface PropertyListResult<T> {
   /** Re-reads the list through the existing request guard (never loops). */
   refetch: () => void;
   loadMore: () => void;
-  /** Row the details drawer is open on (also set by the notification deep-link). */
+  /** Row the details drawer is open on (also set by the deep-link). */
   selected: T | null;
   setSelected: Dispatch<SetStateAction<T | null>>;
+  /**
+   * The deep-linked target: the REAL authorized row resolved from
+   * `GET /properties/:id`, present here even when it is not in the loaded page
+   * window. `null` when no target is active. Callers must merge it into the rows
+   * they display (never synthesise a card) so the exact card is rendered.
+   */
+  revealed: T | null;
+  /** `revealed.id`, or null — the id whose card should show the selected state. */
+  targetId: string | null;
+  /** Closes the drawer AND clears the deep-link target (store + URL param). */
+  closeSelected: () => void;
 }
 
-export function usePropertyList<T>({
+export function usePropertyList<T extends { id?: string | undefined }>({
   pageSize,
   maxPagesPerLoad = 1,
   mapProperty,
@@ -78,11 +94,22 @@ export function usePropertyList<T>({
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<T | null>(null);
+  /**
+   * The deep-linked target resolved from `GET /properties/:id`. It is a REAL
+   * authorized row (never a synthesised card), kept separately so the caller can
+   * render its exact card even when the paginated window does not contain it.
+   */
+  const [revealed, setRevealed] = useState<T | null>(null);
   // Monotonic id: a late page can never overwrite a newer load.
   const requestId = useRef(0);
   // Set by a notification-driven re-read so it can update in the background.
   const silentRef = useRef(false);
   const [nonce, setNonce] = useState(0);
+
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const urlTargetId = readPropertyParam(searchParams);
 
   // The mapper and the error reporter may be re-created by a render, but the
   // effects below re-run only for the data/channel deps (exactly as the pages
@@ -108,32 +135,49 @@ export function usePropertyList<T>({
     refetch();
   }, [refreshSignal, refetch]);
 
-  // Opens the property a notification deep-linked to, using the EXISTING details
-  // drawer. The backend re-authorizes the property on read, so a stale link
-  // answers 404 and is reported instead of opening an empty drawer.
+  // Resolves a deep-linked property through `GET /properties/:id` (the backend
+  // re-authorizes on read, so a stale/denied id answers 404 and is reported
+  // instead of opening an empty drawer). Two channels feed this:
+  //  - the URL query parameter `?property=<id>`, which survives a refresh and a
+  //    direct deep-link, and
+  //  - the transient notification store, which works before the URL updates.
   const openRequest = useOpenPropertyRequest();
+  const pendingId = urlTargetId ?? openRequest?.propertyId ?? null;
+  // The URL param survives across renders, so this effect can re-run for an id
+  // that was already resolved (e.g. when the transient store request is
+  // consumed). One authorized fetch per distinct target id is enough.
+  const resolvedTarget = useRef<string | null>(null);
   useEffect(() => {
-    if (!openRequest || !viewer) return;
-    const propertyId = openRequest.propertyId;
+    if (!pendingId || !viewer) return;
+    if (resolvedTarget.current === pendingId) return;
     let cancelled = false;
     (async () => {
       try {
-        const dto = await getProperty(propertyId);
+        const dto = await getProperty(pendingId);
         if (cancelled) return;
-        setSelected(mapPropertyRef.current(dto, viewer));
+        resolvedTarget.current = pendingId;
+        const row = mapPropertyRef.current(dto, viewer);
+        setRevealed(row);
+        setSelected(row);
       } catch (cause) {
         if (cancelled) return;
+        // A failed target is not locked, so a retry (fresh click) can resolve it
+        // later; the page's own notice reports the safe message.
+        resolvedTarget.current = null;
+        setRevealed(null);
         onOpenErrorRef.current?.(
           cause instanceof Error ? cause.message : 'تعذّر فتح العقار.',
         );
       } finally {
-        consumeOpenProperty(propertyId);
+        // Only the transient channel is consumed here; the URL param is cleared
+        // explicitly (closeSelected) so a refresh keeps showing the target.
+        if (openRequest?.propertyId === pendingId) consumeOpenProperty(pendingId);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [openRequest, viewer]);
+  }, [pendingId, viewer, openRequest?.propertyId]);
 
   useEffect(() => {
     const id = ++requestId.current;
@@ -209,6 +253,27 @@ export function usePropertyList<T>({
       });
   }, [nextCursor, loadingMore, pageSize, viewer]);
 
+  /**
+   * Closes the drawer and clears the deep-link target: drops the transient store
+   * request, clears `?property=`, and releases the resolved row. Used by the
+   * drawer's close button so a refresh after closing does not re-open it.
+   */
+  const closeSelected = useCallback(() => {
+    setSelected(null);
+    setRevealed(null);
+    // Allow the same id to be deep-linked again later (e.g. from the owner
+    // drawer after closing) instead of being treated as already resolved.
+    resolvedTarget.current = null;
+    const pending = peekOpenPropertyRequest();
+    if (pending) consumeOpenProperty(pending.propertyId);
+    if (urlTargetId) {
+      const params = new URLSearchParams(searchParams?.toString() ?? '');
+      params.delete(PROPERTY_QUERY_PARAM);
+      const query = params.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    }
+  }, [pathname, router, searchParams, urlTargetId]);
+
   return {
     items,
     nextCursor,
@@ -219,5 +284,8 @@ export function usePropertyList<T>({
     loadMore,
     selected,
     setSelected,
+    revealed,
+    targetId: revealed?.id ?? null,
+    closeSelected,
   };
 }

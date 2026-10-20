@@ -62,3 +62,12 @@ function getServerSnapshot(): OpenPropertyRequest | null {
 export function useOpenPropertyRequest(): OpenPropertyRequest | null {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
+
+/**
+ * The current pending request, without a React hook. Used by the pure Jest tests
+ * in the backend project (no React renderer is installed there) and by nothing
+ * in the app; it reads the exact state the hook renders from.
+ */
+export function peekOpenPropertyRequest(): OpenPropertyRequest | null {
+  return getSnapshot();
+}

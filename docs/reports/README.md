@@ -45,4 +45,10 @@
 
 | 2026-10-18 | [codebase-health-audit](./2026-10-18-codebase-health-audit.md) | تدقيق شامل للقراءة فقط: المعمارية، السلامة الوظيفية، الأمان وقاعدة البيانات، mock مقابل بيانات حقيقية — مع أولويات إصلاح وخطة تنظيف مرحليات | التدقيق `Completed` (‏typecheck/lint/build ناجحة + `169 passed`) — `format:check` يفشل (‏305 ملفًا، سابق) — **تنفيذ أي إصلاح `Not Implemented` (بانتظار الموافقة)** — تحقق متصفح `Not Tested` |
 
+| 2026-10-19 | [clients-integration-recovery](./2026-10-19-clients-integration-recovery.md) | تحقيق استئناف فقط بعد انقطاع الجلسة: حالة دمج العملاء (خلفية `/clients` + صفحتا المدير/الموظف) وحجبات الترحيل | الخلفية `Completed` (`typecheck` ناجح، `prisma validate`/`migrate status` ناجحة) — الواجهة `Partial` (**7 أخطاء typecheck + 38 خطأ lint**) — الاختبارات/`next build`/المتصفح `Not Tested` — **لا ترحيل مطلوب** |
+
+| 2026-10-19 | [clients-stabilization](./2026-10-19-clients-stabilization.md) | تثبيت صفحتَي العملاء: إصلاح 7 أخطاء typecheck و38 خطأ lint وخطأ `refresh` غير المعرَّف بعد حفظ مالك/وسيط | `Completed` (`typecheck`/`lint` 0 خطأ + `next build` ناجح) — تغيير ملفين فقط، تصميم Astra دون تعديل CSS — اختبارات الخلفية/المتصفح `Not Tested` — **لا ترحيل، لا commits** |
+
+| 2026-10-19 | [clients-backend-verification](./2026-10-19-clients-backend-verification.md) | اختبارات تكامل مركّزة لوحدة `/clients` الخلفية وتشغيل حزمة regression كاملة على قاعدة الاختبار المعزولة المؤكَّدة | اختبارات العملاء `Completed` (`23/23` جديدًا؛ **`200 passed` / `16 suites`، 0 متخطَّى**) — `typecheck`/`lint` `exit 0` — **عيب استجابة `POST /clients` (متابعة الجدولة) مؤكد ومعطّل بانتظار الموافقة** — قاعدة التطوير/المتصفح `Not Tested` — **ملف اختبار واحد جديد فقط، لا ترحيل، لا commits** |
+
 > ملاحظة: التقارير تلتزم بقواعد المشروع الموثّقة في `AGENTS.md` و`PROJECT_CONTEXT.md` و`TODO.md`، ولا تُصرّح بأي جاهزية إنتاجية.

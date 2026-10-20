@@ -1,13 +1,15 @@
 import {
+  formatSnapshotPrice,
   initialRequest,
   clientLabels,
   requestError,
+  normalizeLinkedProperty,
   requestSummary,
-  properties,
   type ClientRequestDraft,
   type ClientType,
 } from './client-request-model';
 import type { EmployeeClient } from '../../client-model';
+import type { PropertyInterestPayload } from '../../../../lib/api/client-types';
 export interface ClientRequestBundle {
   mode: 'NEW_CLIENT' | 'EXISTING_CLIENT';
   clientId: string;
@@ -107,6 +109,31 @@ export function bundleSummary(b: ClientRequestBundle): string {
     .filter(Boolean)
     .join('\n\n');
 }
+/**
+ * The interests the final save must PERSIST in the database: only real linked
+ * selections — a draft with `hasLinkedProperty` whose `Property.id` matches its
+ * snapshot. One payload entry per DISTINCT property (a repeated pick never
+ * duplicates; the backend upserts the (client, property) pair). Properties from
+ * the free-text "new request" path are intentionally NOT here — no durable
+ * entity exists for them and no `Property.id` points at anything.
+ */
+export function bundlePropertyInterests(
+  b: ClientRequestBundle,
+): PropertyInterestPayload[] {
+  const interests = new Map<string, PropertyInterestPayload>();
+  for (const type of b.types) {
+    const draft = typeDraft(b, type);
+    if (!draft.interest.hasLinkedProperty) continue;
+    const linked = normalizeLinkedProperty(draft.linkedProperty);
+    if (!linked.propertyId || !linked.property) continue;
+    interests.set(linked.propertyId, {
+      propertyId: linked.propertyId,
+      ...(linked.reason.trim() ? { reason: linked.reason.trim() } : {}),
+      ...(linked.notes.trim() ? { notes: linked.notes.trim() } : {}),
+    });
+  }
+  return [...interests.values()];
+}
 export function saveBundle(
   b: ClientRequestBundle,
   clients: readonly EmployeeClient[],
@@ -116,14 +143,24 @@ export function saveBundle(
       ? clients.find((c) => c.id === b.clientId)
       : undefined;
   const drafts = b.types.map((type) => typeDraft(b, type));
-  const linked = drafts.flatMap((d) =>
-    d.interest.hasLinkedProperty
-      ? properties.filter((p) => p.id === d.linkedProperty.propertyId)
-      : [],
-  );
-  const allProperties = [...(old?.properties || []), ...linked].filter(
-    (p, i, list) => list.findIndex((v) => v.name === p.name) === i,
-  );
+  // The interest payloads that WILL be persisted with this save (validated
+  // server-side): real selections only.
+  const persistedInterests = bundlePropertyInterests(b);
+  // Linked rows here are ONLY real selections: a snapshot whose id matches the
+  // draft's `Property.id`. The old demo list is gone — nothing is attached
+  // unless it was picked from a real, authorized backend search result.
+  const linked = drafts
+    .map((d) => normalizeLinkedProperty(d.linkedProperty))
+    .filter((l) => l.propertyId && l.property)
+    .map((l) => l.property!);
+  const allProperties = [
+    ...(old?.properties || []),
+    ...linked.map((p) => ({
+      name: p.reference,
+      area: p.area,
+      price: formatSnapshotPrice(p.askingPrice),
+    })),
+  ].filter((p, i, list) => list.findIndex((v) => v.name === p.name) === i);
   const operations = { BUYER: 'شراء', RENTER: 'إيجار', EXCHANGER: 'بدل' };
   const sanitized: ClientRequestBundle['requests'] = {};
   for (const d of drafts)
@@ -132,14 +169,14 @@ export function saveBundle(
       message: d.interest.hasNewRequest ? d.message : '',
       requestDetails: d.interest.hasNewRequest ? d.requestDetails : null,
       linkedProperty: d.interest.hasLinkedProperty
-        ? d.linkedProperty
-        : { propertyId: '', reason: '', notes: '' },
+        ? normalizeLinkedProperty(d.linkedProperty)
+        : { propertyId: '', property: null, reason: '', notes: '' },
     };
   const areas = drafts
     .map((d) =>
       d.interest.hasNewRequest
         ? d.requestDetails?.desiredProperty.area
-        : properties.find((p) => p.id === d.linkedProperty.propertyId)?.area,
+        : normalizeLinkedProperty(d.linkedProperty).property?.area,
     )
     .filter(Boolean);
   return {
@@ -151,17 +188,36 @@ export function saveBundle(
     name: b.name.trim(),
     phone: b.phone.trim(),
     type: b.types.map((t) => operations[t]).join(' / '),
+    employee: old?.employee || 'غير مُسند',
     area: areas.join(' / ') || 'غير محدد',
     budget: drafts
       .map(
         (d) =>
-          `${clientLabels[d.clientType]}: ${d.interest.hasNewRequest ? [d.requestDetails?.desiredProperty.budget && `من ${d.requestDetails.desiredProperty.budget}`, d.requestDetails?.desiredProperty.budgetTo && `إلى ${d.requestDetails.desiredProperty.budgetTo}`].filter(Boolean).join(' ') || 'غير محدد' : properties.find((p) => p.id === d.linkedProperty.propertyId)?.price || 'غير محدد'}`,
+          `${clientLabels[d.clientType]}: ${d.interest.hasNewRequest ? [d.requestDetails?.desiredProperty.budget && `من ${d.requestDetails.desiredProperty.budget}`, d.requestDetails?.desiredProperty.budgetTo && `إلى ${d.requestDetails.desiredProperty.budgetTo}`].filter(Boolean).join(' ') || 'غير محدد' : formatSnapshotPrice(normalizeLinkedProperty(d.linkedProperty).property?.askingPrice ?? null)}`,
       )
       .join(' / '),
     notes: bundleSummary(b),
     history: old?.history || [],
     next: old?.next || '',
     properties: allProperties,
+    // Planned interests for DISPLAY until the post-save refresh refetches the
+    // real persisted rows from `GET /clients` (which is the source of truth).
+    propertyInterests: [
+      ...(old?.propertyInterests ?? []).filter(
+        (row) => !persistedInterests.some((p) => p.propertyId === row.propertyId),
+      ),
+      ...persistedInterests.map((p) => {
+        const linkedRow = linked.find((l) => l.id === p.propertyId);
+        return {
+          propertyId: p.propertyId,
+          name: linkedRow?.reference || p.propertyId,
+          area: linkedRow?.area || '',
+          price: formatSnapshotPrice(linkedRow?.askingPrice ?? null),
+          reason: p.reason ?? '',
+          notes: p.notes ?? '',
+        };
+      }),
+    ],
     requestDraft: drafts[0],
     requestBundle: { ...b, requests: sanitized },
   };

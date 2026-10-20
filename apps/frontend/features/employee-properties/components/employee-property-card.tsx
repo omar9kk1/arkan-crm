@@ -20,9 +20,12 @@ export function PropertyStatusBadge({ status }: { status: string }) {
 export function EmployeePropertyCard({
   property: p,
   onOpen,
+  selected = false,
 }: {
   property: Property;
   onOpen: () => void;
+  /** Deep-link highlight: a subtle outline on the EXACT targeted card. */
+  selected?: boolean;
 }) {
   // Rows fetch their private image only as they approach the viewport.
   const { ref, inView } = useInViewport<HTMLButtonElement>();
@@ -44,7 +47,10 @@ export function EmployeePropertyCard({
     <button
       ref={ref}
       type="button"
-      className={styles.imageCard}
+      className={`${styles.imageCard} ${selected ? styles.selected : ''}`}
+      // The scroll-into-view hook locates the deep-linked card by this stable
+      // id attribute — never by code, index or displayed text.
+      data-property-id={p.id || undefined}
       onClick={onOpen}
       aria-label={`تفاصيل العقار: ${district}، ${price}، ${status}`}
     >

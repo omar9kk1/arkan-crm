@@ -4,7 +4,10 @@ import styles from './properties-segmented-tabs.module.css';
 
 // Shares keyboard navigation and ARIA behavior with the employee follow-up tabs.
 export function PropertiesSegmentedTabs(
-  props: Omit<ComponentProps<typeof PropertiesTabs>, 'className'>,
+  props: Omit<ComponentProps<typeof PropertiesTabs>, 'className' | 'wrapperClassName'>,
 ) {
-  return <PropertiesTabs {...props} className={styles.segmented} />;
+  // The pill becomes a WRAPPER`; the tablist inside it is the scroller. The
+  // painted scroll indicator anchors to this wrapper, so it can never leave
+  // the bar (drawer variant only — plain tabs usage is untouched).
+  return <PropertiesTabs {...props} wrapperClassName={styles.segmented} />;
 }

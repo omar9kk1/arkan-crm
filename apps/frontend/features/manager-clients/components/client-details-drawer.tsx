@@ -2,16 +2,19 @@
 import { useState } from 'react';
 import { PropertyOverlay } from '../../manager-properties/components/property-overlay';
 import { PropertiesSegmentedTabs as SegmentedTabs } from '../../../components/ui/properties-segmented-tabs';
-import type { ClientSample } from '../mock-data';
+import type { ClientSample } from '../client-model';
 import { FollowUpTimeline } from './follow-up-timeline';
 import { PersonProperties } from './person-properties';
 import styles from './clients.module.css';
 export function ClientDetailsDrawer({
   client,
   onClose,
+  onOpenProperty,
 }: {
   client: ClientSample;
   onClose: () => void;
+  /** Ask the properties page to open one exact `Property.id`. */
+  onOpenProperty?: (propertyId: string) => void;
 }) {
   const [tab, setTab] = useState('summary');
   return (
@@ -91,6 +94,18 @@ export function ClientDetailsDrawer({
         <h3>الطلب والعقارات المناسبة</h3>
         <p>{client.request}</p>
         <PersonProperties properties={client.properties} />
+        {/* Real `ClientPropertyInterest` rows saved by the wizard. Only these
+            are recorded DB facts: cards carry the immutable `Property.id` and
+            open the exact property via the same deep-link channel. */}
+        {client.propertyInterests?.length ? (
+          <>
+            <h3>استفسارات عقارات البرنامج</h3>
+            <PersonProperties
+              properties={client.propertyInterests}
+              onOpenProperty={onOpenProperty}
+            />
+          </>
+        ) : null}
         <p className={styles.secondary}>
           مطابقات تجريبية وليست اقتراحات من النظام.
         </p>

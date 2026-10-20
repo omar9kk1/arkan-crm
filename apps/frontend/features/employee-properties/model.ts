@@ -49,6 +49,13 @@ export interface Property {
    * fields for another employee's AVAILABLE property.
    */
   hasPrivateContact?: boolean;
+  /**
+   * `Contact.id` already linked to this property, present only when the
+   * authorized response carried it (manager, or the creator who owns the
+   * contact). Used to keep editing on the same contact instead of creating a
+   * duplicate; `null`/absent always means "no authorized linked contact".
+   */
+  linkedContactId?: string | null;
 }
 export const empty: Property = {
   id: '',

@@ -1,4 +1,4 @@
-import type { FollowUp } from '../mock-data';
+import type { FollowUp } from '../client-model';
 import styles from './clients.module.css';
 export function FollowUpTimeline({
   entries,

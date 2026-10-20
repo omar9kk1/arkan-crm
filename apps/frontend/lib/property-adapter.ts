@@ -167,6 +167,24 @@ export function awaitingCorrection(property: {
 }
 
 /**
+ * Model-level gate for the details-drawer edit action. True only for a row the
+ * viewer created (`Viewer.mine`, which the server derives from
+ * `createdByUserId` — never a client value or a name match) that is in a state
+ * the backend accepts an edit for: a rejected/needs-correction row, or an
+ * approved row (which returns to review on save). `mine` alone is not enough —
+ * a manager-visible AVAILABLE row created by another employee stays read-only.
+ */
+export function editableByViewer(property: {
+  apiStatus?: PropertyStatusApi | null;
+  reviewStatus?: ApprovalStatusApi | null;
+  mine?: boolean;
+}): boolean {
+  if (property.mine !== true) return false;
+  if (awaitingCorrection(property)) return true;
+  return property.apiStatus === 'PENDING' || property.apiStatus === 'AVAILABLE';
+}
+
+/**
  * Structural view of the wizard form. Declared locally (instead of importing
  * `NewPropertyFormV2`) so this module has no runtime dependency on React or on
  * the registry; the wizard's form object satisfies it structurally at the call
@@ -397,6 +415,60 @@ export function buildDescription(form: PropertyFormInput): string {
 /** Maximum the backend accepts for `description`; enforced before submitting. */
 export const MAX_DESCRIPTION_LENGTH = 4000;
 
+/**
+ * The contact already linked to the row being edited, when the authorized
+ * response carried it. `contactId` is authoritative: it is present exactly when
+ * the backend decided this viewer may read that contact (manager, or the
+ * creator who owns it). An empty id means "no linked contact" and must keep the
+ * wizard on its explicit NEW flow — the draft is never silently switched to an
+ * existing contact we did not actually receive.
+ */
+export function existingContactSelection(payload: {
+  contactId: string | null;
+  contact: ContactSummaryDto | null;
+}): Pick<
+  PropertyFormInput,
+  'contactType' | 'ownerMode' | 'brokerMode' | 'ownerId' | 'brokerId' | 'ownerName' | 'brokerName' | 'contactPhone' | 'brokerPhone'
+> | null {
+  if (!payload.contactId) return null;
+  const contact = payload.contact;
+  const name = contact?.name ?? '';
+  const phone = contact?.phone ?? '';
+  return contact?.type === 'BROKER'
+    ? {
+        contactType: 'BROKER',
+        brokerMode: 'EXISTING',
+        brokerId: payload.contactId,
+        brokerName: name,
+        brokerPhone: phone,
+        ownerMode: 'NEW',
+        ownerId: '',
+        ownerName: '',
+        contactPhone: '',
+      }
+    : {
+        contactType: 'OWNER',
+        ownerMode: 'EXISTING',
+        ownerId: payload.contactId,
+        ownerName: name,
+        contactPhone: phone,
+        brokerMode: 'NEW',
+        brokerId: '',
+        brokerName: '',
+        brokerPhone: '',
+      };
+}
+
+/** True while the wizard still targets the contact the row was loaded with. */
+export function keepsExistingContact(
+  form: PropertyFormInput,
+  payload: { contactId: string | null },
+): boolean {
+  if (!payload.contactId) return false;
+  const id = (form.contactType === 'BROKER' ? form.brokerId : form.ownerId).trim();
+  return !!id && id === payload.contactId;
+}
+
 function sharedPayload(
   form: PropertyFormInput,
   options: PropertyFormOptions,
@@ -586,17 +658,32 @@ export function deriveMine(
 
 function contactFields(
   dto: PropertyViewDto,
-): Pick<Property, 'owner' | 'phone' | 'contactType' | 'hasPrivateContact'> {
+): Pick<
+  Property,
+  'owner' | 'phone' | 'contactType' | 'hasPrivateContact' | 'linkedContactId'
+> {
+  const privateDto = isPrivatePropertyDto(dto)
+    ? (dto as PrivatePropertyDto)
+    : null;
   const contact: ContactSummaryDto | null = hasPrivateContact(dto)
     ? (dto as PrivatePropertyDto).contact
     : null;
   if (!contact)
-    return { owner: '', phone: '', contactType: undefined, hasPrivateContact: false };
+    return {
+      owner: '',
+      phone: '',
+      contactType: undefined,
+      hasPrivateContact: false,
+      // The backend only fills `contactId` when this viewer is authorized for
+      // that contact; otherwise it is null and the wizard keeps its NEW flow.
+      linkedContactId: null,
+    };
   return {
     owner: contact.name,
     phone: contact.phone,
     contactType: contact.type,
     hasPrivateContact: true,
+    linkedContactId: privateDto?.contactId ?? contact.id,
   };
 }
 

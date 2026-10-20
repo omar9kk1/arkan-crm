@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { PropertiesSegmentedTabs as SegmentedTabs } from '../../../components/ui/properties-segmented-tabs';
-import type { OwnerEmployee } from '../mock-data';
+import type { OwnerEmployee } from '../client-model';
 import { FollowUpTimeline } from './follow-up-timeline';
 export function OwnerEmployeeFollowUpTabs({
   employees,
@@ -9,7 +9,7 @@ export function OwnerEmployeeFollowUpTabs({
   employees: readonly OwnerEmployee[];
 }) {
   const [selected, setSelected] = useState(employees[0]?.id ?? '');
-  if (!employees.length) return <p>لا يوجد موظف متابع في العينة الحالية.</p>;
+  if (!employees.length) return <p>غير مُسند</p>;
   return (
     <>
       <SegmentedTabs

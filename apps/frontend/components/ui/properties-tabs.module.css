@@ -21,6 +21,50 @@
   box-shadow: var(--shadow-control);
   border-color: var(--focus);
 }
+/* Vertical-ish tight scroller variant used inside the pill wrapper
+   (PropertiesSegmentedTabs): the tablist itself scrolls horizontally while
+   the pill surface (the wrapper) never does — so an absolutely-positioned
+   indicator anchored to the wrapper cannot drift with the scroll. The native
+   scrollbar is hidden; the painted DOM thumb replaces it. */
+.scroller {
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  min-width: 0;
+  margin-bottom: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-behavior: smooth;
+  scroll-padding-inline: var(--space-1);
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scroller::-webkit-scrollbar {
+  display: none;
+}
+/* The painted scrollbar: a slim gold thumb inside the bar, DRAGGABLE like a
+   native one. The track is an interactive hit band inside the wrapper's own
+   padding (below the tab buttons, so it never steals their clicks) and is
+   inset from the pill edges — it can never reach the rounded corners in
+   either direction. */
+.scrollTrack {
+  position: absolute;
+  inset-inline: 14px;
+  inset-block-end: 0;
+  block-size: 8px;
+  touch-action: none;
+  cursor: pointer;
+  user-select: none;
+}
+.scrollThumb {
+  position: absolute;
+  inset-block-start: 1px;
+  block-size: 5px;
+  inset-inline-start: 0;
+  display: block;
+  border-radius: 999px;
+  cursor: grab;
+  background: rgba(128, 98, 56, 0.35);
+}
 @media (max-width: 600px) {
   .tabs {
     width: 100%;

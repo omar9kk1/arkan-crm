@@ -1,3 +1,5 @@
+import type { DealType } from '../../../../lib/api/property-types';
+
 export type ClientType = 'BUYER' | 'RENTER' | 'EXCHANGER';
 export interface RequestFloor {
   name: string;
@@ -37,13 +39,37 @@ export interface ClientRequestDraft {
   notes: string;
   clientType: ClientType;
   interest: { hasLinkedProperty: boolean; hasNewRequest: boolean };
-  linkedProperty: { propertyId: string; reason: string; notes: string };
+  linkedProperty: LinkedPropertyDraft;
   message: string;
   requestDetails: null | {
     desiredProperty: ParsedRequestData;
     currentProperty?: ParsedRequestData;
     customFields: CustomField[];
   };
+}
+
+/**
+ * Public summary of the REAL selected property, kept next to the raw
+ * `Property.id` so the wizard can display and preserve the selection across
+ * steps without re-fetching. Only public listing fields travel here — never any
+ * owner/broker contact detail. The id is the backend's immutable `Property.id`;
+ * display codes are not used for the selection itself.
+ */
+export interface LinkedPropertySnapshot {
+  id: string;
+  reference: string;
+  area: string;
+  listingType: DealType;
+  askingPrice: string | null;
+}
+
+export interface LinkedPropertyDraft {
+  /** Immutable backend `Property.id` of the selected row (never a code). */
+  propertyId: string;
+  /** Snapshot of the same row at selection time; null when nothing selected. */
+  property: LinkedPropertySnapshot | null;
+  reason: string;
+  notes: string;
 }
 export const clientLabels: Record<ClientType, string> = {
   BUYER: 'مشتري',
@@ -58,24 +84,59 @@ export const placeholders: Record<ClientType, string> = {
   EXCHANGER:
     'عندي بيت في الجهراء 400 متر وأريد أبدله ببيت في المطلاع أو جنوب عبدالله المبارك، فرق حدود 80 ألف',
 };
-export const properties = [
-  {
-    id: 'K027',
-    name: 'بيت المطلاع K027',
-    area: 'مدينة المطلاع',
-    price: '290,000 د.ك',
-    type: 'بيت',
-    status: 'متاح للبيع',
-  },
-  {
-    id: 'K0331',
-    name: 'دور غرناطة K0331',
-    area: 'غرناطة',
-    price: '2,000 د.ك / شهر',
-    type: 'دور',
-    status: 'متاح للإيجار',
-  },
-];
+/** Arabic operation label per backend `DealType`, shown in search results. */
+export const propertyOperationLabel: Record<DealType, string> = {
+  SALE: 'بيع',
+  RENT: 'إيجار',
+  EXCHANGE: 'بدل',
+};
+
+/** Price text in the established Astra format; null stays «غير محدد». */
+export function formatSnapshotPrice(askingPrice: string | null): string {
+  if (!askingPrice) return 'غير محدد';
+  const value = Number(askingPrice);
+  if (Number.isNaN(value)) return askingPrice;
+  return `${Math.round(value).toLocaleString('ar-KW')} د.ك`;
+}
+
+/**
+ * One compact public line for the search dropdown: code · area · operation ·
+ * price. Built ONLY from public listing fields (reference/district/governorate/
+ * listingType/askingPrice) — a private contact can never appear in an option.
+ */
+export function propertySearchOptionLabel(row: {
+  reference: string;
+  district: string | null;
+  governorate: string | null;
+  listingType: DealType;
+  askingPrice: string | null;
+}): string {
+  const area = row.district ?? row.governorate ?? 'غير محدد';
+  const operation = propertyOperationLabel[row.listingType];
+  return `${row.reference} · ${area} · ${operation} · ${formatSnapshotPrice(row.askingPrice)}`;
+}
+
+/** The selected-property reminder shown under the search field. */
+export function linkedPropertyPreview(
+  snapshot: LinkedPropertySnapshot | null | undefined,
+): string {
+  if (!snapshot) return '';
+  const operation = propertyOperationLabel[snapshot.listingType];
+  return `${snapshot.reference} · ${snapshot.area} · ${operation} · ${formatSnapshotPrice(snapshot.askingPrice)}`;
+}
+
+/**
+ * Self-heals drafts saved before the real search existed (or corrupt ones):
+ * the id only stays when it matches the snapshot of the same real row.
+ */
+export function normalizeLinkedProperty(
+  linked: LinkedPropertyDraft,
+): LinkedPropertyDraft {
+  if (!linked.propertyId || linked.property?.id !== linked.propertyId)
+    return { ...linked, propertyId: '', property: null };
+  return linked;
+}
+
 export function initialRequest(): ClientRequestDraft {
   return {
     name: '',
@@ -83,7 +144,12 @@ export function initialRequest(): ClientRequestDraft {
     notes: '',
     clientType: 'BUYER',
     interest: { hasLinkedProperty: false, hasNewRequest: false },
-    linkedProperty: { propertyId: '', reason: 'استفسار', notes: '' },
+    linkedProperty: {
+      propertyId: '',
+      property: null,
+      reason: 'استفسار',
+      notes: '',
+    },
     message: '',
     requestDetails: null,
   };
@@ -177,7 +243,7 @@ export function requestError(d: ClientRequestDraft, step: number): string {
     return 'اختر مصدر اهتمام واحدًا على الأقل.';
   if (
     d.interest.hasLinkedProperty &&
-    !properties.some((p) => p.id === d.linkedProperty.propertyId)
+    normalizeLinkedProperty(d.linkedProperty).propertyId === ''
   )
     return 'اختر العقار المرتبط.';
   if (d.interest.hasNewRequest && !d.requestDetails)
@@ -206,9 +272,11 @@ export function requestError(d: ClientRequestDraft, step: number): string {
 }
 export function requestSummary(d: ClientRequestDraft): string {
   const lines = [`نوع العميل: ${clientLabels[d.clientType]}`, d.notes];
+  const linked = normalizeLinkedProperty(d.linkedProperty);
   if (d.interest.hasLinkedProperty)
     lines.push(
-      `العقار المرتبط: ${d.linkedProperty.propertyId}`,
+      `العقار المرتبط: ${linked.property?.reference || linked.propertyId}`,
+      linked.property ? `منطقة العقار: ${linked.property.area}` : '',
       `سبب الاهتمام: ${d.linkedProperty.reason}`,
       d.linkedProperty.notes,
     );

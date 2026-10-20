@@ -5,11 +5,29 @@ export interface FollowUp {
   result: string;
   note: string;
   next: string;
+  /** Display name of the employee the follow-up is assigned to. */
+  employee: string;
 }
 export interface SuitableProperty {
   name: string;
   area: string;
   price: string;
+}
+/**
+ * One recorded interest of this client in an EXISTING program property
+ * (`ClientPropertyInterest`). `propertyId` is the immutable `Property.id` so
+ * the drawer can deep-link the EXACT property (never by code).
+ */
+export interface ClientInterest {
+  propertyId: string;
+  /** Clean property title — the display CODE travels in `code` separately. */
+  name: string;
+  /** Display reference (optional: temporary mirror rows reuse title only). */
+  code?: string;
+  area: string;
+  price: string;
+  reason: string;
+  notes: string;
 }
 export interface EmployeeClient {
   requestBundle?: import('./components/request-wizard/client-request-bundle').ClientRequestBundle;
@@ -18,12 +36,15 @@ export interface EmployeeClient {
   name: string;
   phone: string;
   type: string;
+  /** Display name of the responsible employee from `Client.responsibleEmployeeId`. */
+  employee: string;
   area: string;
   budget: string;
   notes: string;
   next: string;
   history: FollowUp[];
   properties: SuitableProperty[];
+  propertyInterests: ClientInterest[];
 }
 export const requestTypes = ['شراء', 'إيجار', 'استثمار'];
 export const tabs = [
@@ -36,89 +57,77 @@ export function localDate() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
-export const isLate = (c: EmployeeClient, today = localDate()) =>
-  Boolean(c.next && c.next < today);
-export const clientStatus = (c: EmployeeClient) =>
-  isLate(c) ? 'متأخر' : !c.properties.length ? 'بدون عقار مناسب' : 'نشط';
-export function filterClients(
-  items: EmployeeClient[],
-  tab: string,
-  query: string,
-  today = localDate(),
-) {
-  const q = query.trim().toLocaleLowerCase('ar');
-  return items.filter(
-    (c) =>
-      (tab === 'all' ||
-        (tab === 'today' && c.next === today) ||
-        (tab === 'late' && isLate(c, today)) ||
-        (tab === 'unmatched' && !c.properties.length)) &&
-      `${c.name} ${c.phone} ${c.type}`.toLocaleLowerCase('ar').includes(q),
-  );
+export function isLate(c: EmployeeClient, today: string): boolean {
+  return Boolean(c.next && c.next < today);
 }
-export function createClients(): EmployeeClient[] {
-  return [
-    {
-      id: 'c1',
-      name: 'محمد العتيبي',
-      phone: '5000 0001',
-      type: 'شراء',
-      area: 'مدينة المطلاع',
-      budget: '300000',
-      notes: 'يفضل بيتًا جاهزًا للسكن.',
-      next: localDate(),
-      history: [
-        {
-          id: 'f1',
-          date: '2026-09-07',
-          type: 'اتصال',
-          result: 'مهتم بالعرض',
-          note: 'طلب تحديد موعد للمعاينة.',
-          next: localDate(),
-        },
-      ],
-      properties: [
-        {
-          name: 'بيت المطلاع K027',
-          area: 'مدينة المطلاع',
-          price: '290,000 د.ك',
-        },
-      ],
-    },
-    {
-      id: 'c2',
-      name: 'سارة سالم',
-      phone: '5000 0002',
-      type: 'إيجار',
-      area: 'غرناطة',
-      budget: '2000',
-      notes: 'تفضل دورًا مستقلًا.',
-      next: '2026-09-01',
-      history: [
-        {
-          id: 'f2',
-          date: '2026-08-30',
-          type: 'رسالة',
-          result: 'بانتظار صور العقار',
-          note: 'المتابعة مستحقة.',
-          next: '2026-09-01',
-        },
-      ],
-      properties: [
-        { name: 'دور غرناطة K0331', area: 'غرناطة', price: '2,000 د.ك / شهر' },
-      ],
-    },
-    {
-      id: 'c3',
-      name: 'عبدالله علي',
-      phone: '5000 0003',
-      type: 'استثمار',
-      area: 'صباح الأحمد',
-      budget: '450000',
-      notes: 'يبحث عن فرصة استثمارية طويلة الأجل.',
-      next: '',
-      history: [],
-      properties: [],
-    },
-  ];
+export function filterClients(clients: EmployeeClient[], tab: string, today: string) {
+  switch (tab) {
+    case 'today':
+      return clients.filter((c) => c.next === today);
+    case 'late':
+      return clients.filter((c) => isLate(c, today));
+    case 'unmatched':
+      return clients.filter((c) => !c.properties.length);
+    default:
+      return clients;
+  }
+}
+import type { ClientApiDto } from '../../lib/api/client-types';
+
+const currencyLabel = (code: string | null): string => {
+  if (!code) return 'د.ك';
+  if (code === 'KWD') return 'د.ك';
+  if (code.toLowerCase() === 'usd') return 'دولار أمريكي';
+  return code;
+};
+
+function formatPrice(price: string | null, currency: string | null): string {
+  if (!price) return '';
+  const num = Number(price);
+  if (Number.isNaN(num)) return price;
+  const cur = currencyLabel(currency);
+  if (num >= 1000000) return `${(num / 1000000).toFixed(num % 1000000 === 0 ? 0 : 1)} مليون ${cur}`;
+  return `${Math.round(num).toLocaleString('ar-KW')} ${cur}`;
+}
+
+export function employeeClientFromDto(dto: ClientApiDto): EmployeeClient {
+  const logged = dto.followUps.filter((f) => f.outcome || f.note);
+  return {
+    id: dto.id,
+    name: dto.name,
+    phone: dto.phone,
+    type: '—',
+    employee: dto.responsibleEmployeeName || 'غير مُسند',
+    area: '—',
+    budget: '—',
+    notes: dto.notes,
+    next: dto.nextFollowUp || '',
+    history: logged.map((f) => ({
+      id: f.id,
+      date: f.createdAt.slice(0, 10),
+      type: f.method || 'متابعة',
+      result: f.outcome,
+      note: f.note,
+      next: f.dueAt,
+      employee: f.employeeName || 'غير مُسند',
+    })),
+    properties: dto.properties.map((p) => ({
+      name: `${p.title}${p.reference ? ` ${p.reference}` : ''}`.trim() || p.title,
+      area: p.area || '',
+      price: p.askingPrice ? `${formatPrice(p.askingPrice, p.currency)}` : '—',
+    })),
+    propertyInterests: dto.propertyInterests.map((interest) => ({
+      propertyId: interest.propertyId,
+      // Title and code on SEPARATE lines below it, per the interest card
+      // layout — never merged into one cramped line.
+      name: interest.title,
+      code: interest.reference,
+      area: interest.area || '',
+      price: interest.askingPrice
+        ? `${formatPrice(interest.askingPrice, interest.currency)}`
+        : '—',
+      reason: interest.reason,
+      notes: interest.notes,
+    })),
+  };
 }

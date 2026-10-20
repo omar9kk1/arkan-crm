@@ -39,7 +39,7 @@ export function ContactCard({
       </span>
       <span>
         <span className={styles.secondary}>الموظف المسؤول</span>
-        <strong>{contact.ownerName || 'سجل الشركة'}</strong>
+        <strong>{contact.ownerName || 'غير مُسند'}</strong>
       </span>
       <span>
         <span className={styles.secondary}>عدد العقارات</span>

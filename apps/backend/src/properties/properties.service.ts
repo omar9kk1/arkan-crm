@@ -208,13 +208,36 @@ export class PropertiesService {
     query: ListPropertiesQueryDto,
   ): Promise<PropertyPageDto> {
     const limit = resolveLimit(query.limit);
-    const where: Prisma.PropertyWhereInput = {
-      ...propertyVisibilityWhere(viewer),
-      ...(query.status ? { status: query.status } : {}),
-      ...(query.listingType ? { listingType: query.listingType } : {}),
-      ...(query.governorate ? { governorate: query.governorate } : {}),
-      ...(query.district ? { district: query.district } : {}),
-    };
+    const search = query.q?.trim();
+    // Every constraint lives in its own AND entry. The visibility filter for an
+    // employee is itself a top-level `OR`, so spreading it next to a search
+    // `OR` would silently REPLACE the row-level rule — composing via explicit
+    // `AND` entries keeps RBAC intact whatever shape each filter takes.
+    const filters: Prisma.PropertyWhereInput[] = [
+      propertyVisibilityWhere(viewer),
+    ];
+    if (query.status) filters.push({ status: query.status });
+    if (query.listingType) filters.push({ listingType: query.listingType });
+    if (query.governorate) filters.push({ governorate: query.governorate });
+    if (query.district) filters.push({ district: query.district });
+    if (search) {
+      // Free-text match over PUBLIC listing fields only (the full property
+      // code among them). The search never touches the Contact table, and the
+      // visibility entry above still decides what this viewer can see, so
+      // RBAC and privacy are exactly as before.
+      filters.push({
+        OR: [
+          { reference: { contains: search, mode: 'insensitive' } },
+          { title: { contains: search, mode: 'insensitive' } },
+          { area: { contains: search, mode: 'insensitive' } },
+          { district: { contains: search, mode: 'insensitive' } },
+          { governorate: { contains: search, mode: 'insensitive' } },
+        ],
+      });
+    }
+    // A single {AND: [visibility]} equals the visibility itself.
+    const where =
+      filters.length === 1 ? filters[0] : { AND: filters as Prisma.PropertyWhereInput[] };
     const rows = await this.prisma.property.findMany({
       where,
       include: propertyDetailInclude,
@@ -509,22 +532,32 @@ export class PropertiesService {
     payload: UpdatePropertyPayloadDto,
   ): Promise<PropertyViewDto> {
     const existing = await this.requireExisting(id);
+    // `createdByUserId` is the server-authoritative owner of the row: an
+    // employee can never edit a property created by someone else, not even by
+    // guessing the id. The conflicting states answer 403 here (not 404) because
+    // the id is real and the caller is authenticated — the row's existence is
+    // not a secret from its own non-creator in this path.
     if (existing.createdByUserId !== viewer.id)
       throw new ForbiddenException(
         'Only the property creator can edit this property',
       );
     if (
       existing.status !== PropertyStatus.PENDING &&
-      existing.status !== PropertyStatus.REJECTED
+      existing.status !== PropertyStatus.REJECTED &&
+      existing.status !== PropertyStatus.AVAILABLE
     )
       throw new ConflictException(
-        'Only PENDING or REJECTED properties can be edited',
+        'Only PENDING, REJECTED or AVAILABLE properties can be edited',
       );
     if (existing.version !== payload.version)
       throw new ConflictException(
         'Stale version: the property changed since it was loaded',
       );
     this.validateUpdateShape(payload, existing.listingType);
+    // Editing an APPROVED row sends it back through review: the row becomes
+    // PENDING and a NEW approval round starts. Editing a PENDING/REJECTED row
+    // keeps its current status (the creator still resubmits explicitly).
+    const returnsToReview = existing.status === PropertyStatus.AVAILABLE;
 
     await this.prisma.$transaction(async (tx) => {
       const data: Prisma.PropertyUncheckedUpdateManyInput = {
@@ -592,15 +625,34 @@ export class PropertiesService {
         where: {
           id,
           createdByUserId: viewer.id,
-          status: {
-            in: [PropertyStatus.PENDING, PropertyStatus.REJECTED],
-          },
+          status: existing.status,
           version: payload.version,
         },
-        data,
+        data: returnsToReview
+          ? { ...data, status: PropertyStatus.PENDING }
+          : data,
       });
       if (transitioned.count === 0)
         throw new ConflictException('Stale version or invalid state');
+      if (returnsToReview) {
+        // A fresh review round: the previous APPROVED request row stays
+        // untouched, so the approval history is preserved and the manager sees
+        // exactly one open request per submission.
+        const request = await tx.propertyApprovalRequest.create({
+          data: {
+            propertyId: id,
+            requestedById: viewer.id,
+            status: ApprovalStatus.PENDING,
+          },
+        });
+        await this.notifications.notifyPropertyResubmitted(tx, {
+          propertyId: id,
+          reference: existing.reference,
+          creatorId: existing.createdByUserId,
+          approvalRequestId: request.id,
+          version: existing.version + 1,
+        });
+      }
 
       if (payload.floors !== undefined) {
         await tx.propertyFloor.deleteMany({ where: { propertyId: id } });
@@ -628,7 +680,9 @@ export class PropertiesService {
           action: 'PROPERTY_UPDATE',
           entityType: 'Property',
           entityId: id,
-          after: { status: existing.status },
+          after: {
+            status: returnsToReview ? PropertyStatus.PENDING : existing.status,
+          },
         },
       });
     });

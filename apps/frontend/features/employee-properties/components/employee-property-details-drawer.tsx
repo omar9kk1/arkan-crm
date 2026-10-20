@@ -4,7 +4,7 @@ import { PropertiesSegmentedTabs as SegmentedTabs } from '../../../components/ui
 import { Button } from '../../../components/ui/button';
 import { Card } from '../../../components/ui/card';
 import type { Property } from '../model';
-import { awaitingCorrection } from '../../../lib/property-adapter';
+import { awaitingCorrection, editableByViewer } from '../../../lib/property-adapter';
 import {
   PropertyDetailHeader,
   PropertyDetailSections,
@@ -39,6 +39,13 @@ export function EmployeePropertyDetailsDrawer({
             correction + resubmission action. */}
         {awaitingCorrection(p) && p.mine ? (
           <Button onClick={onEdit}>تعديل وإعادة إرسال</Button>
+        ) : null}
+        {/* An approved row the viewer created is still editable: saving sends
+            it back to manager review (PENDING) with a fresh approval request.
+            Only the server-derived creator flag opens this — never another
+            employee's approved listing. */}
+        {editableByViewer(p) && !awaitingCorrection(p) ? (
+          <Button onClick={onEdit}>تعديل العقار</Button>
         ) : null}
       </PropertyDetailSections>
       {/* Follow-up history has no backend persistence yet, so the block is

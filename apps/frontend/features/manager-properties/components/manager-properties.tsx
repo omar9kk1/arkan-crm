@@ -3,7 +3,7 @@ import { useDraftState } from '../../../lib/drafts/use-form-draft';
 
 import { Toast } from '../../../components/ui/toast';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ManagerPageShell } from '../../../components/layout/manager/manager-page-shell';
 import { Button } from '../../../components/ui/button';
 import { StatCard } from '../../../components/ui/stat-card';
@@ -17,6 +17,11 @@ import {
 } from '../../../lib/api/properties-api';
 import { mapPreviewFromApi } from '../../../lib/property-adapter';
 import { usePropertyList } from '../../../lib/use-property-list';
+import {
+  managerTabForStatus,
+  withRevealedRow,
+} from '../../../lib/property-reveal';
+import { useRevealScroll } from '../../../lib/use-reveal-scroll';
 import type { PreviewProperty } from '../preview-data';
 import { PropertiesSegmentedTabs } from '../../../components/ui/properties-segmented-tabs';
 import { PropertyCard } from './property-card';
@@ -67,6 +72,9 @@ export function ManagerProperties() {
     loadMore,
     selected,
     setSelected,
+    revealed,
+    targetId,
+    closeSelected,
   } = usePropertyList<PreviewProperty>({
     pageSize: PAGE_SIZE,
     maxPagesPerLoad: MAX_PAGES_PER_LOAD,
@@ -80,19 +88,41 @@ export function ManagerProperties() {
       .toLocaleLowerCase('ar')
       .includes(query.trim().toLocaleLowerCase('ar'));
 
-  const visible = items.filter(matches);
+  // A deep-link target must be VISIBLE: activate the tab that lists its status
+  // and clear the search box, so the row is not hidden by the current filter.
+  // The tab comes from the backend status enum, never the localized label.
+  useEffect(() => {
+    if (!revealed) return;
+    const needed = managerTabForStatus(revealed.apiStatus);
+    if (needed && needed !== tab) setTab(needed);
+    if (query) setQuery('');
+    // Deliberately keys on the resolved target only: a manual tab switch or a
+    // later query edit is never fought by this effect (deps intentionally omit
+    // `tab`/`query`, which the hook reads through the current render).
+  }, [revealed?.id]);
+
+  // The resolved target is merged into the rows so its REAL card is rendered
+  // even when the paginated window does not contain it — never a fake card, and
+  // never a duplicate of an already-loaded row.
+  const rows = useMemo(
+    () => withRevealedRow(items, revealed),
+    [items, revealed],
+  );
+  useRevealScroll(targetId);
+
+  const visible = rows.filter(matches);
   const countOf = (status: string) =>
-    items.filter((property) => property.apiStatus === status).length;
+    rows.filter((property) => property.apiStatus === status).length;
   // A PENDING row whose latest review is CHANGES_REQUESTED is waiting on the
   // employee, not on the manager, so it must NOT sit in the actionable queue.
   const awaitingManager = (property: PreviewProperty) =>
     property.apiStatus === 'PENDING' &&
     property.reviewStatus !== 'CHANGES_REQUESTED';
-  const pendingCount = items.filter(awaitingManager).length;
+  const pendingCount = rows.filter(awaitingManager).length;
   // Rows the employee still has to act on: rejected outright, or changes requested.
   const needsCorrectionCount =
     countOf('REJECTED') +
-    items.filter((property) => property.reviewStatus === 'CHANGES_REQUESTED')
+    rows.filter((property) => property.reviewStatus === 'CHANGES_REQUESTED')
       .length;
   // «العقارات» is the APPROVED inventory: only AVAILABLE rows may appear there,
   // so a row that is still under review — or was rejected / sent back for
@@ -117,10 +147,11 @@ export function ManagerProperties() {
     ...new Set(approved.map((property) => property.region)),
   ].filter(Boolean);
   // Keep the open drawer in sync with the latest fetch: after a decision the row
-  // is re-read and the drawer reflects the new status without being closed.
+  // is re-read and the drawer reflects the new status without being closed. The
+  // revealed deep-link target is part of `rows`, so it stays in sync too.
   const selectedLive = selected
     ? (selected.id
-        ? items.find((property) => property.id === selected.id)
+        ? rows.find((property) => property.id === selected.id)
         : undefined) ?? selected
     : null;
 
@@ -213,7 +244,7 @@ export function ManagerProperties() {
         </p>
         <div className={styles.stats}>
           {[
-            { title: 'عقار داخل البرنامج', value: items.length },
+            { title: 'عقار داخل البرنامج', value: rows.length },
             { title: 'بانتظار الموافقة', value: pendingCount },
             { title: 'عقار معتمد', value: countOf('AVAILABLE') },
             { title: 'مطلوب تعديل', value: needsCorrectionCount },
@@ -260,7 +291,7 @@ export function ManagerProperties() {
               إعادة المحاولة
             </Button>
           </p>
-        ) : items.length === 0 ? (
+        ) : rows.length === 0 ? (
           <p className={styles.inset}>لم يسجّل الخادم أي عقار حتى الآن.</p>
         ) : (
           <>
@@ -294,6 +325,9 @@ export function ManagerProperties() {
                           key={property.id ?? property.code}
                           property={property}
                           onOpen={() => setSelected(property)}
+                          selected={
+                            !!targetId && property.id === targetId
+                          }
                         />
                       ))}
                   </div>
@@ -320,6 +354,7 @@ export function ManagerProperties() {
                     key={property.id ?? property.code}
                     property={property}
                     onOpen={() => setSelected(property)}
+                    selected={!!targetId && property.id === targetId}
                   />
                 ))}
               </div>
@@ -352,7 +387,7 @@ export function ManagerProperties() {
           <PropertyDetailsDrawer
             key={selectedLive.id ?? selectedLive.code}
             property={selectedLive}
-            onClose={() => setSelected(null)}
+            onClose={closeSelected}
             onAction={onAction}
             busy={busyId === selectedLive.id}
           />

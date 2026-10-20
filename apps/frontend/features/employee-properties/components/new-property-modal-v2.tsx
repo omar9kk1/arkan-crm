@@ -38,7 +38,9 @@ import {
   toUpdatePropertyPayload,
 } from '../../../lib/property-adapter';
 import {
+  applyLinkedContact,
   initialNewPropertyFormV2,
+  linkedContactSelection,
   propertyAreaV2,
   type FloorEntry,
   type ListingOperation,
@@ -96,33 +98,39 @@ function formFromPropertyV2(property?: Property): NewPropertyFormV2 {
       'entryMethod' in parsed &&
       'floors' in parsed
     )
-      return {
-        ...initialNewPropertyFormV2,
-        ...(parsed as NewPropertyFormV2),
-        // The structured description never carries contact data, so the stored
-        // owner/broker fields are restored after the parsed form.
-        ownerName: property.owner,
-        contactPhone: property.phone,
-        area: propertyAreaV2(parsed as Partial<NewPropertyFormV2>),
-        floors: (parsed as NewPropertyFormV2).floors.map((floor) => ({ ...floor, id: floor.id || uid() })),
-        image: null,
-      };
+      return applyLinkedContact(
+        {
+          ...initialNewPropertyFormV2,
+          ...(parsed as NewPropertyFormV2),
+          // The structured description never carries contact data, so the stored
+          // owner/broker fields are restored after the parsed form.
+          ownerName: property.owner,
+          contactPhone: property.phone,
+          area: propertyAreaV2(parsed as Partial<NewPropertyFormV2>),
+          floors: (parsed as NewPropertyFormV2).floors.map((floor) => ({ ...floor, id: floor.id || uid() })),
+          image: null,
+        },
+        property,
+      );
   } catch {
     /* Older free-text descriptions are not structured; fall back below. */
   }
   const operation = OPERATIONS.find((value) => value === property.operation);
-  return {
-    ...initialNewPropertyFormV2,
-    entryMethod: 'MANUAL',
-    contactType: 'OWNER',
-    ownerMode: 'NEW',
-    ownerName: property.owner,
-    contactPhone: property.phone,
-    price: property.price,
-    operation: operation || 'بيع',
-    district: property.region,
-    area: property.area,
-  };
+  return applyLinkedContact(
+    {
+      ...initialNewPropertyFormV2,
+      entryMethod: 'MANUAL',
+      contactType: 'OWNER',
+      ownerMode: 'NEW',
+      ownerName: property.owner,
+      contactPhone: property.phone,
+      price: property.price,
+      operation: operation || 'بيع',
+      district: property.region,
+      area: property.area,
+    },
+    property,
+  );
 }
 
 function validateStepV2(
@@ -130,6 +138,7 @@ function validateStepV2(
   step: number,
   hasImage: boolean,
   records: RegistryContact[],
+  linkedContactId: string | null = null,
 ): string {
   if (step === 0) {
     if (form.entryMethod === 'SMART_PASTE' && !form.pastedText.trim())
@@ -176,16 +185,23 @@ function validateStepV2(
     return '';
   }
   if (step === 2) {
+    // The authorized linked contact of the row being edited is always a valid
+    // target, even before the contact list finishes loading — otherwise a slow
+    // or failed load would block an untouched save and push the user to "new
+    // person", which is exactly what creates duplicates.
+    const isResolvable = (id: string) =>
+      (!!linkedContactId && id === linkedContactId) ||
+      records.some((contact) => contact.id === id);
     if (form.contactType === 'BROKER') {
       if (form.brokerMode === 'EXISTING') {
-        if (!records.some((contact) => contact.id === form.brokerId))
+        if (!isResolvable(form.brokerId))
           return 'اختر وسيطًا مسجلًا في النظام أو أضف وسيطًا جديدًا.';
       } else {
         if (!form.brokerName.trim()) return 'أدخل اسم الوسيط.';
         if (!normalizePhone(form.brokerPhone)) return 'أدخل رقم هاتف الوسيط.';
       }
     } else if (form.ownerMode === 'EXISTING') {
-      if (!records.some((contact) => contact.id === form.ownerId))
+      if (!isResolvable(form.ownerId))
         return 'اختر مالكًا مسجلًا في النظام أو أضف مالكًا جديدًا.';
     } else {
       if (!form.ownerName.trim()) return 'أدخل اسم المالك.';
@@ -372,10 +388,17 @@ export function AddPropertyModalV2({
   // image field), so the image already stored on the row satisfies the step.
   const editingExisting = Boolean(property?.id);
   const hasImage = !!image || editingExisting;
+  const linkedContactId = property?.linkedContactId ?? null;
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const message = validateStepV2(draft, step, hasImage, contactRecords);
+    const message = validateStepV2(
+      draft,
+      step,
+      hasImage,
+      contactRecords,
+      linkedContactId,
+    );
     if (message) {
       showError(message);
       return;
@@ -388,7 +411,13 @@ export function AddPropertyModalV2({
     // Restored drafts intentionally do not contain device files. Recheck all
     // stages before saving, including a draft reopened on the final stage.
     for (let index = 0; index < STEPS.length - 1; index++) {
-      const previousError = validateStepV2(draft, index, hasImage, contactRecords);
+      const previousError = validateStepV2(
+        draft,
+        index,
+        hasImage,
+        contactRecords,
+        linkedContactId,
+      );
       if (previousError) {
         setStep(index);
         showError(previousError);
@@ -459,15 +488,24 @@ export function AddPropertyModalV2({
     ? governorateForArea(draft.district)
     : '';
   const isExchange = draft.operation === 'بدل';
-
   const isBroker = draft.contactType === 'BROKER';
-  const contactMode: ContactMode = isBroker
-    ? draft.brokerMode
-    : draft.ownerMode;
-  const contactId = isBroker ? draft.brokerId : draft.ownerId;
+
+  const contactRecords = useVisibleContacts(user, draft.contactType);
+  /**
+   * The contact linked to the row being edited. When the authorized response
+   * carried it, step 3 is pinned to it until the user explicitly switches mode
+   * or picks another contact — so an untouched edit/resubmit can never create a
+   * duplicate person.
+   */
+  const linkedSelection = linkedContactSelection(property, draft);
+  const contactMode: ContactMode = linkedSelection
+    ? 'EXISTING'
+    : isBroker
+      ? draft.brokerMode
+      : draft.ownerMode;
+  const contactId = linkedSelection ?? (isBroker ? draft.brokerId : draft.ownerId);
   const contactName = isBroker ? draft.brokerName : draft.ownerName;
   const contactPhone = isBroker ? draft.brokerPhone : draft.contactPhone;
-  const contactRecords = useVisibleContacts(user, draft.contactType);
   const selectedContact = contactRecords.find(
     (record) => record.id === contactId,
   );
@@ -476,7 +514,10 @@ export function AddPropertyModalV2({
       ? findContactByPhone(draft.contactType, contactPhone, contactRecords)
       : undefined;
 
-  const setContactMode = (mode: ContactMode) =>
+  const setContactMode = (mode: ContactMode) => {
+    // Leaving the preselected linked contact is an explicit act: the form then
+    // carries an empty id, so the save either keeps the original id (unchanged)
+    // or sends a deliberately entered new person — never a silent re-selection.
     patch(
       isBroker
         ? mode === 'NEW'
@@ -486,20 +527,27 @@ export function AddPropertyModalV2({
         ? { ownerMode: mode, ownerId: '', ownerName: '', contactPhone: '' }
         : { ownerMode: mode },
     );
+  };
 
   const selectContact = (id: string) => {
     const record = contactRecords.find((contact) => contact.id === id);
+    if (!record) {
+      // An id we cannot resolve must never degrade into "new person": keep the
+      // selection empty, show the reason and block the step.
+      showError('اختر جهة تواصل مسجلة، أو حدث الصفحة ثم أعد المحاولة.');
+      return;
+    }
     patch(
       isBroker
         ? {
-            brokerId: record?.id || '',
-            brokerName: record?.name || '',
-            brokerPhone: record?.phone || '',
+            brokerId: record.id,
+            brokerName: record.name,
+            brokerPhone: record.phone,
           }
         : {
-            ownerId: record?.id || '',
-            ownerName: record?.name || '',
-            contactPhone: record?.phone || '',
+            ownerId: record.id,
+            ownerName: record.name,
+            contactPhone: record.phone,
           },
     );
   };

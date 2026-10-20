@@ -7,6 +7,7 @@ import { Button } from '../../../components/ui/button';
 import { type EmployeeClient, type FollowUp } from '../client-model';
 import {
   ClientFollowUpTimeline,
+  ClientInterestMiniCard,
   SuitablePropertyMiniCard,
 } from './client-cards';
 import { AddFollowUpModal } from './add-follow-up-modal';
@@ -21,10 +22,13 @@ export function EmployeeClientDetailsDrawer({
   client,
   onClose,
   onFollowUp,
+  onOpenProperty,
 }: {
   client: EmployeeClient;
   onClose: () => void;
-  onFollowUp: (item: FollowUp) => void;
+  onFollowUp: (item: FollowUp) => Promise<string | null>;
+  /** Ask the properties page to open one exact `Property.id`. */
+  onOpenProperty?: (propertyId: string) => void;
 }) {
   const [tab, setTab] = useState('summary'),
     [adding, setAdding] = useDraftState(
@@ -35,7 +39,7 @@ export function EmployeeClientDetailsDrawer({
   return (
     <PropertyOverlay title={client.name} drawer onClose={onClose}>
       <p>
-        <bdi>{client.phone}</bdi> · الموظف المسؤول: أحمد محمد
+        <bdi>{client.phone}</bdi> · الموظف المسؤول: {client.employee}
       </p>
       <SegmentedTabs
         id="client-detail"
@@ -70,15 +74,34 @@ export function EmployeeClientDetailsDrawer({
           ) : item.id === 'history' ? (
             <ClientFollowUpTimeline items={client.history} />
           ) : item.id === 'properties' ? (
-            <div className={styles.list}>
-              {client.properties.length ? (
-                client.properties.map((p) => (
-                  <SuitablePropertyMiniCard key={p.name} property={p} />
-                ))
-              ) : (
-                <p>لا يوجد عقار مناسب ضمن العينة الحالية.</p>
-              )}
-            </div>
+            <>
+              <div className={styles.list}>
+                {client.properties.length ? (
+                  client.properties.map((p) => (
+                    <SuitablePropertyMiniCard key={p.name} property={p} />
+                  ))
+                ) : (
+                  <p>لا يوجد عقار مناسب مرتبط بهذا العميل.</p>
+                )}
+              </div>
+              {/* Real `ClientPropertyInterest` rows: interest in an EXISTING
+                  program property, saved with the wizard. Clickable rows open
+                  the EXACT property through the shared deep-link channel. */}
+              {client.propertyInterests.length ? (
+                <>
+                  <h3>استفسارات عقارات البرنامج</h3>
+                  <div className={styles.list}>
+                    {client.propertyInterests.map((interest) => (
+                      <ClientInterestMiniCard
+                        key={interest.propertyId}
+                        interest={interest}
+                        onOpenProperty={onOpenProperty}
+                      />
+                    ))}
+                  </div>
+                </>
+              ) : null}
+            </>
           ) : (
             <p>{client.notes || 'لا توجد ملاحظات.'}</p>
           )}
@@ -88,11 +111,16 @@ export function EmployeeClientDetailsDrawer({
         <AddFollowUpModal
           clientId={client.id}
           onCancel={() => setAdding(false)}
-          onSave={(item) => {
-            onFollowUp(item);
+          onSave={async (item) => {
+            const failure = await onFollowUp(item);
+            if (failure) {
+              setNotice(failure);
+              return failure;
+            }
             setAdding(false);
             setTab('history');
-            setNotice('تم تسجيل المتابعة مؤقتًا');
+            setNotice('تم تسجيل المتابعة بنجاح');
+            return null;
           }}
         />
       ) : (

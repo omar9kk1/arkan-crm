@@ -12,8 +12,9 @@ import { Toast } from '../../../../components/ui/toast';
 import type { EmployeeClient } from '../../client-model';
 import {
   clientLabels,
+  linkedPropertyPreview,
+  normalizeLinkedProperty,
   parseRequest,
-  properties,
   requestSummary,
   type ClientType,
   type ClientRequestDraft,
@@ -35,7 +36,7 @@ export function AddClientRequestModal({
   clients = [],
 }: {
   onClose: () => void;
-  onSave: (client: EmployeeClient) => void;
+  onSave: (client: EmployeeClient) => void | boolean | Promise<void | boolean>;
   clients?: readonly EmployeeClient[];
 }) {
   const formKey = 'add-client';
@@ -85,7 +86,7 @@ export function AddClientRequestModal({
         <DraftTools formKey={formKey} />{' '}
         <form
           className={styles.form}
-          onSubmit={(event) => {
+          onSubmit={async (event) => {
             event.preventDefault();
             const validation = bundleError(
               bundle,
@@ -103,7 +104,11 @@ export function AddClientRequestModal({
             }
             if (submitted.current) return;
             submitted.current = true;
-            onSave(saveBundle(bundle, clients));
+            const saved = await onSave(saveBundle(bundle, clients));
+            if (saved === false) {
+              submitted.current = false;
+              return;
+            }
             clearFormDraft();
           }}
         >
@@ -208,17 +213,15 @@ export function AddClientRequestModal({
                 </section>
                 {bundle.types.map((type) => {
                   const d = typeDraft(bundle, type);
-                  const p = d.interest.hasLinkedProperty
-                    ? properties.find(
-                        (p) => p.id === d.linkedProperty.propertyId,
-                      )
-                    : undefined;
+                  const linked = normalizeLinkedProperty(d.linkedProperty);
                   return (
                     <section className={styles.panel} key={type}>
                       <h3>{clientLabels[type]}</h3>
-                      {p && (
+                      {d.interest.hasLinkedProperty && (
                         <p className={styles.preview}>
-                          {p.id} · {p.area} · {p.price} · {p.type} · {p.status}
+                          {linked.property
+                            ? linkedPropertyPreview(linked.property)
+                            : 'لم يتم اختيار عقار بعد'}
                         </p>
                       )}
                       <div className={styles.summary}>{requestSummary(d)}</div>

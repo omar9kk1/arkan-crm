@@ -19,9 +19,12 @@ import styles from './properties.module.css';
 export function PropertyCard({
   property,
   onOpen,
+  selected = false,
 }: {
   property: PreviewProperty;
   onOpen: () => void;
+  /** Deep-link highlight: a subtle outline on the EXACT targeted card. */
+  selected?: boolean;
 }) {
   // Only rows nearing the viewport fetch their private image, so a long list
   // does not issue one authenticated image request per card on mount.
@@ -39,7 +42,10 @@ export function PropertyCard({
     <button
       ref={ref}
       type="button"
-      className={styles.propertyCard}
+      className={`${styles.propertyCard} ${selected ? styles.selected : ''}`}
+      // The scroll-into-view hook locates the deep-linked card by this stable
+      // id attribute — never by code, index or displayed text.
+      data-property-id={property.id || undefined}
       onClick={onOpen}
       aria-label={`تفاصيل العقار: ${district}، ${property.price}، ${status}`}
     >

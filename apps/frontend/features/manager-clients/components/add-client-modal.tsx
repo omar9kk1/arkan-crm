@@ -1,12 +1,12 @@
 import { AddClientRequestModal } from '../../employee-clients/components/request-wizard/add-client-request-modal';
-import type { ClientSample } from '../mock-data';
+import type { ClientSample } from '../client-model';
 export function AddClientModal({
   onClose,
   onSave,
   clients,
 }: {
   onClose: () => void;
-  onSave: (client: ClientSample) => void;
+  onSave: (client: ClientSample) => void | boolean | Promise<void | boolean>;
   clients: readonly ClientSample[];
 }) {
   return (
@@ -22,29 +22,39 @@ export function AddClientModal({
         notes: client.notes || '',
         history: [],
         next: client.nextFollowUp,
+        employee: client.employee,
         properties: client.properties.map((p) => ({
           name: p.title,
           area: '',
           price: p.summary,
         })),
+        // Interests handed to the wizard as its own display shape.
+        propertyInterests: (client.propertyInterests ?? []).map((row) => ({
+          propertyId: row.id,
+          name: row.title,
+          area: '',
+          price: row.summary,
+          reason: row.reason,
+          notes: row.notes,
+        })),
         requestBundle: client.requestBundle,
       }))}
-      onSave={(client) => {
+      onSave={async (client) => {
         const previous = clients.find((c) => c.id === client.id);
         const newProperties = client.properties.map((p) => ({
+          id: '',
           code: p.name.match(/K\d+/)?.[0] || p.name,
           title: p.name,
           summary: `${p.area} · ${p.price}`,
         }));
-        onSave({
-          ...previous,
-          id: client.id,
+        return await onSave({
+          id: previous?.id ?? client.id,
           name: client.name,
           phone: client.phone,
           type: client.type,
           employee: previous?.employee || 'المدير — لم يُخصص لموظف بعد',
           lastFollowUp: previous?.lastFollowUp || 'لم تُسجل بعد',
-          nextFollowUp: previous?.nextFollowUp || 'لم تُحدد',
+          nextFollowUp: previous?.nextFollowUp || 'لم يُحدد بعد',
           status: previous?.status || 'مفتوح',
           request: `${client.type} · ${client.area} · الميزانية: ${client.budget}`,
           notes: client.notes,
@@ -55,7 +65,10 @@ export function AddClientModal({
           ].filter(
             (p, i, list) => list.findIndex((v) => v.code === p.code) === i,
           ),
-          requestBundle: client.requestBundle,
+          // Interests keep coming from the NEXT "refresh" read; the locally
+          // changed draft links are only display-aids until then.
+          propertyInterests: previous?.propertyInterests ?? [],
+          requestBundle: previous?.requestBundle ?? client.requestBundle,
         });
       }}
     />

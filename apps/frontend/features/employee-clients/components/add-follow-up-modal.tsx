@@ -15,7 +15,7 @@ export function AddFollowUpModal({
   onCancel,
 }: {
   clientId: string;
-  onSave: (item: FollowUp) => void;
+  onSave: (item: FollowUp) => void | Promise<string | null>;
   onCancel: () => void;
 }) {
   const formKey = 'client-followup:' + clientId;
@@ -29,24 +29,35 @@ export function AddFollowUpModal({
       <>
         <DraftTools formKey={formKey} />{' '}
         <form
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
+            setError('');
             const data = new FormData(e.currentTarget);
             const result = String(data.get('result') || '').trim();
+            const type = String(data.get('type') || '').trim();
             if (!result) {
               setError('أدخل نتيجة التواصل.');
               return;
             }
-            onSave({
+            if (!type) {
+              setError('حدد نوع المتابعة.');
+              return;
+            }
+            const saved = await onSave({
               id:
                 globalThis.crypto?.randomUUID?.() ??
                 `local-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
               date: localDate(),
-              type: String(data.get('type')),
+              type,
               next: String(data.get('next')),
               result,
               note: String(data.get('note') || '').trim(),
+              employee: '',
             });
+            if (typeof saved === 'string') {
+              setError(saved);
+              return;
+            }
             clearFormDraft();
           }}
         >

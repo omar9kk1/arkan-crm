@@ -1,26 +1,30 @@
-.segmented.segmented {
+/* The segmented bar is now a two-layer sandwich: this wrapper is the STATIC
+   pill surface (rounded, blurred, never scrolls), and the tablist inside it
+   (PropertiesTabs `.scroller`) is the only thing that scrolls. The painted
+   scroll indicator is anchored to this wrapper, so it can never drift past
+   the pill's rounded corners the way a native scrollbar does. */
+.segmented {
   --segment-surface: rgba(255, 255, 255, 0.55);
   --segment-border: rgba(255, 255, 255, 0.75);
   --segment-active: rgba(255, 255, 255, 0.7);
   --segment-count: rgba(255, 255, 255, 0.65);
+  position: relative;
   display: flex;
-  flex-wrap: nowrap;
-  gap: var(--space-1);
-  padding: var(--space-2);
-  margin: 0;
   min-width: 0;
   max-width: 100%;
+  margin: 0;
+  padding: var(--space-2);
   border: 1px solid var(--segment-border);
   border-radius: var(--radius-pill);
   background: var(--segment-surface);
   box-shadow: var(--shadow-card);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scroll-behavior: smooth;
 }
-.segmented.segmented button {
+.segmented > [role='tablist'] {
+  gap: var(--space-1);
+}
+.segmented > [role='tablist'] > button {
   flex: 1 0 auto;
   display: flex;
   align-items: center;
@@ -35,10 +39,12 @@
   white-space: nowrap;
   box-shadow: none;
 }
-.segmented.segmented button:hover {
+.segmented > [role='tablist'] > button:hover {
   background: var(--segment-surface);
 }
-.segmented.segmented button[aria-selected='true'] {
+/* Attribute-qualified selector keeps this above the base `.tabs button`
+   styling regardless of stylesheet source order. */
+.segmented > [role='tablist'] > button[aria-selected='true'] {
   background: var(--segment-active);
   color: var(--ink);
   border-color: var(--segment-border);
@@ -60,15 +66,15 @@
   outline-offset: -3px;
 }
 @media (max-width: 600px) {
-  .segmented.segmented {
+  .segmented {
     width: 100%;
   }
-  .segmented.segmented button {
+  .segmented > [role='tablist'] > button {
     padding-inline: var(--space-3);
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .segmented.segmented {
+  .segmented > [role='tablist'] {
     scroll-behavior: auto;
   }
 }

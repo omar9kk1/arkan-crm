@@ -3,13 +3,39 @@ import { Contact, Prisma } from '@prisma/client';
 import { Role, type AuthUser } from '@arkan/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { resolveLimit } from '../common/pagination';
+import { propertyVisibilityWhere } from '../properties/property-visibility';
 import { contactOwnershipWhere } from './contact-policy';
 import { CreateContactDto } from './dto/create-contact.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
 import { ListContactsQueryDto } from './dto/list-contacts.query';
-import type { ContactDto, ContactPageDto } from './contact.dto';
+import type {
+  ContactDto,
+  ContactPageDto,
+  ContactPropertyRefDto,
+} from './contact.dto';
 
-export function serializeContact(contact: Contact): ContactDto {
+/**
+ * Linked properties are filtered inside the Prisma query with the same row-level
+ * rule as `GET /properties`, so the response never carries a property the viewer
+ * could not open directly. References are ordered for a stable card summary.
+ */
+function contactInclude(viewer: AuthUser) {
+  return {
+    properties: {
+      where: propertyVisibilityWhere(viewer),
+      select: { id: true, reference: true, listingType: true },
+      orderBy: [{ reference: 'asc' }],
+    },
+    // Joined, not queried per row: the responsible employee's display name
+    // comes from the related `User.name` in the same query.
+    responsibleUser: { select: { name: true } },
+  } satisfies Prisma.ContactInclude;
+}
+
+export function serializeContact(
+  contact: Contact & { responsibleUser?: { name: string } | null },
+  properties: readonly ContactPropertyRefDto[] = [],
+): ContactDto {
   return {
     id: contact.id,
     type: contact.type,
@@ -17,6 +43,12 @@ export function serializeContact(contact: Contact): ContactDto {
     phone: contact.phone,
     notes: contact.notes,
     responsibleUserId: contact.responsibleUserId,
+    responsibleEmployeeName: contact.responsibleUser?.name ?? null,
+    properties: properties.map((property) => ({
+      id: property.id,
+      reference: property.reference,
+      listingType: property.listingType,
+    })),
     createdAt: contact.createdAt.toISOString(),
     updatedAt: contact.updatedAt.toISOString(),
   };
@@ -38,6 +70,7 @@ export class ContactsService {
           // records (responsibleUserId = null) and are not auto-granted to employees.
           responsibleUserId: viewer.role === Role.EMPLOYEE ? viewer.id : null,
         },
+        include: { responsibleUser: { select: { name: true } } },
       });
       await tx.auditLog.create({
         data: {
@@ -64,6 +97,7 @@ export class ContactsService {
     };
     const rows = await this.prisma.contact.findMany({
       where,
+      include: contactInclude(viewer),
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: limit + 1,
       ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
@@ -71,13 +105,18 @@ export class ContactsService {
     const hasMore = rows.length > limit;
     const items = hasMore ? rows.slice(0, limit) : rows;
     return {
-      items: items.map(serializeContact),
+      items: items.map((row) => serializeContact(row, row.properties)),
       nextCursor: hasMore ? (items[items.length - 1]?.id ?? null) : null,
     };
   }
 
   async findOne(viewer: AuthUser, id: string): Promise<ContactDto> {
-    return serializeContact(await this.requireVisible(viewer, id));
+    const contact = await this.prisma.contact.findFirst({
+      where: { id, ...contactOwnershipWhere(viewer) },
+      include: contactInclude(viewer),
+    });
+    if (!contact) throw new NotFoundException('Contact not found');
+    return serializeContact(contact, contact.properties);
   }
 
   async update(
@@ -102,6 +141,7 @@ export class ContactsService {
             ? { notes: dto.notes?.trim() || null }
             : {}),
         },
+        include: contactInclude(viewer),
       });
       await tx.auditLog.create({
         data: {
@@ -114,7 +154,7 @@ export class ContactsService {
       });
       return contact;
     });
-    return serializeContact(updated);
+    return serializeContact(updated, updated.properties);
   }
 
   /** Returns the contact when the viewer may act on it, otherwise 404. */

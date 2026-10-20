@@ -156,6 +156,13 @@ export interface PropertyPageDto {
   nextCursor: string | null;
 }
 
+export interface ContactPropertyRefDto {
+  id: string;
+  reference: string;
+  /** Real transaction type of the linked property (`Property.listingType`). */
+  listingType: DealType;
+}
+
 export interface ContactDto {
   id: string;
   type: ContactTypeApi;
@@ -163,6 +170,10 @@ export interface ContactDto {
   phone: string;
   notes: string | null;
   responsibleUserId: string | null;
+  /** Display name of the responsible employee from `User.name`; null when unassigned. */
+  responsibleEmployeeName: string | null;
+  /** Linked properties (`Property.contactId`) the viewer is authorized to see. */
+  properties: ContactPropertyRefDto[];
   createdAt: string;
   updatedAt: string;
 }

@@ -3,15 +3,20 @@ import { useDraftState } from '../../../lib/drafts/use-form-draft';
 
 import { Toast } from '../../../components/ui/toast';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { EmployeePageShell } from '../../../components/layout/employee/employee-page-shell';
 import { Button } from '../../../components/ui/button';
 import { SearchBar } from '../../../components/ui/search-bar';
 import { Card } from '../../../components/ui/card';
 import { PropertiesSegmentedTabs as SegmentedTabs } from '../../../components/ui/properties-segmented-tabs';
-import { tabs, filterProperties, type Property } from '../model';
+import { matchesTab, tabs, filterProperties, type Property } from '../model';
 import { mapPropertyFromApi } from '../../../lib/property-adapter';
 import { usePropertyList } from '../../../lib/use-property-list';
+import {
+  employeeTabForRow,
+  withRevealedRow,
+} from '../../../lib/property-reveal';
+import { useRevealScroll } from '../../../lib/use-reveal-scroll';
 import { EmployeePropertyCard } from './employee-property-card';
 import { EmployeePropertyDetailsDrawer } from './employee-property-details-drawer';
 import { AddPropertyModal } from './add-property-modal';
@@ -46,6 +51,9 @@ export function EmployeePropertiesPage() {
     loadMore,
     selected,
     setSelected,
+    revealed,
+    targetId,
+    closeSelected,
   } = usePropertyList<Property>({
     pageSize: PAGE_SIZE,
     mapProperty: mapPropertyFromApi,
@@ -53,7 +61,33 @@ export function EmployeePropertiesPage() {
     onOpenError: setNotice,
   });
 
-  const visible = filterProperties(items, tab, query);
+  // A deep-link target must be VISIBLE: activate the broadest employee tab that
+  // lists the resolved row (same `matchesTab` rule as the panel filter and the
+  // tab counts) and clear the search box, so the card is not hidden by filters.
+  useEffect(() => {
+    if (!revealed) return;
+    const needed = employeeTabForRow(
+      revealed,
+      (row, tabId) => matchesTab(row as Property, tabId),
+      tabs.map((t) => t.id),
+    );
+    if (needed && needed !== tab) setTab(needed);
+    if (query) setQuery('');
+    // Deliberately keys on the resolved target only: a manual tab switch or a
+    // later query edit is never fought by this effect (deps intentionally omit
+    // `tab`/`query`, which the hook reads through the current render).
+  }, [revealed?.id]);
+
+  // The resolved target is merged into the rows so its REAL card is rendered
+  // even when it was not in the first page window — the real authorized row,
+  // never a synthesised card or a duplicate of an already-loaded row.
+  const rows = useMemo(
+    () => withRevealedRow(items, revealed),
+    [items, revealed],
+  );
+  useRevealScroll(targetId);
+
+  const visible = filterProperties(rows, tab, query);
   const regions = [...new Set(visible.map((p) => p.region))].filter(Boolean);
 
   return (
@@ -80,7 +114,7 @@ export function EmployeePropertiesPage() {
               // as a total.
               count:
                 !loading && nextCursor === null
-                  ? filterProperties(items, item.id, '').length
+                  ? filterProperties(rows, item.id, '').length
                   : undefined,
             }))}
             value={tab}
@@ -107,7 +141,7 @@ export function EmployeePropertiesPage() {
             إعادة المحاولة
           </Button>
         </Card>
-      ) : items.length === 0 ? (
+      ) : rows.length === 0 ? (
         <Card>لم يسجّل الخادم أي عقار حتى الآن.</Card>
       ) : (
         <>
@@ -133,6 +167,7 @@ export function EmployeePropertiesPage() {
                               key={p.id}
                               property={p}
                               onOpen={() => setSelected(p)}
+                              selected={!!targetId && p.id === targetId}
                             />
                           ))}
                       </div>
@@ -164,10 +199,10 @@ export function EmployeePropertiesPage() {
       {selected && (
         <EmployeePropertyDetailsDrawer
           property={selected}
-          onClose={() => setSelected(null)}
+          onClose={closeSelected}
           onEdit={() => {
             setForm({ property: selected });
-            setSelected(null);
+            closeSelected();
           }}
         />
       )}

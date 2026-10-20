@@ -75,6 +75,13 @@
   outline: 3px solid var(--focus);
   outline-offset: 4px;
 }
+/* Subtle selected state for a deep-linked card: the same warm outline the
+   card already uses for keyboard focus, shown persistently on the EXACT
+   targeted property until the selection is cleared. */
+.propertyCard.selected {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
 /* Uploaded single image fills the whole card, edge to edge. */
 .cardImage {
   position: absolute;

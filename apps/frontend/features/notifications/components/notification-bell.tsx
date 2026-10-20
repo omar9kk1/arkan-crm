@@ -10,6 +10,7 @@ import { useAuth } from '../../auth/components/auth-provider';
 import { NOTIFICATION_PAGE_SIZE, useNotifications } from '../store';
 import type { NotificationDto } from '../../../lib/api/notification-types';
 import { requestOpenProperty } from '../open-property';
+import { PROPERTY_QUERY_PARAM } from '../../../lib/property-reveal';
 import { notifyPropertyDataChanged } from '../property-refresh';
 import styles from './notification-bell.module.css';
 
@@ -162,7 +163,12 @@ export function NotificationBell({ className = '' }: { className?: string }) {
     // so a null `propertyId` simply means "nothing to open".
     if (item.propertyId) {
       requestOpenProperty(item.propertyId);
-      router.push(propertiesRoute);
+      // Carry the id in the URL as well: the properties page resolves both
+      // channels through the same authorized lookup, and the URL keeps the exact
+      // card selected across a refresh.
+      router.push(
+        `${propertiesRoute}?${PROPERTY_QUERY_PARAM}=${encodeURIComponent(item.propertyId)}`,
+      );
     }
   };
 

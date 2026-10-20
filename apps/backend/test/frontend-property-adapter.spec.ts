@@ -4,8 +4,10 @@ import {
   buildDescription,
   deriveMine,
   displayStatus,
+  editableByViewer,
   floorSummary,
   formatDecimal,
+  keepsExistingContact,
   mapFloors,
   orderedFloors,
   mapPreviewFromApi,
@@ -20,6 +22,12 @@ import {
   toUpdatePropertyPayload,
   type PropertyFormInput,
 } from '../../frontend/lib/property-adapter';
+import {
+  applyLinkedContact,
+  linkedContactSelection,
+  toPropertyFromNewV2,
+} from '../../frontend/features/employee-properties/components/new-property-model-v2';
+import { wizardForm } from './support/wizard-form';
 import type {
   PrivatePropertyDto,
   PropertyFloorDto,
@@ -671,6 +679,254 @@ describe('review state (request changes vs reject)', () => {
       isMine: undefined,
     } as unknown as PrivatePropertyDto;
     expect(mapPropertyFromApi(withoutFlag, employee).mine).toBe(true);
+  });
+});
+
+/**
+ * Regression coverage for the confirmed duplicate-contact defect: editing or
+ * resubmitting an already-linked property must keep its Contact.id instead of
+ * sending `newContact`.
+ */
+describe('editing keeps the property contact', () => {
+  const employee = { id: 'emp-1', role: 'EMPLOYEE' as const };
+
+  it('carries the authorized linked contact id onto the mapped property', () => {
+    const property = mapPropertyFromApi(privateDto(), employee);
+    expect(property.linkedContactId).toBe('contact-1');
+    expect(property.contactType).toBe('OWNER');
+  });
+
+  it('carries no linked contact for a public response (no private data)', () => {
+    const property = mapPropertyFromApi(publicDto(), employee);
+    expect(property.linkedContactId).toBeNull();
+    expect(property.owner).toBe('');
+    expect(property.phone).toBe('');
+    expect(property.hasPrivateContact).toBe(false);
+  });
+
+  it('carries no linked contact when the private contact was withheld', () => {
+    const dto = privateDto({
+      contactId: null,
+      contact: null,
+    });
+    const property = mapPropertyFromApi(dto, employee);
+    expect(property.linkedContactId).toBeNull();
+    expect(property.hasPrivateContact).toBe(false);
+  });
+
+  it('preselects the existing contact in step 3 from the loaded row', () => {
+    const property = mapPropertyFromApi(privateDto(), employee);
+    const form = wizardForm(
+      baseForm({
+        ownerMode: 'EXISTING',
+        ownerId: 'contact-1',
+        ownerName: property.owner,
+        contactPhone: property.phone,
+      }),
+    );
+    expect(linkedContactSelection(property, form)).toBe('contact-1');
+    expect(keepsExistingContact(form, { contactId: 'contact-1' })).toBe(true);
+  });
+
+  it('sends contactId — never newContact — when the contact is untouched', () => {
+    const form = baseForm({
+      ownerMode: 'EXISTING',
+      ownerId: 'contact-1',
+      ownerName: 'أبو فهد',
+      contactPhone: '66661122',
+    });
+    const payload = toUpdatePropertyPayload(form, 3);
+    expect(payload.contactId).toBe('contact-1');
+    expect(payload.newContact).toBeUndefined();
+  });
+
+  it('still sends contactId on a plain resubmission edit', () => {
+    const form = baseForm({
+      district: 'الفنطاس',
+      ownerMode: 'EXISTING',
+      ownerId: 'contact-1',
+    });
+    const payload = toUpdatePropertyPayload(form, 4);
+    expect(payload.contactId).toBe('contact-1');
+    expect(payload.newContact).toBeUndefined();
+  });
+
+  it('creates a new contact only when the user switches to NEW explicitly', () => {
+    const form = baseForm({ ownerMode: 'NEW', ownerId: '' });
+    const payload = toUpdatePropertyPayload(form, 3);
+    expect(payload.contactId).toBeUndefined();
+    expect(payload.newContact).toEqual({
+      type: 'OWNER',
+      name: 'أبو فهد',
+      phone: '66661122',
+    });
+  });
+
+  it('clears the linked selection when the user leaves the linked contact', () => {
+    const property = mapPropertyFromApi(privateDto(), employee);
+    const switched = wizardForm(baseForm({ ownerMode: 'NEW', ownerId: '' }));
+    expect(linkedContactSelection(property, switched)).toBeNull();
+    expect(toUpdatePropertyPayload(switched, 3).contactId).toBeUndefined();
+  });
+
+  it('never falls back to NEW when the linked row has no authorized contact', () => {
+    const withoutContact = {
+      ...mapPropertyFromApi(privateDto(), employee),
+      linkedContactId: null,
+    };
+    const form = wizardForm(baseForm({ ownerMode: 'NEW', ownerId: '' }));
+    // The wizard must keep whatever the form says — it is never auto-switched.
+    expect(linkedContactSelection(withoutContact, form)).toBeUndefined();
+    expect(keepsExistingContact(form, { contactId: null })).toBe(false);
+  });
+
+  it('preserves the id for a BROKER-linked row', () => {
+    const dto = privateDto({
+      contactId: 'broker-9',
+      contact: {
+        id: 'broker-9',
+        type: 'BROKER',
+        name: 'وسيط',
+        phone: '66660000',
+        notes: null,
+      },
+    });
+    const property = mapPropertyFromApi(dto, employee);
+    expect(property.contactType).toBe('BROKER');
+    expect(property.linkedContactId).toBe('broker-9');
+    const form = wizardForm(
+      baseForm({
+        contactType: 'BROKER',
+        brokerMode: 'EXISTING',
+        brokerId: 'broker-9',
+        ownerMode: 'NEW',
+        ownerId: '',
+      }),
+    );
+    expect(linkedContactSelection(property, form)).toBe('broker-9');
+    const payload = toUpdatePropertyPayload(form, 2);
+    expect(payload.contactId).toBe('broker-9');
+    expect(payload.newContact).toBeUndefined();
+  });
+
+  it('keeps the linked id in the rebuilt display model only while unchanged', () => {
+    const previous = mapPropertyFromApi(privateDto(), employee);
+    const unchanged = wizardForm(
+      baseForm({ ownerMode: 'EXISTING', ownerId: 'contact-1' }),
+    );
+    expect(
+      toPropertyFromNewV2(unchanged, false, previous).linkedContactId,
+    ).toBe('contact-1');
+
+    const switched = wizardForm(baseForm({ ownerMode: 'NEW', ownerId: '' }));
+    expect(
+      toPropertyFromNewV2(switched, false, previous).linkedContactId,
+    ).toBeNull();
+  });
+
+  it('seeds the edit draft onto EXISTING when the row carries a linked contact', () => {
+    // This is the confirmed defect: the edit draft used to open on NEW, so an
+    // untouched save sent `newContact` and created a duplicate person.
+    const property = mapPropertyFromApi(privateDto(), employee);
+    const draft = wizardForm(baseForm());
+    expect(draft.ownerMode).toBe('NEW');
+
+    const seeded = applyLinkedContact(draft, property);
+    expect(seeded.ownerMode).toBe('EXISTING');
+    expect(seeded.ownerId).toBe('contact-1');
+    // The seeded draft now resolves the linked selection and stays on it.
+    expect(linkedContactSelection(property, seeded)).toBe('contact-1');
+    expect(toUpdatePropertyPayload(seeded, 3).contactId).toBe('contact-1');
+    expect(toUpdatePropertyPayload(seeded, 3).newContact).toBeUndefined();
+  });
+
+  it('seeds a BROKER-linked row onto the broker EXISTING mode', () => {
+    const dto = privateDto({
+      contactId: 'broker-7',
+      contact: {
+        id: 'broker-7',
+        type: 'BROKER',
+        name: 'وسيط',
+        phone: '66660001',
+        notes: null,
+      },
+    });
+    const property = mapPropertyFromApi(dto, employee);
+    const seeded = applyLinkedContact(
+      wizardForm(baseForm({ contactType: 'BROKER' })),
+      property,
+    );
+    expect(seeded.brokerMode).toBe('EXISTING');
+    expect(seeded.brokerId).toBe('broker-7');
+    expect(linkedContactSelection(property, seeded)).toBe('broker-7');
+  });
+
+  it('leaves the NEW flow untouched when there is no authorized linked contact', () => {
+    const noLinked = mapPropertyFromApi(publicDto(), employee);
+    expect(noLinked.linkedContactId).toBeNull();
+    const draft = wizardForm(baseForm());
+    expect(applyLinkedContact(draft, noLinked)).toBe(draft);
+    // And an undefined property (a brand-new wizard) is a no-op too.
+    expect(applyLinkedContact(draft, undefined)).toBe(draft);
+  });
+});
+
+/**
+ * The details-drawer edit action is gated on the server-derived creator flag,
+ * never on a name or a client value.
+ */
+describe('editableByViewer', () => {
+  it('opens the edit action for an own approved row', () => {
+    expect(
+      editableByViewer({
+        apiStatus: 'AVAILABLE',
+        reviewStatus: 'APPROVED',
+        mine: true,
+      }),
+    ).toBe(true);
+  });
+
+  it('keeps another employee\'s approved row read-only', () => {
+    expect(
+      editableByViewer({
+        apiStatus: 'AVAILABLE',
+        reviewStatus: 'APPROVED',
+        mine: false,
+      }),
+    ).toBe(false);
+  });
+
+  it('opens the edit action for an own row needing correction', () => {
+    expect(
+      editableByViewer({ apiStatus: 'REJECTED', mine: true }),
+    ).toBe(true);
+    expect(
+      editableByViewer({
+        apiStatus: 'PENDING',
+        reviewStatus: 'CHANGES_REQUESTED',
+        mine: true,
+      }),
+    ).toBe(true);
+  });
+
+  it('never opens on a status the backend refuses to edit', () => {
+    expect(editableByViewer({ apiStatus: 'SOLD', mine: true })).toBe(false);
+    expect(editableByViewer({ apiStatus: 'ARCHIVED', mine: true })).toBe(false);
+    expect(editableByViewer({ apiStatus: 'AVAILABLE' })).toBe(false);
+    // An ordinary PENDING row (no changes requested) is still the creator's and
+    // stays editable, matching the wizard's existing behaviour.
+    expect(editableByViewer({ apiStatus: 'PENDING', mine: true })).toBe(true);
+  });
+
+  it('keeps an approved own row out of the resubmit wording', () => {
+    // Saving an approved row goes straight to review server-side, so the
+    // wizard must NOT call `/resubmit` afterwards (status PENDING, review PENDING).
+    expect(
+      needsResubmitAfterCorrection({
+        ...publicDto({ status: 'PENDING' }),
+        reviewStatus: 'PENDING',
+      } as PrivatePropertyDto),
+    ).toBe(false);
   });
 });
 

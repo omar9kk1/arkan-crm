@@ -285,6 +285,10 @@ describeWithDatabase('Property images + EXCHANGE (storage, validation, mapping)'
       // Added by the in-app notifications task: an additive notification-events
       // migration (new enum + two nullable/defaulted columns + one unique index).
       '20261017120000_notification_events',
+      // Added by the OWNER-APPROVED client→property interest persistence:
+      // an additive `ClientPropertyInterest` table only (new table + indexes +
+      // FKs; no change to any existing table or row).
+      '20261020014757_client_property_interest',
     ]);
   });
 });

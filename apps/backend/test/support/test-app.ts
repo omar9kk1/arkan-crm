@@ -11,6 +11,7 @@ import request from 'supertest';
 import { ThrottlerStorage } from '@nestjs/throttler';
 import { environmentSchema } from '../../src/config/environment';
 import { AuthModule } from '../../src/auth/auth.module';
+import { ClientsModule } from '../../src/clients/clients.module';
 import { ContactsModule } from '../../src/contacts/contacts.module';
 import { EmployeesModule } from '../../src/employees/employees.module';
 import { PropertiesModule } from '../../src/properties/properties.module';
@@ -68,8 +69,8 @@ export interface TestContext {
 const TEST_PASSWORD = 'ChangeMe123!';
 
 /**
- * Builds a real Nest application (Auth + Contacts + Employees + Properties +
- * Notifications + Files) backed by the DEDICATED test database. It never touches the development
+ * Builds a real Nest application (Auth + Clients + Contacts + Employees +
+ * Properties + Notifications + Files) backed by the DEDICATED test database. It never touches the development
  * database: DATABASE_URL is repointed to TEST_DATABASE_URL before any PrismaClient
  * is constructed.
  */
@@ -100,6 +101,7 @@ export async function createTestApp(options?: {
       }),
       AuthModule,
       FilesModule,
+      ClientsModule,
       ContactsModule,
       EmployeesModule,
       PropertiesModule,
