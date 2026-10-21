@@ -1,5 +1,9 @@
 import type { NotificationDto } from '../../../lib/api/notification-types';
-import { displayDate, notificationTypeLabel } from '../../notifications/view';
+import {
+  displayDate,
+  notificationTypeLabel,
+  resolvePropertyCode,
+} from '../../notifications/view';
 import styles from './employee-notifications.module.css';
 
 export function EmployeeNotificationCard({
@@ -25,7 +29,9 @@ export function EmployeeNotificationCard({
       />
       <span className={styles.body}>
         <span className={styles.title}>{item.title}</span>
-        <span className={styles.description}>{item.message}</span>
+        <span className={styles.description}>
+          {resolvePropertyCode(item.message, item.propertyReference)}
+        </span>
         <span className={styles.category}>
           {notificationTypeLabel(item.type)}
         </span>

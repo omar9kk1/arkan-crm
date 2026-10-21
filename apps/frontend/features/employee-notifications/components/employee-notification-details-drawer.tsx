@@ -3,7 +3,11 @@ import { useState } from 'react';
 import { PropertyOverlay } from '../../manager-properties/components/property-overlay';
 import { Button } from '../../../components/ui/button';
 import type { NotificationDto } from '../../../lib/api/notification-types';
-import { displayDate, notificationTypeLabel } from '../../notifications/view';
+import {
+  displayDate,
+  notificationTypeLabel,
+  resolvePropertyCode,
+} from '../../notifications/view';
 import styles from '../../manager-notifications/components/notifications.module.css';
 
 /**
@@ -33,7 +37,7 @@ export function EmployeeNotificationDetailsDrawer({
           {item.read ? 'مقروء' : 'غير مقروء'}
         </span>
       </div>
-      <p>{item.message}</p>
+      <p>{resolvePropertyCode(item.message, item.propertyReference)}</p>
       <dl className={styles.facts}>
         {(
           [

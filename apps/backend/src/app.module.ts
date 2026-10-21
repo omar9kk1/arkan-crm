@@ -18,6 +18,7 @@ import { FinanceModule } from './finance/finance.module';
 import { AttendanceModule } from './attendance/attendance.module';
 import { FollowupsModule } from './followups/followups.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { PushModule } from './push/push.module';
 import { FilesModule } from './files/files.module';
 import { SmartPasteModule } from './smart-paste/smart-paste.module';
 @Module({
@@ -44,6 +45,7 @@ import { SmartPasteModule } from './smart-paste/smart-paste.module';
     AttendanceModule,
     FollowupsModule,
     NotificationsModule,
+    PushModule,
     FilesModule,
     SmartPasteModule,
   ],

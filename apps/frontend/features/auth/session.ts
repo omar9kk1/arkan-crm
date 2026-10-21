@@ -1,7 +1,6 @@
 import type { AuthUser, TokenPair } from '@arkan/shared';
 import { ApiError } from '../../lib/api-client';
 import * as api from './api/auth-api';
-
 export interface Session extends TokenPair {
   user: AuthUser;
 }
@@ -155,6 +154,14 @@ export function restoreSession(): Promise<Session | null> {
 export async function signOut(): Promise<void> {
   const tokens = readTokens();
   revision++;
+  // This device's Web Push subscription is dropped BEFORE the session is
+  // closed, so the browser stops being a push target immediately. The server
+  // revokes the whole session lineage on logout as well, so the pushes stop
+  // even if this call never reaches the server.
+  // (Imported lazily: the push helper uses the authorized request layer,
+  // which depends on this module.)
+  const { disablePush } = await import('../notifications/push');
+  await disablePush().catch(() => undefined);
   clearStoredSession();
   if (tokens) await api.logout(tokens.refreshToken);
 }

@@ -25,6 +25,7 @@ import { PropertiesService } from './properties.service';
 import { CreatePropertyMultipartDto } from './dto/create-property-multipart.dto';
 import { CreatePropertyPayloadDto } from './dto/create-property-payload.dto';
 import { UpdatePropertyPayloadDto } from './dto/update-property-payload.dto';
+import { UpdatePropertyRequestDto } from './dto/update-property-request.dto';
 import { ListPropertiesQueryDto } from './dto/list-properties.query';
 import { ApprovePropertyDto } from './dto/approve-property.dto';
 import { RejectPropertyDto } from './dto/reject-property.dto';
@@ -90,12 +91,27 @@ export class PropertiesController {
   }
 
   @Patch(':id')
-  update(
+  @UseInterceptors(
+    FileInterceptor('image', {
+      limits: { fileSize: MAX_IMAGE_BYTES, files: 1 },
+    }),
+  )
+  async update(
     @Req() request: { user: AuthUser },
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: UpdatePropertyPayloadDto,
+    @Body() body: UpdatePropertyRequestDto,
+    @UploadedFile() file?: UploadedImageFile,
   ) {
-    return this.properties.update(request.user, id, body);
+    // A JSON body carries the fields directly; a multipart body carries them
+    // in the `payload` JSON string (the replacement image travels with it).
+    const payload =
+      typeof body.payload === 'string'
+        ? await parseAndValidatePayload(
+            UpdatePropertyPayloadDto,
+            body.payload,
+          )
+        : body;
+    return this.properties.update(request.user, id, payload, file);
   }
 
   @Roles(Role.MANAGER)

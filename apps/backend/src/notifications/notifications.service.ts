@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { Prisma, Role, type NotificationType } from '@prisma/client';
 import type { AuthUser } from '@arkan/shared';
 import { PrismaService } from '../prisma/prisma.service';
@@ -9,8 +10,13 @@ import {
   PROPERTY_EVENT_TITLES,
   notificationEventKeys,
   propertyEventBody,
+  recordEventBody,
+  recordEventKeys,
+  recordEventTitle,
+  type EmployeeRecordEvent,
   type NotificationDraft,
   type PropertyEventContext,
+  type RecordEventContext,
 } from './notification-events';
 import {
   toNotificationDto,
@@ -27,6 +33,16 @@ const NOTIFICATION_SELECT = {
   readAt: true,
   createdAt: true,
   propertyId: true,
+  clientId: true,
+  contactId: true,
+  followUpId: true,
+  // The CURRENT code of the linked property: historical notification bodies may
+  // still carry a retired code, so the current one is resolved from the
+  // property row (the stored text itself is never rewritten).
+  property: { select: { reference: true } },
+  // Only the contact's type is needed (for the bell's routing); the contact's
+  // private fields (phone/notes) are never read for a notification row.
+  contact: { select: { type: true } },
 } satisfies Prisma.NotificationSelect;
 
 /**
@@ -94,7 +110,7 @@ export class NotificationsService {
       userId,
       type: event.type,
       title: event.title,
-      body: propertyEventBody(context.reference),
+      body: propertyEventBody(context.reference, context.changeSummary),
       propertyId: context.propertyId,
       eventKey: event.eventKey,
     };
@@ -124,12 +140,19 @@ export class NotificationsService {
     context: PropertyEventContext,
   ): Promise<void> {
     const managers = await this.activeUserIds(tx, Role.MANAGER);
+    // An EDITED property that was already in the program is announced with the
+    // fields that really changed, so the manager can decide with the facts. A
+    // property that enters the program for the first time keeps the plain
+    // "awaiting review" wording.
+    const isUpdate = context.submissionKind === 'UPDATED';
     await this.deliver(
       tx,
       managers.map((userId) =>
         this.propertyDraft(userId, context, {
           type: 'PROPERTY_RESUBMITTED',
-          title: PROPERTY_EVENT_TITLES.RESUBMITTED,
+          title: isUpdate
+            ? PROPERTY_EVENT_TITLES.RESUBMITTED_UPDATED
+            : PROPERTY_EVENT_TITLES.RESUBMITTED,
           eventKey: notificationEventKeys.resubmitted(
             context.approvalRequestId,
             context.propertyId,
@@ -212,15 +235,82 @@ export class NotificationsService {
       Role.EMPLOYEE,
       context.creatorId,
     );
+    // A property that is approved AGAIN after an edit is not new stock: the
+    // alert says so and lists the public fields that really changed.
+    const isUpdate = context.availabilityKind === 'UPDATED';
     await this.deliver(
       tx,
       employees.map((userId) =>
         this.propertyDraft(userId, context, {
           type: 'PROPERTY_AVAILABLE',
-          title: PROPERTY_EVENT_TITLES.AVAILABLE,
-          eventKey: notificationEventKeys.available(context.propertyId),
+          title: isUpdate
+            ? PROPERTY_EVENT_TITLES.AVAILABLE_UPDATED
+            : PROPERTY_EVENT_TITLES.AVAILABLE,
+          eventKey: notificationEventKeys.available(
+            context.approvalRequestId,
+            context.propertyId,
+            context.version,
+          ),
         }),
       ),
+    );
+  }
+
+  /**
+   * 7. An employee saved or changed a company record (client, follow-up,
+   * payment-free contact card, property interest) → every ACTIVE manager,
+   * exactly once per committed save.
+   *
+   * The writer runs INSIDE the caller's transaction, so a notification row can
+   * never commit for a change that rolled back — and vice versa. Only employee
+   * actions are ever reported: a manager's own write skips this silently, so
+   * there are no manager self-notifications and no employee is ever a
+   * recipient of record events.
+   *
+   * The actor's display name is read from the database inside the same
+   * transaction — never from a request body.
+   */
+  async notifyEmployeeRecordChange(
+    tx: Prisma.TransactionClient,
+    actor: AuthUser,
+    event: EmployeeRecordEvent,
+    record: RecordEventContext,
+  ): Promise<void> {
+    if (actor.role !== Role.EMPLOYEE) return;
+    const actorRow = await tx.user.findUnique({
+      where: { id: actor.id },
+      select: { name: true },
+    });
+    if (!actorRow) return;
+
+    const managers = await this.activeUserIds(tx, Role.MANAGER);
+    // At most one reference column is set by construction; the row id for the
+    // event key follows the same choice (see `recordEventKeys`).
+    const entityId = record.clientId ?? record.contactId ?? record.followUpId;
+    if (!entityId) return;
+
+    const eventKey = recordEventKeys[
+      event.endsWith('_CREATED') ? 'birth' : 'occurrence'
+    ](event, entityId, randomUUID());
+
+    await this.deliver(
+      tx,
+      managers.map((userId) => ({
+        userId,
+        type: event,
+        title: recordEventTitle(event, record.clientIntent),
+        body: recordEventBody(
+          actorRow.name,
+          event,
+          record.contactType,
+          record.clientIntent,
+        ),
+        propertyId: null,
+        clientId: record.clientId ?? null,
+        contactId: record.contactId ?? null,
+        followUpId: record.followUpId ?? null,
+        eventKey,
+      })),
     );
   }
 
@@ -256,7 +346,13 @@ export class NotificationsService {
     return {
       items: items.map((row) =>
         toNotificationDto(
-          row,
+          // Flatten the contact's type and the property's CURRENT code only —
+          // never its private fields, never a rewritten history.
+          {
+            ...row,
+            contactType: row.contact?.type ?? null,
+            propertyReference: row.property?.reference ?? null,
+          },
           row.propertyId && visible.has(row.propertyId)
             ? row.propertyId
             : null,

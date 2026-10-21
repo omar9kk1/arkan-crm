@@ -3,7 +3,12 @@ import { useState } from 'react';
 import { PropertyOverlay } from '../../manager-properties/components/property-overlay';
 import { Button } from '../../../components/ui/button';
 import type { NotificationDto } from '../../../lib/api/notification-types';
-import { displayDate, notificationTypeLabel } from '../../notifications/view';
+import { notificationRoute } from '../../notifications/notification-target';
+import {
+  displayDate,
+  notificationTypeLabel,
+  resolvePropertyCode,
+} from '../../notifications/view';
 import styles from './notifications.module.css';
 
 /**
@@ -18,12 +23,12 @@ export function NotificationDetailsDrawer({
   item,
   onClose,
   onRead,
-  onOpenProperty,
+  onOpenRecord,
 }: {
   item: NotificationDto;
   onClose: () => void;
   onRead: () => void;
-  onOpenProperty: (propertyId: string) => void;
+  onOpenRecord: (path: string) => void;
 }) {
   return (
     <PropertyOverlay title={item.title} drawer onClose={onClose}>
@@ -35,7 +40,7 @@ export function NotificationDetailsDrawer({
           {item.read ? 'مقروء' : 'غير مقروء'}
         </span>
       </div>
-      <p>{item.message}</p>
+      <p>{resolvePropertyCode(item.message, item.propertyReference)}</p>
       <dl className={styles.facts}>
         {(
           [
@@ -53,7 +58,7 @@ export function NotificationDetailsDrawer({
       <DrawerActions
         item={item}
         onRead={onRead}
-        onOpenProperty={onOpenProperty}
+        onOpenRecord={onOpenRecord}
         onClose={onClose}
       />
     </PropertyOverlay>
@@ -63,15 +68,18 @@ export function NotificationDetailsDrawer({
 function DrawerActions({
   item,
   onRead,
-  onOpenProperty,
+  onOpenRecord,
   onClose,
 }: {
   item: NotificationDto;
   onRead: () => void;
-  onOpenProperty: (propertyId: string) => void;
+  onOpenRecord: (path: string) => void;
   onClose: () => void;
 }) {
   const [notice, setNotice] = useState('');
+  // Managagers are authorized for every company record, so the row's reference
+  // (property / client / contact) decides where the action button lands.
+  const target = notificationRoute(item, 'MANAGER');
   return (
     <>
       <div className={styles.actions}>
@@ -85,12 +93,12 @@ function DrawerActions({
           تعليم كمقروء
         </Button>
         <Button
-          disabled={!item.propertyId}
+          disabled={!target}
           onClick={() => {
-            if (item.propertyId) onOpenProperty(item.propertyId);
+            if (target) onOpenRecord(target.path);
           }}
         >
-          فتح العقار
+          {item.propertyId ? 'فتح العقار' : 'فتح السجل'}
         </Button>
         <Button onClick={onClose}>إغلاق</Button>
       </div>

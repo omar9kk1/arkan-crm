@@ -1,16 +1,21 @@
 'use client';
 import { useDraftState } from '../../../lib/drafts/use-form-draft';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   useRegistryContacts,
   type RegistryContact,
 } from '../../../lib/contact-registry';
-import { createClient, updateClient } from '../../../lib/api/clients-api';
+import { createClient, getClient, updateClient } from '../../../lib/api/clients-api';
 import { useClients } from '../../../lib/use-clients';
 import type { ClientApiDto } from '../../../lib/api/client-types';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { requestOpenProperty } from '../../notifications/open-property';
+import {
+  MANAGER_CLIENT_BROKER_QUERY_PARAM,
+  MANAGER_CLIENT_CLIENT_QUERY_PARAM,
+  MANAGER_CLIENT_OWNER_QUERY_PARAM,
+} from '../../notifications/notification-target';
 import { PROPERTY_QUERY_PARAM } from '../../../lib/property-reveal';
 import { matchesPerson } from '../../../lib/search';
 import { Button } from '../../../components/ui/button';
@@ -117,6 +122,7 @@ function ownerFromContact(
 }
 
 export default function ManagerClientsPage() {
+  const searchParams = useSearchParams();
   const registry = useRegistryContacts();
   const router = useRouter();
   const contacts = registry.contacts;
@@ -159,6 +165,73 @@ export default function ManagerClientsPage() {
     'manager-clients:context',
     {},
   );
+
+  // Notification deep-link support. The bell routes record activity to this page
+  // with `client` (a customer id), or `owner`/`broker` (a contact id). The id
+  // opens the EXACT drawer on the right tab once the authorised lists have
+  // loaded. An id absent from the loaded window is fetched through the
+  // authorized `GET /clients/:id`; a contact id that never resolves simply
+  // opens nothing — no guessed access, matching the properties deep-link
+  // contract. The params are read REACTIVELY (not once per mount): a bell click
+  // while the page is already open re-runs this effect for the new id, so the
+  // exact new client opens without leaving the page.
+  const clientIdParam = searchParams.get(MANAGER_CLIENT_CLIENT_QUERY_PARAM)?.trim() || '';
+  const ownerIdParam = searchParams.get(MANAGER_CLIENT_OWNER_QUERY_PARAM)?.trim() || '';
+  const brokerIdParam = searchParams.get(MANAGER_CLIENT_BROKER_QUERY_PARAM)?.trim() || '';
+  const handledKeyRef = useRef('');
+  useEffect(() => {
+    if (clientsLoading || contactsLoading) return;
+    const deepLinkKey = `${clientIdParam}\u0000${ownerIdParam}\u0000${brokerIdParam}`;
+    if (!clientIdParam && !ownerIdParam && !brokerIdParam) return;
+    // The same key is not re-handled: the drawer was opened once for it, and the
+    // surviving URL must not re-open the drawer on an unrelated refetch.
+    if (handledKeyRef.current === deepLinkKey) return;
+    handledKeyRef.current = deepLinkKey;
+
+    if (clientIdParam) {
+      if (items.some((row) => row.id === clientIdParam)) {
+        setTab('clients');
+        setFile({ kind: 'client', id: clientIdParam });
+        return;
+      }
+      // Out of the loaded window: fetch the real authorised record once, then
+      // open the drawer with it (the drawer prefers `clientContext[id]`).
+      void getClient(clientIdParam)
+        .then((dto) => {
+          setClientContext((context) => ({
+            ...context,
+            [clientIdParam]: clientFromDto(dto),
+          }));
+          setTab('clients');
+          setFile({ kind: 'client', id: clientIdParam });
+        })
+        .catch(() => {
+          // A denied or stale id answers 404 — the page simply stays silent.
+        });
+      return;
+    }
+    if (ownerIdParam) {
+      const owner = contacts.find((c) => c.id === ownerIdParam && c.type === 'OWNER');
+      if (!owner) return;
+      setTab('owners');
+      setFile({ kind: 'owner', id: `owner-${ownerIdParam}` });
+      return;
+    }
+    const broker = contacts.find((c) => c.id === brokerIdParam && c.type === 'BROKER');
+    if (!broker) return;
+    setTab('brokers');
+    setSelectedBroker(broker);
+    setFile({ kind: 'contact', id: brokerIdParam });
+  }, [
+    clientsLoading,
+    contactsLoading,
+    items,
+    contacts,
+    setClientContext,
+    clientIdParam,
+    ownerIdParam,
+    brokerIdParam,
+  ]);
 
   const addingData = useMemo(() => {
     if (!addingType || addingType !== 'client') return undefined;

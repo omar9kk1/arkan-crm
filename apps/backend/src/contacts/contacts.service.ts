@@ -4,6 +4,7 @@ import { Role, type AuthUser } from '@arkan/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { resolveLimit } from '../common/pagination';
 import { propertyVisibilityWhere } from '../properties/property-visibility';
+import { NotificationsService } from '../notifications/notifications.service';
 import { contactOwnershipWhere } from './contact-policy';
 import { CreateContactDto } from './dto/create-contact.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
@@ -56,7 +57,10 @@ export function serializeContact(
 
 @Injectable()
 export class ContactsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   async create(viewer: AuthUser, dto: CreateContactDto): Promise<ContactDto> {
     const contact = await this.prisma.$transaction(async (tx) => {
@@ -81,6 +85,15 @@ export class ContactsService {
           after: { type: created.type },
         },
       });
+      // Employee activity reporting: the contact's birth keys on the immutable
+      // contact row id, so a retried save never notifies twice. Only the card
+      // KIND (owner/broker) enters the wording — never the name or phone.
+      await this.notifications.notifyEmployeeRecordChange(
+        tx,
+        viewer,
+        'CONTACT_CREATED',
+        { contactId: created.id, contactType: created.type },
+      );
       return created;
     });
     return serializeContact(contact);
@@ -152,6 +165,22 @@ export class ContactsService {
           after: { type: contact.type },
         },
       });
+      // Employee activity reporting — only when the PATCH actually moved a
+      // value; an identical resave is silent.
+      const contactChanged =
+        (dto.type !== undefined && dto.type !== result.type) ||
+        (dto.name !== undefined && dto.name.trim() !== result.name) ||
+        (dto.phone !== undefined && dto.phone.trim() !== result.phone) ||
+        (dto.notes !== undefined &&
+          (dto.notes?.trim() || null) !== result.notes);
+      if (contactChanged) {
+        await this.notifications.notifyEmployeeRecordChange(
+          tx,
+          viewer,
+          'CONTACT_UPDATED',
+          { contactId: id, contactType: contact.type },
+        );
+      }
       return contact;
     });
     return serializeContact(updated, updated.properties);

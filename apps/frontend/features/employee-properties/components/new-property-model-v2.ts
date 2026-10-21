@@ -11,6 +11,56 @@ export interface PropertyImage {
   preview: string;
 }
 
+/**
+ * The images a property ALREADY has in the program.
+ *
+ * They live on the property row (the API exposes the authorized image through
+ * `primaryImageUrl`), never in the wizard's draft: the wizard form only holds
+ * a file the employee picked on this device. An edit therefore keeps the
+ * stored image, and the wizard shows it instead of pretending it is missing.
+ */
+export function storedPropertyImages(
+  property?: { id?: string; primaryImageUrl?: string | null } | null,
+): string[] {
+  if (!property?.id || !property.primaryImageUrl) return [];
+  return [property.primaryImageUrl];
+}
+
+/**
+ * The image the wizard surfaces show: a chosen replacement first, otherwise
+ * the image the property already stores.
+ *
+ * Both steps of the wizard use it, so they can never disagree about whether
+ * the property HAS an image — the saved image is a real image and satisfies the
+ * mandatory-image rule, exactly like a freshly picked file.
+ */
+export function effectiveImageUrl(input: {
+  localPreview?: string | null;
+  storedUrl?: string | null;
+}): string | null {
+  return input.localPreview || input.storedUrl || null;
+}
+
+/**
+ * The mandatory-image rule of the wizard.
+ *
+ * A stored image of the property being edited satisfies it — the employee is
+ * NOT asked to upload the same picture again — and a freshly picked file
+ * satisfies it for a new property. Only a property that has no image at all
+ * (a genuinely new one) is blocked.
+ */
+export function satisfiesImageRequirement(input: {
+  newImage: unknown | null;
+  storedImages: readonly string[];
+  editingExisting: boolean;
+}): boolean {
+  return (
+    Boolean(input.newImage) ||
+    input.storedImages.length > 0 ||
+    input.editingExisting
+  );
+}
+
 export interface FloorEntry {
   id: string;
   label: string;

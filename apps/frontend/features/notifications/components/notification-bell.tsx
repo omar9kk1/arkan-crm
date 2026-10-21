@@ -2,20 +2,98 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Role } from '@arkan/shared';
 import { Button } from '../../../components/ui/button';
 import { Icon } from '../../../components/ui/icon';
 import { Toast } from '../../../components/ui/toast';
 import { useAuth } from '../../auth/components/auth-provider';
-import { NOTIFICATION_PAGE_SIZE, useNotifications } from '../store';
+import {
+  NOTIFICATION_PAGE_SIZE,
+  useNotifications,
+} from '../store';
 import type { NotificationDto } from '../../../lib/api/notification-types';
-import { requestOpenProperty } from '../open-property';
-import { PROPERTY_QUERY_PARAM } from '../../../lib/property-reveal';
+import { notificationRoute } from '../notification-target';
+import { notifyClientsDataChanged } from '../clients-refresh';
+import {
+  isRecordNotification,
+  resolvePropertyCode,
+} from '../view';
 import { notifyPropertyDataChanged } from '../property-refresh';
 import styles from './notification-bell.module.css';
 
 function pad(value: number): string {
   return value < 10 ? `0${value}` : String(value);
+}
+
+// ---------------------------------------------------------------------------
+// Presentation-only reading of a stored notification body.
+//
+// The backend writes property bodies in one known shape
+// (`رقم العقار: <code> — التعديلات: <label (old ← new)>، …`). The bell turns
+// that shape into readable lines; ANY body that does not match it exactly —
+// including every older notification, record-activity and system rows — is
+// displayed as its plain stored text with safe wrapping. Nothing is re-parsed
+// for meaning, nothing is sent anywhere and the stored history is untouched.
+// ---------------------------------------------------------------------------
+
+const PROPERTY_BODY_PREFIX = 'رقم العقار: ';
+const CHANGES_SEPARATOR = ' — التعديلات: ';
+const SUMMARY_ITEM_SEPARATOR = '، ';
+
+/** One changed field, read from a single summary item. */
+export interface NotificationChangeLine {
+  /** The field label, e.g. «المنطقة» or «الدور الأرضي — التفاصيل». */
+  label: string;
+  /** The value before the change, when the item reports a value change. */
+  before: string | null;
+  /** The value after the change, when the item reports a value change. */
+  after: string | null;
+  /** An optional free-text note shown after the label. */
+  note: string | null;
+  /** The item's stored text, unchanged — the safe fallback for any line. */
+  text: string;
+}
+
+/** The display model of one stored body, used only by the bell panel. */
+export interface NotificationBodyPreview {
+  /** The body is a property event body in the known generated shape. */
+  isProperty: boolean;
+  /** Per-field change lines, or null when the body has none to show. */
+  changes: NotificationChangeLine[] | null;
+}
+
+/** Reads a value-change detail (`old ← new`); anything else stays a note. */
+const VALUE_PAIR = /^([^←]+) ← ([^←]+)$/;
+
+function parseChangeItem(rawItem: string): NotificationChangeLine {
+  const text = rawItem.trim();
+  // The trailing `label (detail)` of the generated grammar. A detail that
+  // itself contains parentheses never matches — such an item falls back to
+  // its stored text instead of being reinterpreted.
+  const shaped = /^(.+?) \(([^()]*)\)$/.exec(text);
+  const label = (shaped ? (shaped[1] ?? text) : text).trim();
+  const detail = shaped ? (shaped[2] ?? '').trim() : null;
+  const pair = detail ? VALUE_PAIR.exec(detail) : null;
+  return {
+    label: label || text,
+    before: pair ? (pair[1] ?? '').trim() : null,
+    after: pair ? (pair[2] ?? '').trim() : null,
+    note: pair ? null : detail,
+    text,
+  };
+}
+
+export function parseNotificationBody(message: string): NotificationBodyPreview {
+  if (!message.startsWith(PROPERTY_BODY_PREFIX)) {
+    return { isProperty: false, changes: null };
+  }
+  const marker = message.indexOf(CHANGES_SEPARATOR);
+  if (marker === -1) return { isProperty: true, changes: null };
+  const summary = message.slice(marker + CHANGES_SEPARATOR.length);
+  const changes = summary
+    .split(SUMMARY_ITEM_SEPARATOR)
+    .filter((rawItem) => rawItem.trim().length > 0)
+    .map(parseChangeItem);
+  return { isProperty: true, changes: changes.length ? changes : null };
 }
 
 /** Compact, locale-independent age label rendered inside the panel. */
@@ -89,6 +167,13 @@ export function NotificationBell({ className = '' }: { className?: string }) {
     if (fresh.some((item) => item.type !== 'SYSTEM')) {
       notifyPropertyDataChanged();
     }
+    // Record-activity rows (clients/contacts/follow-ups/interests) also move
+    // the data behind the already-open companies/clients pages — publish the
+    // shared refresh signal so those pages refetch through their own hook
+    // without a page reload.
+    if (fresh.some((item) => isRecordNotification(item.type))) {
+      notifyClientsDataChanged();
+    }
     setToast(
       fresh.length === 1
         ? (fresh[0]?.title ?? 'لديك إشعار جديد')
@@ -151,25 +236,15 @@ export function NotificationBell({ className = '' }: { className?: string }) {
     };
   }, [open]);
 
-  const propertiesRoute =
-    user?.role === Role.MANAGER ? '/manager/properties' : '/employee/properties';
-
   const openNotification = (item: NotificationDto) => {
     setOpen(false);
     // Optimistically flip the row to read (the store persists it and re-syncs on
     // failure); the shared feed updates the bell badge and any open page at once.
     if (!item.read) void markRead(item.id);
-    // A notification always links to a property the API re-authorizes on read,
-    // so a null `propertyId` simply means "nothing to open".
-    if (item.propertyId) {
-      requestOpenProperty(item.propertyId);
-      // Carry the id in the URL as well: the properties page resolves both
-      // channels through the same authorized lookup, and the URL keeps the exact
-      // card selected across a refresh.
-      router.push(
-        `${propertiesRoute}?${PROPERTY_QUERY_PARAM}=${encodeURIComponent(item.propertyId)}`,
-      );
-    }
+    // The route is derived ONLY from the authorized references the API echoes
+    // back (property / client / contact) — an unusable row simply does nothing.
+    const target = notificationRoute(item, user?.role);
+    if (target) router.push(target.path);
   };
 
   const markAll = () => {
@@ -235,30 +310,74 @@ export function NotificationBell({ className = '' }: { className?: string }) {
             <p className={styles.state}>لا توجد إشعارات</p>
           ) : (
             <ul className={styles.list}>
-              {preview.map((item) => (
-                <li key={item.id}>
-                  <button
-                    type="button"
-                    className={`${styles.item} ${
-                      item.read ? styles.itemRead : styles.itemUnread
-                    }`}
-                    onClick={() => openNotification(item)}
-                  >
-                    <span className={styles.itemTop}>
-                      <span className={styles.itemTitle}>
-                        {!item.read && (
-                          <span className={styles.dot} aria-hidden="true" />
-                        )}
-                        {item.title}
+              {preview.map((item) => {
+                // The CURRENT property code (the pill) comes from the API,
+                // never from the stored historic text; the message itself is
+                // ALSO shown with current codes by resolvePropertyCode.
+                const surface = parseNotificationBody(
+                  resolvePropertyCode(item.message, item.propertyReference),
+                );
+                const showPill = surface.isProperty && item.propertyReference;
+                const showChanges = showPill && surface.changes;
+                return (
+                  <li key={item.id}>
+                    <button
+                      type="button"
+                      className={`${styles.item} ${
+                        item.read ? styles.itemRead : styles.itemUnread
+                      }`}
+                      onClick={() => openNotification(item)}
+                    >
+                      <span className={styles.itemTop}>
+                        <span className={styles.itemTitle}>
+                          {!item.read && (
+                            <span className={styles.dot} aria-hidden="true" />
+                          )}
+                          {item.title}
+                        </span>
+                        <time
+                          className={styles.itemTime}
+                          dateTime={item.createdAt}
+                        >
+                          {formatTime(item.createdAt)}
+                        </time>
                       </span>
-                      <time className={styles.itemTime} dateTime={item.createdAt}>
-                        {formatTime(item.createdAt)}
-                      </time>
-                    </span>
-                    <span className={styles.itemMessage}>{item.message}</span>
-                  </button>
-                </li>
-              ))}
+                      {showPill && (
+                        <span className={styles.itemCode}>
+                          <bdi>{item.propertyReference}</bdi>
+                        </span>
+                      )}
+                      {showChanges ? (
+                        <span className={styles.itemChanges}>
+                          {surface.changes?.map((line, index) => (
+                            <span key={index} className={styles.itemChange}>
+                              {line.before !== null && line.after !== null ? (
+                                <>
+                                  {line.label}: من{' '}
+                                  <bdi>{line.before}</bdi>
+                                  {' إلى '}
+                                  <bdi>{line.after}</bdi>
+                                </>
+                              ) : line.note ? (
+                                `${line.label}: ${line.note}`
+                              ) : (
+                                line.text
+                              )}
+                            </span>
+                          ))}
+                        </span>
+                      ) : !showPill ? (
+                        <span className={styles.itemMessage}>
+                          {resolvePropertyCode(
+                            item.message,
+                            item.propertyReference,
+                          )}
+                        </span>
+                      ) : null}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

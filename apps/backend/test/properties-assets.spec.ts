@@ -289,6 +289,19 @@ describeWithDatabase('Property images + EXCHANGE (storage, validation, mapping)'
       // an additive `ClientPropertyInterest` table only (new table + indexes +
       // FKs; no change to any existing table or row).
       '20261020014757_client_property_interest',
+      // Added by the centralized employee-activity notifications: six appended
+      // NotificationType values + one nullable `contactId` FK (no column is
+      // dropped, no row is touched; the legacy `ownerId` stays untouched).
+      '20261020120000_notification_record_events',
+      // Added by the sequential property codes: the atomic counter table + the
+      // one-time renumbering of the existing rows (the rows are only updated,
+      // never deleted or recreated) + the indexed prefix lookup.
+      '20261021120000_property_codes_sequential',
+      // Added by the Web Push phase: a nullable `lineageId` on the session
+      // table (stable device lineage across refresh rotations) + the new
+      // `PushSubscription` table (additive only; existing sessions keep
+      // working and simply carry no lineage).
+      '20261021120000_push_subscriptions_and_session_lineage',
     ]);
   });
 });

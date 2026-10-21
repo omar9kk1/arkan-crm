@@ -59,14 +59,31 @@ export function createProperty(
   });
 }
 
-/** `PATCH /properties/:id` — JSON body, mandatory `version`, stale → 409. */
+/**
+ * `PATCH /properties/:id` — mandatory `version`, stale → 409.
+ *
+ * With a replacement image the request becomes multipart: the fields travel in
+ * a `payload` JSON string (exactly like `POST /properties`) and the image in
+ * the `image` field. Without an image the request stays a plain JSON body.
+ */
 export function updateProperty(
   id: string,
   payload: UpdatePropertyPayload,
+  image?: File | null,
 ): Promise<PropertyViewDto> {
+  if (!image) {
+    return authorizedRequest<PropertyViewDto>(`${BASE}/${id}`, {
+      method: 'PATCH',
+      body: payload,
+    });
+  }
+  const body = new FormData();
+  body.append('version', String(payload.version));
+  body.append('payload', JSON.stringify(payload));
+  body.append('image', image, image.name);
   return authorizedRequest<PropertyViewDto>(`${BASE}/${id}`, {
     method: 'PATCH',
-    body: payload,
+    formData: body,
   });
 }
 

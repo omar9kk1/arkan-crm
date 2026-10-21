@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { ClientsController } from './clients.controller';
 import { ClientsService } from './clients.service';
 
@@ -9,6 +10,7 @@ import { ClientsService } from './clients.service';
  * private contact payloads, only count authorised rows for the stats cards.
  */
 @Module({
+  imports: [NotificationsModule],
   controllers: [ClientsController],
   providers: [ClientsService],
 })

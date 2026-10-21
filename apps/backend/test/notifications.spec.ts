@@ -23,6 +23,10 @@ interface NotificationItem {
   title: string;
   message: string;
   propertyId: string | null;
+  clientId: string | null;
+  contactId: string | null;
+  contactType: string | null;
+  followUpId: string | null;
   read: boolean;
   readAt: string | null;
   createdAt: string;
@@ -555,8 +559,27 @@ describeWithDatabase('In-app notifications', () => {
 
     // Exactly the documented fields — no raw entity, no `userId`.
     expect(Object.keys(item).sort()).toEqual(
-      ['createdAt', 'id', 'message', 'propertyId', 'read', 'readAt', 'title', 'type'].sort(),
+      [
+        'clientId',
+        'contactId',
+        'contactType',
+        'createdAt',
+        'followUpId',
+        'id',
+        'message',
+        'propertyId',
+        'propertyReference',
+        'read',
+        'readAt',
+        'title',
+        'type',
+      ].sort(),
     );
+    // A property row never carries any record event reference.
+    expect(item.clientId).toBeNull();
+    expect(item.contactId).toBeNull();
+    expect(item.contactType).toBeNull();
+    expect(item.followUpId).toBeNull();
     const serialized = JSON.stringify(item);
     for (const secret of ['66661111', 'وسيط خاص', managerId, employeeAId]) {
       expect(serialized).not.toContain(secret);

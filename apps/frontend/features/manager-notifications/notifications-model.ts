@@ -41,8 +41,11 @@ export function matchesManagerFilter(
       return !item.read;
     case 'property':
       return isPropertyNotification(item.type);
+    case 'followup':
+      // The real backend follow-up activity of the employees.
+      return item.type === 'FOLLOWUP_CREATED';
     default:
-      // Follow-ups, deals/commissions and attendance have no backend events.
+      // Deals/commissions and attendance have no backend events.
       return false;
   }
 }

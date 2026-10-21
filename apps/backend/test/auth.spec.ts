@@ -72,22 +72,46 @@ describe('Auth HTTP flow (Prisma test double)', () => {
           where,
           data,
         }: {
-          where: { id: string; expiresAt?: { gt: Date } };
+          where: {
+            id?: string;
+            userId?: string;
+            lineageId?: string | null;
+            revokedAt?: null;
+            expiresAt?: { gt: Date };
+          };
           data: { revokedAt: Date };
         }) => {
-          const session = sessions.get(where.id);
-          if (
-            !session ||
-            session.revokedAt ||
-            (where.expiresAt && session.expiresAt <= where.expiresAt.gt)
-          )
-            return { count: 0 };
-          session.revokedAt = data.revokedAt;
-          return { count: 1 };
+          // The real logout revokes the WHOLE session lineage, and the real
+          // refresh consumes exactly one row — the double models both.
+          const candidates = [...sessions.values()].filter((session) => {
+            if (where.id && session.id !== where.id) return false;
+            if (where.userId && session.userId !== where.userId) return false;
+            if (
+              where.lineageId !== undefined &&
+              session.lineageId !== where.lineageId
+            )
+              return false;
+            return true;
+          });
+          let count = 0;
+          for (const session of candidates) {
+            if (session.revokedAt) continue;
+            if (
+              where.expiresAt &&
+              session.expiresAt <= where.expiresAt.gt
+            )
+              continue;
+            session.revokedAt = data.revokedAt;
+            count += 1;
+          }
+          return { count };
         },
       ),
     },
     auditLog: { create: audit },
+    // The real service serializes refresh/logout of one session lineage with a
+    // transaction-scoped advisory lock.
+    $queryRaw: jest.fn(async () => [{ locked: 1 }]),
     $transaction: async (
       work: (tx: unknown) => Promise<unknown>,
     ): Promise<unknown> => work(database),

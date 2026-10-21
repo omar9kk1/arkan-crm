@@ -869,7 +869,7 @@ describeWithDatabase(
       expect(keys).toEqual([...CLIENT_DTO_KEYS].sort());
     });
 
-    it('documents the current edge case: an account without an EmployeeProfile cannot see the client it just created', async () => {
+    it('auto-provisions the EmployeeProfile so an account created outside the employees flow OWNS the client it registers', async () => {
       const orphan = await createUser(ctx.prisma, {
         email: 'employee.orphan@clients.local',
         name: 'Employee Orphan',
@@ -880,17 +880,20 @@ describeWithDatabase(
         name: 'زبون مهجور',
         phone: '65000016',
       });
-      expect(created.createdByUserId).toBeNull();
-      expect(created.responsibleUserId).toBeNull();
+      // The save provisions a minimal profile on demand: the creator owns it.
+      expect(created.createdByUserId).toBe(orphan.id);
+      expect(created.responsibleUserId).toBe(orphan.id);
 
       const read = await api()
         .get(`/clients/${created.id}`)
         .set(auth(orphanToken));
-      expect(read.status).toBe(404);
+      expect(read.status).toBe(200);
       const list = await api().get('/clients').set(auth(orphanToken));
-      expect((list.body.data as { items: ClientDtoShape[] }).items).toHaveLength(0);
+      expect(
+        (list.body.data as { items: ClientDtoShape[] }).items,
+      ).toHaveLength(1);
 
-      // The record is not lost: the manager still sees it.
+      // The manager still sees it too.
       const managerRead = await api()
         .get(`/clients/${created.id}`)
         .set(auth(managerToken));

@@ -15,6 +15,14 @@ import { Role, type AuthUser } from '@arkan/shared';
 import type { ReadStream } from 'node:fs';
 import { PrismaService } from '../prisma/prisma.service';
 import { ContactsService } from '../contacts/contacts.service';
+import {
+  capturePropertySnapshot,
+  decodeRevisionPayload,
+  diffPropertySnapshots,
+  formatPropertyChanges,
+  reviewRoundState,
+  snapshotFromPropertyRow,
+} from './property-changes';
 import { FilesService, type UploadedImageFile } from '../files/files.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import type { PropertyEventContext } from '../notifications/notification-events';
@@ -32,7 +40,7 @@ import { RejectPropertyDto } from './dto/reject-property.dto';
 import { RequestChangesDto } from './dto/request-changes.dto';
 import { PropertyFloorInputDto } from './dto/property-floor.dto';
 import { RequestedPropertyInputDto } from './dto/requested-property.dto';
-import { generatePropertyReference } from './property-reference';
+import { nextPropertyCode } from './property-reference';
 import { propertyVisibilityWhere } from './property-visibility';
 import {
   propertyDetailInclude,
@@ -98,10 +106,13 @@ export class PropertiesService {
     // FileAsset row can be created.
     const sanitized = await this.files.sanitizeImage(file!.buffer, detected);
     const key = await this.files.persistBytes(sanitized.buffer, sanitized);
+    // The code is allocated from the DATABASE counter BEFORE the transaction:
+    // the allocation is atomic (two employees can never receive the same code)
+    // and a rolled-back creation leaves a gap, never a reused code.
+    const reference = await this.generateUniqueReference();
     try {
       const propertyId = await this.prisma.$transaction(async (tx) => {
         const contact = await this.resolveContactInTx(tx, viewer, payload);
-        const reference = await this.generateUniqueReference(tx);
         const isEmployee = viewer.role === Role.EMPLOYEE;
         const district = trimOrNull(payload.district);
         const governorate = trimOrNull(payload.governorate);
@@ -187,8 +198,24 @@ export class PropertiesService {
         };
         if (isEmployee)
           await this.notifications.notifyPropertySubmitted(tx, eventContext);
-        else
+        else {
           await this.notifications.notifyPropertyAvailable(tx, eventContext);
+          // A manager-created property is AVAILABLE immediately: this approved
+          // snapshot is the baseline of every later comparison.
+          const snapshot = await capturePropertySnapshot(tx, property.id);
+          if (snapshot)
+            await tx.propertyRevision.create({
+              data: {
+                propertyId: property.id,
+                status: ApprovalStatus.APPROVED,
+                payload: snapshot as unknown as Prisma.InputJsonValue,
+                baseVersion: property.version,
+                requestedById: viewer.id,
+                reviewedById: viewer.id,
+                reviewedAt: new Date(),
+              },
+            });
+        }
         return property.id;
       });
       return await this.getAuthorizedDetail(viewer, propertyId);
@@ -227,6 +254,10 @@ export class PropertiesService {
       // RBAC and privacy are exactly as before.
       filters.push({
         OR: [
+          // The code is searched with an INDEXED prefix match (the
+          // `text_pattern_ops` index) plus a case-insensitive fallback, so
+          // `A-0001` finds `A-000123` without scanning the table.
+          { reference: { startsWith: search.trim().toUpperCase() } },
           { reference: { contains: search, mode: 'insensitive' } },
           { title: { contains: search, mode: 'insensitive' } },
           { area: { contains: search, mode: 'insensitive' } },
@@ -342,12 +373,79 @@ export class PropertiesService {
       });
       // Approval produces two distinct events: the creator learns the decision,
       // and the OTHER employees learn that a new property entered the program.
+      //
+      // The approved snapshot is recorded (the already existing
+      // `PropertyRevision` table), so the NEXT approval round can compare the
+      // version that was in the program with the one that is approved now and
+      // report the fields that really changed.
+      // The baseline is the review round's stored pre-edit state — the exact
+      // state the manager was shown when the property was sent back for
+      // review — so the creator and the other employees receive the SAME
+      // verified changes at approval time.
+      const round = await reviewRoundState(tx, id, existing);
+      const baseline = round.baseline;
+      // A staged replacement image becomes the property's public image NOW —
+      // at the manager's approval, never before it.
+      if (round.pendingImageId) {
+        await tx.property.update({
+          where: { id },
+          data: { primaryImageId: round.pendingImageId },
+        });
+      }
+      const snapshot = await capturePropertySnapshot(tx, id);
+      const changes =
+        baseline && snapshot ? diffPropertySnapshots(baseline, snapshot) : [];
+      if (snapshot) {
+        const approvedData = {
+          status: ApprovalStatus.APPROVED,
+          payload: snapshot as unknown as Prisma.InputJsonValue,
+          baseVersion: existing.version + 1,
+          reviewedById: viewer.id,
+          reviewedAt: new Date(),
+        };
+        if (round.roundRevisionId) {
+          // Close the review round: the row that CARRIED it (its baseline and
+          // any staged image) becomes this round's approved record. There is
+          // exactly one row per round, and no second PENDING row is ever left
+          // behind — the database allows only one PENDING revision per
+          // property, so leaving it open would break the NEXT edit cycle.
+          await tx.propertyRevision.update({
+            where: { id: round.roundRevisionId },
+            data: approvedData,
+          });
+        } else {
+          // No open round row (e.g. a manager-created property or a legacy
+          // record): the approved snapshot starts the revision history.
+          await tx.propertyRevision.create({
+            data: {
+              propertyId: id,
+              requestedById: existing.createdByUserId ?? viewer.id,
+              ...approvedData,
+            },
+          });
+        }
+      }
+      // A property that was already approved before (an earlier review round)
+      // is not new stock: the alert describes the change instead.
+      const priorRound = await tx.propertyApprovalRequest.findFirst({
+        where: {
+          propertyId: id,
+          status: ApprovalStatus.APPROVED,
+          ...(latest?.id ? { id: { not: latest.id } } : {}),
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true },
+      });
       const eventContext: PropertyEventContext = {
         propertyId: id,
         reference: existing.reference,
         creatorId: existing.createdByUserId,
         approvalRequestId: latest?.id ?? null,
         version: existing.version + 1,
+        availabilityKind: priorRound ? 'UPDATED' : 'NEW',
+        ...(changes.length
+          ? { changeSummary: formatPropertyChanges(changes) }
+          : {}),
       };
       await this.notifications.notifyPropertyApproved(tx, eventContext);
       await this.notifications.notifyPropertyAvailable(tx, eventContext);
@@ -377,6 +475,18 @@ export class PropertiesService {
         throw new ConflictException(
           'The property is no longer PENDING or the version is stale',
         );
+      // Close this round's revision carrier. Leaving it PENDING would break
+      // the property's NEXT edit cycle: the database allows only one PENDING
+      // revision per property, so a review round must never linger after its
+      // decision. The row keeps its baseline payload and is inert afterwards.
+      await tx.propertyRevision.updateMany({
+        where: { propertyId: id, status: ApprovalStatus.PENDING },
+        data: {
+          status: ApprovalStatus.REJECTED,
+          reviewedById: viewer.id,
+          reviewedAt: new Date(),
+        },
+      });
       // The latest review must still be awaiting a decision. This blocks a
       // reject of a request that was already answered (e.g. CHANGES_REQUESTED)
       // so Request Changes and Reject can never both fire on one submission.
@@ -530,6 +640,7 @@ export class PropertiesService {
     viewer: AuthUser,
     id: string,
     payload: UpdatePropertyPayloadDto,
+    file?: UploadedImageFile,
   ): Promise<PropertyViewDto> {
     const existing = await this.requireExisting(id);
     // `createdByUserId` is the server-authoritative owner of the row: an
@@ -559,7 +670,27 @@ export class PropertiesService {
     // keeps its current status (the creator still resubmits explicitly).
     const returnsToReview = existing.status === PropertyStatus.AVAILABLE;
 
-    await this.prisma.$transaction(async (tx) => {
+    // A replacement image travels with the edit. It is sanitized and stored
+    // BEFORE the transaction (exactly like a creation) and compensated — the
+    // bytes are discarded — when the transaction does not commit, so a failed
+    // save never leaves an orphaned file and never touches the approved image.
+    let staged: {
+      key: string;
+      mimeType: string;
+      sizeBytes: number;
+    } | null = null;
+    if (file) {
+      const detected = this.files.assertValidImage(file);
+      const sanitized = await this.files.sanitizeImage(file.buffer, detected);
+      staged = {
+        key: await this.files.persistBytes(sanitized.buffer, sanitized),
+        mimeType: sanitized.mimeType,
+        sizeBytes: sanitized.sizeBytes,
+      };
+    }
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
       const data: Prisma.PropertyUncheckedUpdateManyInput = {
         version: { increment: 1 },
       };
@@ -621,6 +752,14 @@ export class PropertiesService {
         data.contactId = contact.id;
       }
 
+      // The baseline of this edit is the state the program shows NOW — captured
+      // BEFORE the row and its floors are rewritten, so the floors are part of
+      // it. It is stored with the review round, so the later approval can
+      // report exactly the same verified changes.
+      const baseline =
+        (await capturePropertySnapshot(tx, id)) ??
+        snapshotFromPropertyRow(existing);
+
       const transitioned = await tx.property.updateMany({
         where: {
           id,
@@ -634,26 +773,6 @@ export class PropertiesService {
       });
       if (transitioned.count === 0)
         throw new ConflictException('Stale version or invalid state');
-      if (returnsToReview) {
-        // A fresh review round: the previous APPROVED request row stays
-        // untouched, so the approval history is preserved and the manager sees
-        // exactly one open request per submission.
-        const request = await tx.propertyApprovalRequest.create({
-          data: {
-            propertyId: id,
-            requestedById: viewer.id,
-            status: ApprovalStatus.PENDING,
-          },
-        });
-        await this.notifications.notifyPropertyResubmitted(tx, {
-          propertyId: id,
-          reference: existing.reference,
-          creatorId: existing.createdByUserId,
-          approvalRequestId: request.id,
-          version: existing.version + 1,
-        });
-      }
-
       if (payload.floors !== undefined) {
         await tx.propertyFloor.deleteMany({ where: { propertyId: id } });
         if (payload.floors.length)
@@ -674,6 +793,142 @@ export class PropertiesService {
         await tx.requestedProperty.deleteMany({ where: { propertyId: id } });
       }
 
+      if (returnsToReview) {
+        // A fresh review round: the previous APPROVED request row stays
+        // untouched, so the approval history is preserved and the manager sees
+        // exactly one open request per submission.
+        const request = await tx.propertyApprovalRequest.create({
+          data: {
+            propertyId: id,
+            requestedById: viewer.id,
+            status: ApprovalStatus.PENDING,
+          },
+        });
+        // The manager must know WHAT changed before deciding. The baseline is
+        // the state the program showed BEFORE this edit, and it is stored WITH
+        // the review round, so the later approval reports the SAME verified
+        // changes to the creator and to the other employees.
+        const submitted = await capturePropertySnapshot(tx, id);
+        // A replacement image is STAGED with the review round: it becomes the
+        // property's public image only when the manager approves the edit.
+        let pendingImageId: string | null = null;
+        if (staged) {
+          const asset = await this.files.createAsset(tx, {
+            key: staged.key,
+            mimeType: staged.mimeType,
+            sizeBytes: staged.sizeBytes,
+            uploadedById: viewer.id,
+            propertyId: id,
+          });
+          pendingImageId = asset.id;
+        }
+        const effective = submitted
+          ? {
+              ...submitted,
+              primaryImageId: pendingImageId ?? submitted.primaryImageId,
+            }
+          : null;
+        const changes = effective
+          ? diffPropertySnapshots(baseline, effective)
+          : [];
+        // The database allows only ONE PENDING revision per property (a
+        // partial unique index). The open round's row is the round CARRIER:
+        // a property edited again (a later round) REUSES that row with the
+        // current edit's baseline instead of creating a second PENDING row —
+        // which used to fail the unique constraint on the second cycle.
+        const openRound = await tx.propertyRevision.findFirst({
+          where: { propertyId: id, status: ApprovalStatus.PENDING },
+          orderBy: { createdAt: 'desc' },
+          select: { id: true },
+        });
+        const roundPayload = {
+          baseline: baseline as unknown as Prisma.InputJsonValue,
+          pendingImageId,
+        } as unknown as Prisma.InputJsonValue;
+        if (openRound) {
+          await tx.propertyRevision.update({
+            where: { id: openRound.id },
+            data: {
+              payload: roundPayload,
+              baseVersion: existing.version,
+              requestedById: viewer.id,
+            },
+          });
+        } else {
+          await tx.propertyRevision.create({
+            data: {
+              propertyId: id,
+              status: ApprovalStatus.PENDING,
+              payload: roundPayload,
+              baseVersion: existing.version,
+              requestedById: viewer.id,
+            },
+          });
+        }
+        await this.notifications.notifyPropertyResubmitted(tx, {
+          propertyId: id,
+          reference: existing.reference,
+          creatorId: existing.createdByUserId,
+          approvalRequestId: request.id,
+          version: existing.version + 1,
+          ...(changes.length
+            ? {
+                submissionKind: 'UPDATED' as const,
+                changeSummary: formatPropertyChanges(changes),
+              }
+            : {}),
+        });
+      } else if (staged) {
+        // The row is not sent back through review (a PENDING row keeps its open
+        // round, a REJECTED one has none): a replacement image is only ever
+        // applied with a manager's decision.
+        if (existing.status === PropertyStatus.PENDING) {
+          // The open round carries the staged image, so the manager decides it
+          // together with the rest of the row.
+          const openRound = await tx.propertyRevision.findFirst({
+            where: { propertyId: id, status: ApprovalStatus.PENDING },
+            orderBy: { createdAt: 'desc' },
+            select: { id: true, payload: true },
+          });
+          const state = decodeRevisionPayload(openRound?.payload);
+          const asset = await this.files.createAsset(tx, {
+            key: staged.key,
+            mimeType: staged.mimeType,
+            sizeBytes: staged.sizeBytes,
+            uploadedById: viewer.id,
+            propertyId: id,
+          });
+          const payload = {
+            baseline: (state.baseline ??
+              baseline) as unknown as Prisma.InputJsonValue,
+            pendingImageId: asset.id,
+          } as unknown as Prisma.InputJsonValue;
+          if (openRound) {
+            await tx.propertyRevision.update({
+              where: { id: openRound.id },
+              data: { payload },
+            });
+          } else {
+            await tx.propertyRevision.create({
+              data: {
+                propertyId: id,
+                status: ApprovalStatus.PENDING,
+                payload,
+                baseVersion: existing.version,
+                requestedById: viewer.id,
+              },
+            });
+          }
+          staged = null;
+        }
+        if (staged) {
+          // No open round: the replacement is not applied and its bytes are
+          // discarded (the approved image stays exactly as it is).
+          await this.files.discard(staged.key);
+          staged = null;
+        }
+      }
+
       await tx.auditLog.create({
         data: {
           actorId: viewer.id,
@@ -686,6 +941,12 @@ export class PropertiesService {
         },
       });
     });
+    } catch (error) {
+      // A failed save never leaves the replacement behind, and the approved
+      // image stays exactly as it was.
+      if (staged) await this.files.discard(staged.key);
+      throw error;
+    }
     return this.getAuthorizedDetail(viewer, id);
   }
 
@@ -911,19 +1172,10 @@ export class PropertiesService {
     };
   }
 
-  private async generateUniqueReference(
-    tx: Prisma.TransactionClient,
-  ): Promise<string> {
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const reference = generatePropertyReference();
-      const existing = await tx.property.findUnique({
-        where: { reference },
-        select: { id: true },
-      });
-      if (!existing) return reference;
-    }
-    throw new ConflictException(
-      'Could not allocate a unique property reference, please retry',
-    );
+  private async generateUniqueReference(): Promise<string> {
+    // The code is allocated from the DATABASE counter BEFORE the property
+    // transaction: the allocation is atomic (no two employees can receive the
+    // same code) and a rolled-back creation leaves a gap, never a reused code.
+    return nextPropertyCode(this.prisma);
   }
 }

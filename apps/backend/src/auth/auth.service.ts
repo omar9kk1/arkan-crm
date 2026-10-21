@@ -36,7 +36,11 @@ export class AuthService {
       const current = await tx.user.findUnique({ where: { id: user.id } });
       if (!current?.isActive || current.passwordHash !== user.passwordHash)
         throw new UnauthorizedException('Invalid email or password');
-      return this.issueTokens(tx, current, 'AUTH_LOGIN');
+      // A login starts a NEW lineage: the stable identity of this device's
+      // session family. It survives every refresh rotation and is revoked as a
+      // whole on logout, so one device can be signed out without touching the
+      // other devices of the same account.
+      return this.issueTokens(tx, current, 'AUTH_LOGIN', randomUUID());
     });
   }
 
@@ -55,14 +59,35 @@ export class AuthService {
         !session.user.isActive
       )
         throw new UnauthorizedException('Invalid or expired refresh token');
+      // Serialize refresh and logout of the SAME lineage. Without this, a
+      // refresh in flight while a logout commits could insert a new session row
+      // AFTER the logout revoked the family — resurrecting a session the user
+      // already closed.
+      await this.lockLineage(tx, session.lineageId);
+      // Re-read under the lock: a concurrent logout may have revoked the row
+      // while this request waited for the lineage lock.
+      const current = await tx.refreshToken.findUnique({
+        where: { id: session.id },
+        include: { user: true },
+      });
+      if (
+        !current ||
+        current.revokedAt ||
+        current.expiresAt <= new Date() ||
+        !current.user.isActive
+      )
+        throw new UnauthorizedException('Invalid or expired refresh token');
       // Conditional update makes refresh single-use even for concurrent requests.
       const consumed = await tx.refreshToken.updateMany({
-        where: { id: session.id, revokedAt: null, expiresAt: { gt: now } },
-        data: { revokedAt: now },
+        where: { id: session.id, revokedAt: null, expiresAt: { gt: new Date() } },
+        data: { revokedAt: new Date() },
       });
       if (consumed.count !== 1)
         throw new UnauthorizedException('Refresh token already used');
-      return this.issueTokens(tx, session.user, 'AUTH_REFRESH');
+      // The rotation keeps the SAME lineage. A session created before the
+      // lineage column existed stays without one: it keeps working normally and
+      // is simply never eligible for Web Push.
+      return this.issueTokens(tx, current.user, 'AUTH_REFRESH', current.lineageId);
     });
   }
 
@@ -72,8 +97,20 @@ export class AuthService {
         where: { tokenHash: hashRefreshToken(input.refreshToken) },
       });
       if (session) {
+        // The same lineage lock as the refresh path: the two can never
+        // interleave for one device.
+        await this.lockLineage(tx, session.lineageId);
+        // Revoke the WHOLE lineage (every row of this login family), not just
+        // the presented row: the device's Web Push subscriptions die with it,
+        // while other devices keep their own lineage alive.
         const result = await tx.refreshToken.updateMany({
-          where: { id: session.id, revokedAt: null },
+          where: {
+            userId: session.userId,
+            ...(session.lineageId
+              ? { lineageId: session.lineageId }
+              : { id: session.id }),
+            revokedAt: null,
+          },
           data: { revokedAt: new Date() },
         });
         if (result.count)
@@ -90,10 +127,28 @@ export class AuthService {
     });
   }
 
+  /**
+   * Serializes the refresh/logout of ONE session lineage inside the current
+   * transaction. The advisory lock is released when the transaction ends, so
+   * the loser of the race re-reads the (revoked) rows and fails closed.
+   */
+  private async lockLineage(
+    tx: Prisma.TransactionClient,
+    lineageId: string | null,
+  ): Promise<void> {
+    if (!lineageId) return;
+    // The lock function returns `void`, so the statement selects a plain
+    // integer column Prisma can deserialize.
+    await tx.$queryRaw(
+      Prisma.sql`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(CAST(${lineageId} AS text)))`,
+    );
+  }
+
   private async issueTokens(
     tx: Prisma.TransactionClient,
     user: User,
     action: string,
+    lineageId: string | null,
   ) {
     const refreshToken = randomBytes(48).toString('base64url');
     const sessionId = randomUUID();
@@ -109,6 +164,7 @@ export class AuthService {
         userId: user.id,
         tokenHash: hashRefreshToken(refreshToken),
         expiresAt: new Date(Date.now() + REFRESH_LIFETIME_MS),
+        lineageId,
       },
     });
     await tx.auditLog.create({

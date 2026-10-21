@@ -1,4 +1,4 @@
-import type { NotificationType } from '@prisma/client';
+import type { ContactType, NotificationType } from '@prisma/client';
 
 /**
  * The exact `Notification` columns the API is allowed to read. Declared
@@ -13,6 +13,13 @@ export interface NotificationRow {
   readAt: Date | null;
   createdAt: Date;
   propertyId: string | null;
+  clientId: string | null;
+  contactId: string | null;
+  followUpId: string | null;
+  /** The linked contact card's type, when the row points at a contact. */
+  contactType: ContactType | null;
+  /** The CURRENT code of the linked property (the stored body is history). */
+  propertyReference: string | null;
 }
 
 /**
@@ -28,7 +35,20 @@ export interface NotificationDto {
   type: NotificationType;
   title: string;
   message: string;
+  /** Authorized property to open, or null when the reader may not open it. */
   propertyId: string | null;
+  /**
+   * The CURRENT code of the linked property. A historical notification body may
+   * still carry a retired code; the current one is always resolved from the
+   * property row, and the stored history is never rewritten.
+   */
+  propertyReference: string | null;
+  /** Authorized record targets for the bell's deep link. Managers receive the
+   * record events, and a manager is authorized to open any client/contact. */
+  clientId: string | null;
+  contactId: string | null;
+  contactType: ContactType | null;
+  followUpId: string | null;
   read: boolean;
   readAt: string | null;
   createdAt: string;
@@ -53,6 +73,11 @@ export function toNotificationDto(
     title: row.title,
     message: row.body,
     propertyId,
+    propertyReference: row.propertyReference,
+    clientId: row.clientId,
+    contactId: row.contactId,
+    contactType: row.contactType,
+    followUpId: row.followUpId,
     read: row.readAt !== null,
     readAt: row.readAt ? row.readAt.toISOString() : null,
     createdAt: row.createdAt.toISOString(),

@@ -31,6 +31,7 @@ import {
   resubmitProperty,
   updateProperty,
 } from '../../../lib/api/properties-api';
+import { usePropertyImage } from '../../../lib/api/use-property-image';
 import {
   mapPropertyFromApi,
   needsResubmitAfterCorrection,
@@ -39,9 +40,12 @@ import {
 } from '../../../lib/property-adapter';
 import {
   applyLinkedContact,
+  effectiveImageUrl,
   initialNewPropertyFormV2,
   linkedContactSelection,
   propertyAreaV2,
+  satisfiesImageRequirement,
+  storedPropertyImages,
   type FloorEntry,
   type ListingOperation,
   type NewPropertyFormV2,
@@ -385,9 +389,20 @@ export function AddPropertyModalV2({
   };
 
   // Editing an existing row cannot replace its stored image (`PATCH` has no
-  // image field), so the image already stored on the row satisfies the step.
+  // image field), so the image already stored on the row satisfies the step
+  // and is SHOWN to the employee instead of looking missing.
   const editingExisting = Boolean(property?.id);
-  const hasImage = !!image || editingExisting;
+  const storedImages = storedPropertyImages(property);
+  // The stored image is loaded through the SAME authorized hook the property
+  // cards use (no second endpoint, no permanent URL).
+  const storedImage = usePropertyImage(
+    editingExisting ? (property?.id ?? null) : null,
+  );
+  const hasImage = satisfiesImageRequirement({
+    newImage: image,
+    storedImages,
+    editingExisting,
+  });
   const linkedContactId = property?.linkedContactId ?? null;
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -439,6 +454,9 @@ export function AddPropertyModalV2({
         const patched = await updateProperty(
           property.id,
           toUpdatePropertyPayload(draft, property.version, options),
+          // A chosen replacement travels with the edit and is applied only
+          // after the manager's approval.
+          image?.file ?? null,
         );
         // Correcting a REJECTED row — or a PENDING row whose manager requested
         // changes — must not publish it: it only goes back to review when the
@@ -935,37 +953,97 @@ export function AddPropertyModalV2({
               </section>
 
               <section className={styles.panel}>
-                <h3>صورة العقار الرئيسية <span className={styles.required}>مطلوبة</span></h3>
-                <label className={styles.uploadArea}>
-                  <span className={styles.uploadIcon} aria-hidden="true">＋</span>
-                  <strong>{image ? 'استبدال الصورة' : 'اختر صورة من جهازك'}</strong>
-                  <span>صورة واحدة واضحة للعقار · اضغط للاختيار</span>
-                  <input type="file" accept="image/*" onChange={setImageFile} />
-                </label>
-                {image ? (
-                  <div className={styles.uploadPreview}>
-                    <img
-                      className={styles.image}
-                      src={image.preview}
-                      alt="معاينة صورة العقار"
-                    />
-                    <span>{image.file.name}</span>
-                    <div className={styles.flexRow}>
-                      <Button type="button" onClick={removeImage}>
-                        إزالة الصورة
-                      </Button>
+                <h3>
+                  صورة العقار الرئيسية{' '}
+                  <span className={styles.required}>
+                    {editingExisting ? 'محفوظة' : 'مطلوبة'}
+                  </span>
+                </h3>
+                {editingExisting ? (
+                  <>
+                    <div className={styles.uploadPreview}>
+                      {image ? (
+                        <img
+                          className={styles.image}
+                          src={image.preview}
+                          alt="معاينة صورة العقار الجديدة"
+                        />
+                      ) : storedImage.src ? (
+                        <img
+                          className={styles.image}
+                          src={storedImage.src}
+                          alt="الصورة المحفوظة للعقار"
+                        />
+                      ) : (
+                        <p className={styles.hint}>
+                          {storedImage.loading
+                            ? 'جارٍ تحميل الصورة المحفوظة…'
+                            : (storedImage.error ??
+                              'لا توجد صورة محفوظة لهذا العقار.')}
+                        </p>
+                      )}
+                      <span>
+                        {image
+                          ? 'الصورة الجديدة (بانتظار موافقة المدير)'
+                          : 'الصورة المحفوظة للعقار'}
+                      </span>
+                      <div className={styles.flexRow}>
+                        {image ? (
+                          <Button type="button" onClick={removeImage}>
+                            إلغاء الاستبدال
+                          </Button>
+                        ) : (
+                          <label className={styles.uploadArea}>
+                            <span className={styles.uploadIcon} aria-hidden="true">
+                              ＋
+                            </span>
+                            <strong>استبدال الصورة</strong>
+                            <span>اختر صورة جديدة من جهازك</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={setImageFile}
+                            />
+                          </label>
+                        )}
+                      </div>
                     </div>
-                  </div>
+                    <p className={styles.hint}>
+                      {image
+                        ? 'تُحفظ الصورة الجديدة للمراجعة، ولا تظهر للعامة إلا بعد موافقة المدير. الصورة المحفوظة تبقى كما هي حتى ذلك الحين.'
+                        : 'الصورة المحفوظة تبقى كما هي ما لم تختر استبدالًا — ولا يُطلب رفع صورة لحفظ تعديلات أخرى.'}
+                    </p>
+                  </>
                 ) : (
-                  <p className={styles.hint}>
-                    صورة واحدة إلزامية. لا تُقبل روابط صور أو معرض أو فيديو.
-                  </p>
-                )}
-                {editingExisting && image && (
-                  <p className={styles.hint}>
-                    صورة العقار المحفوظة ستبقى كما هي — استبدال الصورة غير مدعوم
-                    عند التعديل في هذه المرحلة.
-                  </p>
+                  <>
+                    <label className={styles.uploadArea}>
+                      <span className={styles.uploadIcon} aria-hidden="true">
+                        ＋
+                      </span>
+                      <strong>اختر صورة من جهازك</strong>
+                      <span>صورة واحدة واضحة للعقار · اضغط للاختيار</span>
+                      <input type="file" accept="image/*" onChange={setImageFile} />
+                    </label>
+                    {image ? (
+                      <div className={styles.uploadPreview}>
+                        <img
+                          className={styles.image}
+                          src={image.preview}
+                          alt="معاينة صورة العقار"
+                        />
+                        <span>{image.file.name}</span>
+                        <div className={styles.flexRow}>
+                          <Button type="button" onClick={removeImage}>
+                            إزالة الصورة
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className={styles.hint}>
+                        صورة واحدة إلزامية. لا تُقبل روابط صور أو معرض أو فيديو.
+                      </p>
+                    )}
+                  </>
                 )}
               </section>
 
@@ -1216,10 +1294,18 @@ export function AddPropertyModalV2({
               <section className={styles.panel}>
                 <h3>ملخص قبل الحفظ</h3>
                 <div className={styles.previewCard}>
-                  {image ? (
+                  {effectiveImageUrl({
+                    localPreview: image?.preview ?? null,
+                    storedUrl: storedImage.src,
+                  }) ? (
                     <img
                       className={styles.image}
-                      src={image.preview}
+                      src={
+                        effectiveImageUrl({
+                          localPreview: image?.preview ?? null,
+                          storedUrl: storedImage.src,
+                        }) as string
+                      }
                       alt="صورة العقار"
                     />
                   ) : (

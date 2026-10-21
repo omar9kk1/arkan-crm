@@ -12,9 +12,10 @@ import {
 } from '@prisma/client';
 import { Role, type AuthUser } from '@arkan/shared';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { contactOwnershipWhere } from '../contacts/contact-policy';
 import { propertyVisibilityWhere } from '../properties/property-visibility';
-import { clientOwnershipWhere } from './client-policy';
+import { clientOwnershipWhere, ensureEmployeeProfile } from './client-policy';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { ListClientsQueryDto } from './dto/list-clients.query';
@@ -258,7 +259,10 @@ function serializeInterests(
 
 @Injectable()
 export class ClientsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   /** `GET /clients` — the whole authorised list, optionally searched. */
   async list(
@@ -435,13 +439,13 @@ export class ClientsService {
             'لا يمكن تخصيص عميل لموظف آخر؛ التخصيص لحسابك فقط.',
           );
         // The creator and the responsible employee stay distinct columns; an
-        // employee registering a client becomes its responsible owner.
-        const profile = await tx.employeeProfile.findUnique({
-          where: { userId: viewer.id },
-          select: { id: true },
-        });
-        createdById = profile?.id ?? null;
-        responsibleEmployeeId = profile?.id ?? null;
+        // employee registering a client becomes its responsible owner. The
+        // profile itself is provisioned on demand, so an account created
+        // outside the employees flow can still OWN the client it registers —
+        // otherwise the save would succeed and the client would then be
+        // invisible to its own creator (the cross-account search/link bug).
+        createdById = await ensureEmployeeProfile(tx, viewer.id);
+        responsibleEmployeeId = createdById;
       } else if (dto.responsibleUserId) {
         // Managers link responsibility by stable User.id, never by name.
         const profile = await tx.employeeProfile.findUnique({
@@ -497,6 +501,25 @@ export class ClientsService {
           after: { name: client.name },
         },
       });
+      // Employee activity reporting: one CLIENT_CREATED occurrence per committed
+      // save, written in the same transaction. The optional scheduled first
+      // follow-up and the freshly linked interests are part of this very save,
+      // so the manager is told about the save once — not once per row. The
+      // intent wording derives ONLY from persisted data: interests in the same
+      // save mean the client is inquiring about an existing program property;
+      // nothing else in the payload is a validated intent, so a save without
+      // interests keeps the generic wording.
+      await this.notifications.notifyEmployeeRecordChange(
+        tx,
+        viewer,
+        'CLIENT_CREATED',
+        {
+          clientId: client.id,
+          ...(dto.propertyInterests?.length
+            ? { clientIntent: 'INQUIRY' as const }
+            : {}),
+        },
+      );
       // Return the client WITH the freshly saved interests visible.
       return dto.propertyInterests?.length
         ? await tx.client.findFirstOrThrow({
@@ -506,6 +529,44 @@ export class ClientsService {
         : client;
     });
     return serializeClient(created);
+  }
+
+  /**
+   * Did the PATCH actually change anything? The employee update is reported to
+   * the managers only on a real change — a repeated save with identical values
+   * produces no notification (the DB write itself stays as before).
+   */
+  private static clientPatchChanged(
+    existing: {
+      name: string;
+      phone: string;
+      notes: string | null;
+      source: string | null;
+      responsibleEmployeeId: string | null;
+    },
+    dto: UpdateClientDto,
+    responsibleEmployeeId: string | null | undefined,
+  ): boolean {
+    if (dto.name !== undefined && (dto.name.trim() || '') !== existing.name)
+      return true;
+    if (dto.phone !== undefined && (dto.phone.trim() || '') !== existing.phone)
+      return true;
+    if (
+      dto.notes !== undefined &&
+      (dto.notes?.trim() || null) !== existing.notes
+    )
+      return true;
+    if (
+      dto.source !== undefined &&
+      (dto.source?.trim() || null) !== existing.source
+    )
+      return true;
+    if (
+      responsibleEmployeeId !== undefined &&
+      responsibleEmployeeId !== existing.responsibleEmployeeId
+    )
+      return true;
+    return false;
   }
 
   /**
@@ -519,7 +580,14 @@ export class ClientsService {
   ): Promise<ClientDto> {
     const existing = await this.prisma.client.findFirst({
       where: { id, ...clientOwnershipWhere(viewer) },
-      select: { id: true },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        notes: true,
+        source: true,
+        responsibleEmployeeId: true,
+      },
     });
     if (!existing) throw new NotFoundException('Client not found');
     if (dto.responsibleUserId !== undefined && viewer.role !== Role.MANAGER)
@@ -570,8 +638,14 @@ export class ClientsService {
       // interest upserts on the (client, property) pair, so repeated
       // submissions never create duplicate rows and never re-create the
       // client itself.
+      let interestChange: InterestUpsertResult | null = null;
       if (dto.propertyInterests?.length) {
-        await this.upsertInterests(tx, viewer, id, dto.propertyInterests);
+        interestChange = await this.upsertInterests(
+          tx,
+          viewer,
+          id,
+          dto.propertyInterests,
+        );
       }
 
       await tx.auditLog.create({
@@ -583,6 +657,26 @@ export class ClientsService {
           after: { name: client.name },
         },
       });
+      // Employee activity reporting — only for a real change, only for an
+      // employee actor (a manager's own edit never notifies). A client-field
+      // change and a new property interest are two distinct events when a single
+      // PATCH performs both.
+      if (ClientsService.clientPatchChanged(existing, dto, responsibleEmployeeId)) {
+        await this.notifications.notifyEmployeeRecordChange(
+          tx,
+          viewer,
+          'CLIENT_UPDATED',
+          { clientId: client.id },
+        );
+      }
+      if (interestChange && interestChange.changed) {
+        await this.notifications.notifyEmployeeRecordChange(
+          tx,
+          viewer,
+          'CLIENT_INTEREST_UPDATED',
+          { clientId: client.id },
+        );
+      }
       // Return the client WITH the freshly upserted interests visible.
       return dto.propertyInterests?.length
         ? await tx.client.findFirstOrThrow({
@@ -648,6 +742,14 @@ export class ClientsService {
           after: { clientId: client.id, dueAt: dto.dueAt },
         },
       });
+      // Employee activity reporting: the follow-up's birth keys on the immutable
+      // follow-up row id, so a retried save never notifies twice.
+      await this.notifications.notifyEmployeeRecordChange(
+        tx,
+        viewer,
+        'FOLLOWUP_CREATED',
+        { clientId: client.id, followUpId: created.id },
+      );
       return created;
     });
     return serializeFollowUp(entry);
@@ -657,6 +759,10 @@ export class ClientsService {
    * Validates each wizard interest server-side, then upserts it on the
    * (client, property) pair — repeated submissions update the reason/notes
    * instead of creating duplicate links.
+   *
+   * Returns whether the upsert actually created new links or changed stored
+   * values: a repeated wizard save with identical values reports `changed`
+   * false, so it produces no manager notification.
    *
    * Rules enforced here, never trusted from the body:
    * - the `Property.id` must exist AND be visible through the SAME
@@ -672,8 +778,22 @@ export class ClientsService {
     viewer: AuthUser,
     clientId: string,
     inputs: PropertyInterestInputDto[],
-  ): Promise<void> {
-    for (const input of inputs) {
+  ): Promise<InterestUpsertResult> {
+    const normalized = inputs.map((input) => ({
+      propertyId: input.propertyId,
+      reason: input.reason?.trim() || null,
+      notes: input.notes?.trim() || null,
+    }));
+    const stored = await tx.clientPropertyInterest.findMany({
+      where: { clientId },
+      select: { propertyId: true, reason: true, notes: true },
+    });
+    const storedKey = new Map(stored.map((row) => [row.propertyId, row]));
+
+    let changed = false;
+    for (const input of normalized) {
+      const before = storedKey.get(input.propertyId) ?? null;
+
       const property = await tx.property.findFirst({
         where: { id: input.propertyId, ...propertyVisibilityWhere(viewer) },
         select: { id: true, status: true },
@@ -696,14 +816,31 @@ export class ClientsService {
         create: {
           clientId,
           propertyId: input.propertyId,
-          reason: input.reason?.trim() || null,
-          notes: input.notes?.trim() || null,
+          reason: input.reason,
+          notes: input.notes,
         },
         update: {
-          reason: input.reason?.trim() || null,
-          notes: input.notes?.trim() || null,
+          reason: input.reason,
+          notes: input.notes,
         },
       });
+
+      // A missing row was created; an existing row counts as changed only when
+      // one of the stored values actually moved.
+      if (!before) {
+        changed = true;
+      } else if (
+        before.reason !== input.reason ||
+        before.notes !== input.notes
+      ) {
+        changed = true;
+      }
     }
+    return { changed };
   }
+}
+
+/** Whether an interest upsert touched anything (drives the interest event). */
+interface InterestUpsertResult {
+  changed: boolean;
 }

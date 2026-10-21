@@ -8,6 +8,7 @@ import { SettingsSectionCard } from './settings-section-card';
 import { SettingsField } from './settings-field';
 import { SettingsToggle } from './settings-toggle';
 import { SettingsPermissionList } from './settings-permission-list';
+import { PushNotificationToggle } from './push-notification-toggle';
 import styles from './settings.module.css';
 export function SettingsPage() {
   const [notice, setNotice] = useState(0);
@@ -116,6 +117,9 @@ export function SettingsPage() {
           ].map((label) => (
             <SettingsToggle key={label} label={label} defaultChecked />
           ))}
+        </SettingsSectionCard>
+        <SettingsSectionCard title="الإشعارات الخارجية">
+          <PushNotificationToggle />
         </SettingsSectionCard>
       </div>
       <Toast

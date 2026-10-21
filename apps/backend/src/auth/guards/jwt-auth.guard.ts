@@ -57,7 +57,13 @@ export class JwtAuthGuard implements CanActivate {
         session.user.role !== payload.role
       )
         throw new Error('Inactive session');
-      request.user = { id: session.userId, role: session.user.role };
+      request.user = {
+        id: session.userId,
+        role: session.user.role,
+        // The lineage of the LIVE session row: the server-side identity of this
+        // device's login family. It is never taken from the request body.
+        sessionLineageId: session.lineageId,
+      };
       return true;
     } catch {
       throw new UnauthorizedException('Invalid or expired access token');

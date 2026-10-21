@@ -58,4 +58,9 @@ export const environmentSchema = Joi.object({
   // Optional private storage root for uploaded property images. When unset the
   // StorageService falls back to `<home>/.arkan-crm/storage` (outside the repo).
   STORAGE_ROOT: Joi.string().optional(),
+  // Web Push (VAPID) — secrets only, never hardcoded. The feature stays off
+  // (and the API answers "not configured") until the keys are provided.
+  PUSH_VAPID_PUBLIC_KEY: Joi.string().optional().allow(''),
+  PUSH_VAPID_PRIVATE_KEY: Joi.string().optional().allow(''),
+  PUSH_VAPID_SUBJECT: Joi.string().optional().allow(''),
 });

@@ -241,7 +241,8 @@ describeWithDatabase('Phase 4A frontend API contract', () => {
     const created = await createProperty(payload, imageFile());
 
     expect(created.status).toBe('PENDING');
-    expect(created.reference).toMatch(/^AK-\d{6}-[0-9A-F]{10}$/);
+    // The permanent sequential code: A-000001, A-000002, …
+    expect(created.reference).toMatch(/^A-\d{6}$/);
     expect(created.version).toBe(1);
     expect(created.primaryImageUrl).toBeTruthy();
     // Public description: the private phone must never be persisted there.

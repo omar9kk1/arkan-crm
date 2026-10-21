@@ -42,6 +42,9 @@ export class AuthController {
   }
   @Get('me')
   me(@Req() request: { user: AuthUser }) {
-    return request.user;
+    // The session lineage is an internal server detail (it identifies the
+    // device's login family); it never leaves the API.
+    const { id, role } = request.user;
+    return { id, role };
   }
 }

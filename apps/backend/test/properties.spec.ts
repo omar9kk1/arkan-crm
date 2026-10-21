@@ -129,7 +129,7 @@ describeWithDatabase('Properties API (workflow, visibility, privacy)', () => {
       image,
     );
     expect(response.status).toBe(201);
-    expect(response.body.data.reference).toMatch(/^AK-\d{6}-[0-9A-F]{10}$/);
+    expect(response.body.data.reference).toMatch(/^A-\d{6}$/);
     expect(response.body.data.title).toContain('الجابرية');
     const row = await ctx.prisma.property.findUnique({
       where: { id: response.body.data.id },

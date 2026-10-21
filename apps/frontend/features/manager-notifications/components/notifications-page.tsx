@@ -8,7 +8,6 @@ import { Button } from '../../../components/ui/button';
 import { Card } from '../../../components/ui/card';
 import { StatCard } from '../../../components/ui/stat-card';
 import type { NotificationDto } from '../../../lib/api/notification-types';
-import { requestOpenProperty } from '../../notifications/open-property';
 import { useNotifications } from '../../notifications/store';
 import {
   awaitingReviewCount,
@@ -59,10 +58,11 @@ export function NotificationsPage() {
     if (!item.read) void markRead(item.id);
   };
 
-  const openProperty = (propertyId: string) => {
+  // The action button in the details drawer deep-links the notification's exact
+  // authorized record (property, client or contact drawer).
+  const openRecord = (path: string) => {
     setSelectedId(null);
-    requestOpenProperty(propertyId);
-    router.push('/manager/properties');
+    router.push(path);
   };
 
   const markAll = () => {
@@ -154,7 +154,7 @@ export function NotificationsPage() {
             item={selected}
             onClose={() => setSelectedId(null)}
             onRead={() => void markRead(selected.id)}
-            onOpenProperty={openProperty}
+            onOpenRecord={openRecord}
           />
         )}
         <Toast message={notice} onDismiss={() => setNotice('')} />

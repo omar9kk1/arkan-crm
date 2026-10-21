@@ -1,0 +1,27 @@
+{
+  "name": "أركان الخليج العقارية",
+  "short_name": "أركان",
+  "description": "نظام أركان الخليج العقارية لإدارة العلاقات العقارية",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0b1220",
+  "theme_color": "#0b1220",
+  "dir": "rtl",
+  "lang": "ar",
+  "icons": [
+    {
+      "src": "/brand/arkan-gulf-logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/brand/arkan-gulf-logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

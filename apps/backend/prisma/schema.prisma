@@ -110,6 +110,15 @@ enum NotificationType {
   PROPERTY_APPROVED
   PROPERTY_AVAILABLE
   SYSTEM
+  // Employee record-activity events. Enum values are APPENDED after `SYSTEM` on
+  // purpose: PostgreSQL `ALTER TYPE ... ADD VALUE` always appends, so the
+  // database keeps the exact order declared here and no future diff drifts.
+  CLIENT_CREATED
+  CLIENT_UPDATED
+  CLIENT_INTEREST_UPDATED
+  FOLLOWUP_CREATED
+  CONTACT_CREATED
+  CONTACT_UPDATED
 }
 
 model User {
@@ -123,6 +132,7 @@ model User {
   updatedAt               DateTime                  @updatedAt
   employee                EmployeeProfile?
   refreshTokens           RefreshToken[]
+  pushSubscriptions       PushSubscription[]
   notifications           Notification[]
   auditLogs               AuditLog[]
   recordedDeals           Deal[]
@@ -147,8 +157,37 @@ model RefreshToken {
   expiresAt DateTime
   revokedAt DateTime?
   createdAt DateTime  @default(now())
+  // Stable "login family" id. A refresh ROTATES the token row, so the row id
+  // alone cannot identify a device; this lineage survives every rotation and
+  // is revoked as a whole on logout. NULL for sessions created before the
+  // column existed: they keep working normally but can never receive Web Push.
+  lineageId String?   @db.Uuid
 
   @@index([userId, expiresAt])
+  @@index([lineageId])
+}
+
+/**
+ * One browser's Web Push subscription, bound to the authenticated manager AND
+ * to the verified session lineage it was created from. The `endpoint` is unique
+ * per browser, so a shared browser can never carry a subscription of another
+ * account: subscribing replaces the endpoint's owner with the current session.
+ */
+model PushSubscription {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // The session lineage that owns this subscription. A push is only delivered
+  // while this lineage still has a live session (see `PushService`).
+  lineageId String   @db.Uuid
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, lineageId])
 }
 
 model EmployeeProfile {
@@ -268,6 +307,21 @@ model Property {
   @@index([contactId])
   @@index([createdByUserId])
   @@index([governorate, district])
+  // Indexed prefix lookup for the property code (`A-000123`): the pattern
+  // operator lets a `LIKE 'A-0001%'` search use the index instead of a scan.
+  @@index([reference(ops: raw("text_pattern_ops"))], type: BTree)
+}
+
+/**
+ * The atomic counter behind the property codes.
+ *
+ * A single row is incremented with `UPDATE ... RETURNING`, so concurrent
+ * employees can never receive the same code and a code is never reused. The
+ * value only grows: a failed creation leaves a gap, never a reused number.
+ */
+model PropertyCodeSequence {
+  id    Int    @id
+  value BigInt @default(0)
 }
 
 model Contact {
@@ -281,6 +335,7 @@ model Contact {
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
   properties        Property[]
+  notifications     Notification[]
 
   @@index([type, responsibleUserId])
   @@index([phone])
@@ -568,6 +623,10 @@ model Notification {
   client         Client?       @relation(fields: [clientId], references: [id], onDelete: Restrict)
   ownerId        String?       @db.Uuid
   owner          Owner?        @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  // Modern Owner/Broker contact cards (legacy `ownerId` above is retired and
+  // never written again — it points at the old `Owner` model, NOT at `Contact`).
+  contactId      String?       @db.Uuid
+  contact        Contact?      @relation(fields: [contactId], references: [id], onDelete: Restrict)
   dealId         String?       @db.Uuid
   deal           Deal?         @relation(fields: [dealId], references: [id], onDelete: Restrict)
   followUpId     String?       @db.Uuid

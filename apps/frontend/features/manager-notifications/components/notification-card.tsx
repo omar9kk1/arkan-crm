@@ -1,7 +1,11 @@
 import { Card } from '../../../components/ui/card';
 import { Button } from '../../../components/ui/button';
 import type { NotificationDto } from '../../../lib/api/notification-types';
-import { displayDate, notificationTypeLabel } from '../../notifications/view';
+import {
+  displayDate,
+  notificationTypeLabel,
+  resolvePropertyCode,
+} from '../../notifications/view';
 import styles from './notifications.module.css';
 
 export function NotificationCard({
@@ -18,7 +22,7 @@ export function NotificationCard({
     >
       <div>
         <h3>{item.title}</h3>
-        <p>{item.message}</p>
+        <p>{resolvePropertyCode(item.message, item.propertyReference)}</p>
         <div className={styles.badges}>
           <span className={styles.badge}>
             {notificationTypeLabel(item.type)}
