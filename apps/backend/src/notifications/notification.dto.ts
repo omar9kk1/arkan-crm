@@ -1,4 +1,4 @@
-import type { ContactType, NotificationType } from '@prisma/client';
+import type { ContactType, NotificationType, PropertyStatus } from '@prisma/client';
 
 /**
  * The exact `Notification` columns the API is allowed to read. Declared
@@ -16,6 +16,20 @@ export interface NotificationRow {
   clientId: string | null;
   contactId: string | null;
   followUpId: string | null;
+  /** Deep link to a client review row (the recipient is always authorized). */
+  clientReviewId: string | null;
+  /**
+   * The stored per-recipient dedup key. For `FOLLOWUP_CREATED` rows it is
+   * exactly `FOLLOWUP_CREATED:<entryId>` — the authoritative entry id the
+   * deep link scrolls/highlights; null on rows without one.
+   */
+  eventKey: string | null;
+  /**
+   * Deep link to an employee follow-up subject. `list()` exposes it to the
+   * recipient authorized for that subject: the responsible employee, or a
+   * manager for monitor-directed rows (creations / escalations).
+   */
+  followUpSubjectId: string | null;
   /** The linked contact card's type, when the row points at a contact. */
   contactType: ContactType | null;
   /** The CURRENT code of the linked property (the stored body is history). */
@@ -30,6 +44,19 @@ export interface NotificationRow {
  * serializer when the caller is not authorized to open the linked property, so
  * the UI can never render a link to a record it cannot read.
  */
+/**
+ * Manager-only, read-time context for a potential-duplicate notification.
+ * Resolved from the linked property + latest approval request so BOTH new and
+ * already-stored rows render human-readable codes/names (never raw UUIDs).
+ * Every field is optional; unavailable data is simply omitted.
+ */
+export interface NotificationDuplicateContextDto {
+  newPropertyReference: string | null;
+  existingPropertyReference: string | null;
+  employeeName: string | null;
+  status: PropertyStatus | null;
+}
+
 export interface NotificationDto {
   id: string;
   type: NotificationType;
@@ -49,6 +76,21 @@ export interface NotificationDto {
   contactId: string | null;
   contactType: ContactType | null;
   followUpId: string | null;
+  /** Client review deep link (requester or manager only, by construction). */
+  clientReviewId: string | null;
+  /**
+   * The stored per-recipient dedup key (`FOLLOWUP_CREATED:<entryId>` on
+   * follow-up rows) — the deep link's entry target; null when absent.
+   */
+  eventKey: string | null;
+  /**
+   * Employee follow-up subject deep link. Exposed to the recipient that may
+   * open it (the responsible employee, or the monitoring manager for the
+   * rows addressed to managers) and masked for every other caller.
+   */
+  followUpSubjectId: string | null;
+  /** Manager-only human-readable potential-duplicate context, or null. */
+  duplicate: NotificationDuplicateContextDto | null;
   read: boolean;
   readAt: string | null;
   createdAt: string;
@@ -66,6 +108,8 @@ export interface UnreadCountDto {
 export function toNotificationDto(
   row: NotificationRow,
   propertyId: string | null,
+  followUpSubjectId: string | null = null,
+  duplicate: NotificationDuplicateContextDto | null = null,
 ): NotificationDto {
   return {
     id: row.id,
@@ -78,6 +122,10 @@ export function toNotificationDto(
     contactId: row.contactId,
     contactType: row.contactType,
     followUpId: row.followUpId,
+    clientReviewId: row.clientReviewId,
+    eventKey: row.eventKey,
+    followUpSubjectId,
+    duplicate,
     read: row.readAt !== null,
     readAt: row.readAt ? row.readAt.toISOString() : null,
     createdAt: row.createdAt.toISOString(),

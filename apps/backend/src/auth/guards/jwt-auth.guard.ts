@@ -46,7 +46,10 @@ export class JwtAuthGuard implements CanActivate {
         throw new Error('Invalid claims');
       const session = await this.prisma.refreshToken.findUnique({
         where: { id: payload.sid as string },
-        include: { user: true },
+        // Only the session-validity columns: the guard must never depend on
+        // unrelated user fields (a pending migration must not turn every
+        // authenticated request into a 401).
+        include: { user: { select: { role: true, isActive: true } } },
       });
       if (
         !session ||

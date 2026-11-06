@@ -16,6 +16,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { contactOwnershipWhere } from '../contacts/contact-policy';
 import { propertyVisibilityWhere } from '../properties/property-visibility';
 import { clientOwnershipWhere, ensureEmployeeProfile } from './client-policy';
+import { clientRequestChangeSummary } from './client-request-data';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { ListClientsQueryDto } from './dto/list-clients.query';
@@ -59,6 +60,7 @@ const FOLLOW_UP_INCLUDE = {
 const PROPERTY_SELECT = {
   id: true,
   reference: true,
+  approvedReference: true,
   title: true,
   area: true,
   askingPrice: true,
@@ -212,6 +214,7 @@ function serializeClient(client: ClientRow): ClientDto {
     notes: client.notes ?? '',
     source: client.source ?? '',
     status: client.status ?? '',
+    requestData: client.requestData ?? null,
     responsibleUserId: client.responsibleEmployee?.userId ?? null,
     responsibleEmployeeName: client.responsibleEmployee?.user.name ?? null,
     createdByUserId: client.createdBy?.userId ?? null,
@@ -221,7 +224,7 @@ function serializeClient(client: ClientRow): ClientDto {
     followUps: client.followups.map(serializeFollowUp),
     properties: client.deals.map(({ property }) => ({
       id: property.id,
-      reference: property.reference,
+      reference: property.approvedReference ?? property.reference,
       title: property.title,
       area: property.area,
       askingPrice:
@@ -243,7 +246,7 @@ function serializeInterests(
 ): ClientPropertyInterestDto[] {
   return rows.map((interest) => ({
     propertyId: interest.property.id,
-    reference: interest.property.reference,
+    reference: interest.property.approvedReference ?? interest.property.reference,
     title: interest.property.title,
     area: interest.property.area,
     askingPrice:
@@ -255,6 +258,18 @@ function serializeInterests(
     notes: interest.notes ?? '',
     createdAt: interest.createdAt.toISOString(),
   }));
+}
+
+/**
+ * Guards against the "?" corruption class at the ONLY entry to the store:
+ * a name whose every letter is a literal question mark (U+003F) was once
+ * accepted and permanently destroyed the real Arabic name. Such a value is
+ * never a human name — it indicates a broken input path at the sender side.
+ */
+export function isUnreadableName(name: string | undefined): boolean {
+  if (name === undefined) return false;
+  const letters = name.replace(/[?\s\u061c\u200b-\u200f\u202a-\u202e]/g, '');
+  return letters.length === 0;
 }
 
 @Injectable()
@@ -318,12 +333,11 @@ export class ClientsService {
         where: { userId: viewer.id },
         select: { id: true },
       });
-      followUpScope = {
-        OR: [
-          { client: clientOwnershipWhere(viewer) },
-          { employeeId: profile?.id ?? 'no-assigned-profile' },
-        ],
-      };
+      const orConditions: Prisma.FollowUpWhereInput[] = [
+        { client: clientOwnershipWhere(viewer) },
+      ];
+      if (profile?.id) orConditions.push({ employeeId: profile.id });
+      followUpScope = { OR: orConditions };
     }
 
     const [totalClients, activeClients, owners, brokers, followUpsThisWeek, pending, dealCounts] =
@@ -429,9 +443,28 @@ export class ClientsService {
 
   /** `POST /clients` — registers a real client (+ optional first follow-up). */
   async create(viewer: AuthUser, dto: CreateClientDto): Promise<ClientDto> {
+    // BYPASS GUARD: an employee's additions ALWAYS go through the staged
+    // review workflow (`POST /client-reviews`) — a pending creation can never
+    // skip a manager approval and appear in the approved lists. Employees
+    // have no direct write path to `Client` rows at all.
+    if (viewer.role === Role.EMPLOYEE)
+      throw new ForbiddenException(
+        'إضافة العملاء من حساب الموظف تتم عبر طلب المراجعة الآن (تبويب «تحت المراجعة»).',
+      );
+    // Store-front integrity: reject the unreadable-name corruption before it
+    // can ever be persisted (the only recoverable state is a non-entry).
+    if (isUnreadableName(dto.name))
+      throw new BadRequestException(
+        'الاسم غير قابل للقراءة — علامات استفهام بدل الحروف. أدخل اسم العميل بلون سليم.',
+      );
     const created = await this.prisma.$transaction(async (tx) => {
       let createdById: string | null = null;
       let responsibleEmployeeId: string | null = null;
+      // The stable USER-level attribution of a MANAGER-registered client with
+      // no responsible employee: the manager becomes the follow-up's
+      // responsible user (FollowUpSubject.responsibleUserId) — never invented
+      // ownership, always this real relationship (§7).
+      let createdByUserId: string | null = null;
 
       if (viewer.role === Role.EMPLOYEE) {
         if (dto.responsibleUserId && dto.responsibleUserId !== viewer.id)
@@ -455,6 +488,9 @@ export class ClientsService {
         if (!profile)
           throw new BadRequestException('حساب الموظف المسؤول غير موجود.');
         responsibleEmployeeId = profile.id;
+      } else if (viewer.role === Role.MANAGER) {
+        // Manager-registered, unassigned client: HE is the responsible user.
+        createdByUserId = viewer.id;
       }
 
       const client = await tx.client.create({
@@ -464,6 +500,7 @@ export class ClientsService {
           notes: dto.notes?.trim() || null,
           source: dto.source?.trim() || null,
           createdById,
+          createdByUserId,
           responsibleEmployeeId,
         },
         include: CLIENT_DETAIL_INCLUDE,
@@ -532,6 +569,57 @@ export class ClientsService {
   }
 
   /**
+   * The privacy-safe Arabic summary of a client PATCH, one item per REALLY
+   * changed field (drives the CLIENT_UPDATED notification to the managers).
+   *
+   * Only plain identity values travel with old → new; the phone, the notes and
+   * the responsible employee appear as a FACT ONLY («تم تغيير رقم الهاتف») —
+   * their contents never go into the bell or Web Push.
+   */
+  private static clientChangeSummary(
+    existing: {
+      name: string;
+      phone: string;
+      notes: string | null;
+      source: string | null;
+      responsibleEmployeeId: string | null;
+      requestData?: string | null;
+    },
+    dto: UpdateClientDto,
+    responsibleEmployeeId: string | null | undefined,
+    existingRequestData: string | null = null,
+  ): string {
+    const items: string[] = [];
+    if (dto.name !== undefined && (dto.name.trim() || '') !== existing.name)
+      items.push(`الاسم: من ${existing.name} إلى ${dto.name.trim()}`);
+    if (
+      dto.source !== undefined &&
+      (dto.source?.trim() || null) !== existing.source
+    )
+      items.push(
+        existing.source
+          ? `المصدر: من ${existing.source} إلى ${dto.source?.trim() || '(فارغ)'}`
+          : `المصدر: ${dto.source?.trim() || '(فارغ)'}`,
+      );
+    if (dto.phone !== undefined && (dto.phone.trim() || '') !== existing.phone)
+      items.push('تم تغيير رقم الهاتف');
+    if (
+      dto.notes !== undefined &&
+      (dto.notes?.trim() || null) !== existing.notes
+    )
+      items.push('تم تعديل الملاحظات');
+    if (
+      responsibleEmployeeId !== undefined &&
+      responsibleEmployeeId !== existing.responsibleEmployeeId
+    )
+      items.push('تم تغيير الموظف المسؤول');
+    // The structured wizard request diffs (typed old → new values, fact-only
+    // free-form changes) — appended only when the save carried a document.
+    items.push(...clientRequestChangeSummary(existingRequestData, dto));
+    return items.filter(Boolean).join('، ');
+  }
+
+  /**
    * Did the PATCH actually change anything? The employee update is reported to
    * the managers only on a real change — a repeated save with identical values
    * produces no notification (the DB write itself stays as before).
@@ -543,6 +631,7 @@ export class ClientsService {
       notes: string | null;
       source: string | null;
       responsibleEmployeeId: string | null;
+      requestData?: string | null;
     },
     dto: UpdateClientDto,
     responsibleEmployeeId: string | null | undefined,
@@ -566,6 +655,11 @@ export class ClientsService {
       responsibleEmployeeId !== existing.responsibleEmployeeId
     )
       return true;
+    if (
+      dto.requestData !== undefined &&
+      (dto.requestData?.trim() || null) !== (existing.requestData ?? null)
+    )
+      return true;
     return false;
   }
 
@@ -578,6 +672,14 @@ export class ClientsService {
     id: string,
     dto: UpdateClientDto,
   ): Promise<ClientDto> {
+    // BYPASS GUARD: employee edits ALWAYS go through the staged review
+    // workflow (`POST`/`PATCH /client-reviews`). An approved client row —
+    // including its request document and property interests — can only be
+    // changed by a manager decision on a review.
+    if (viewer.role === Role.EMPLOYEE)
+      throw new ForbiddenException(
+        'تعديل بيانات العملاء من حساب الموظف يتم عبر طلب مراجعة الآن (تبويب «تحت المراجعة»).',
+      );
     const existing = await this.prisma.client.findFirst({
       where: { id, ...clientOwnershipWhere(viewer) },
       select: {
@@ -587,9 +689,23 @@ export class ClientsService {
         notes: true,
         source: true,
         responsibleEmployeeId: true,
+        requestData: true,
       },
     });
     if (!existing) throw new NotFoundException('Client not found');
+    if (isUnreadableName(dto.name))
+      throw new BadRequestException(
+        'الاسم غير قابل للقراءة — علامات استفهام بدل الحروف. أدخل اسم العميل بلون سليم.',
+      );
+    // The wizard request document must be valid JSON — a corrupted pack never
+    // enters the history (the store itself stays opaque).
+    if (dto.requestData !== null && dto.requestData !== undefined) {
+      try {
+        JSON.parse(dto.requestData);
+      } catch {
+        throw new BadRequestException('شكل بيانات الطلب غير صالح.');
+      }
+    }
     if (dto.responsibleUserId !== undefined && viewer.role !== Role.MANAGER)
       throw new ForbiddenException(
         'إعادة تخصيص العميل إلى موظف آخر متاحة للمدير فقط.',
@@ -630,6 +746,13 @@ export class ClientsService {
           ...(responsibleEmployeeId !== undefined
             ? { responsibleEmployeeId }
             : {}),
+          ...(dto.requestData !== undefined
+            ? {
+                // The packed wizard document travels exactly as written (the
+                // frontend owns the pack); validity is enforced just below.
+                requestData: dto.requestData?.trim() || null,
+              }
+            : {}),
         },
         include: CLIENT_DETAIL_INCLUDE,
       });
@@ -638,15 +761,28 @@ export class ClientsService {
       // interest upserts on the (client, property) pair, so repeated
       // submissions never create duplicate rows and never re-create the
       // client itself.
-      let interestChange: InterestUpsertResult | null = null;
+      let upsertChange: InterestUpsertResult | null = null;
       if (dto.propertyInterests?.length) {
-        interestChange = await this.upsertInterests(
+        upsertChange = await this.upsertInterests(
           tx,
           viewer,
           id,
           dto.propertyInterests,
         );
       }
+      // Explicit wizard edit choices: what the user REMOVED is deleted from
+      // this client's recorded interests (and never touches another client's
+      // — the deleteMany is scoped to `id`). A removal is an interest change
+      // exactly like an upsert.
+      let removedInterests = 0;
+      if (dto.removePropertyInterestIds?.length)
+        removedInterests = (
+          await tx.clientPropertyInterest.deleteMany({
+            where: { clientId: id, propertyId: { in: dto.removePropertyInterestIds } },
+          })
+        ).count;
+      const interestChanged =
+        Boolean(upsertChange?.changed) || removedInterests > 0;
 
       await tx.auditLog.create({
         data: {
@@ -666,10 +802,18 @@ export class ClientsService {
           tx,
           viewer,
           'CLIENT_UPDATED',
-          { clientId: client.id },
+          {
+            clientId: client.id,
+            clientChangeSummary: ClientsService.clientChangeSummary(
+              existing,
+              dto,
+              responsibleEmployeeId,
+              existing.requestData ?? null,
+            ),
+          },
         );
       }
-      if (interestChange && interestChange.changed) {
+      if (interestChanged) {
         await this.notifications.notifyEmployeeRecordChange(
           tx,
           viewer,
@@ -677,8 +821,8 @@ export class ClientsService {
           { clientId: client.id },
         );
       }
-      // Return the client WITH the freshly upserted interests visible.
-      return dto.propertyInterests?.length
+      // Return the client WITH the freshly upserted/removed interests visible.
+      return dto.propertyInterests?.length || removedInterests > 0
         ? await tx.client.findFirstOrThrow({
             where: { id },
             include: CLIENT_DETAIL_INCLUDE,

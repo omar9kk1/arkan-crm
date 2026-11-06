@@ -26,12 +26,13 @@ describeWithDatabase('Properties API (workflow, visibility, privacy)', () => {
   let employeeBToken: string;
   const api = () => request(ctx.app.getHttpServer());
 
+  let seq = 0;
   const employeePayload = (overrides: Record<string, unknown> = {}) => ({
     listingType: 'SALE',
     governorate: 'الفروانية',
     district: 'غرناطة',
     block: '3',
-    plotNumber: '12',
+    plotNumber: String(900000 + ++seq),
     sizeSqm: '400.00',
     askingPrice: '250000.00',
     negotiable: true,
@@ -129,7 +130,7 @@ describeWithDatabase('Properties API (workflow, visibility, privacy)', () => {
       image,
     );
     expect(response.status).toBe(201);
-    expect(response.body.data.reference).toMatch(/^A-\d{6}$/);
+    expect(response.body.data.reference).toMatch(/^P-\d{6}$/);
     expect(response.body.data.title).toContain('الجابرية');
     const row = await ctx.prisma.property.findUnique({
       where: { id: response.body.data.id },
@@ -331,7 +332,7 @@ describeWithDatabase('Properties API (workflow, visibility, privacy)', () => {
     const id = created.body.data.id;
     // Creator sees the private contact.
     const own = await api().get(`/properties/${id}`).set(auth(employeeAToken));
-    expect(own.body.data.contact?.phone).toBe('69998877');
+    expect(own.body.data.proposedOwner?.phone).toBe('69998877');
 
     await api().post(`/properties/${id}/approve`).set(auth(managerToken)).send({});
 

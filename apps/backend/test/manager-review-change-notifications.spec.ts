@@ -40,12 +40,13 @@ describeWithDatabase('Manager review notification — real changes', () => {
 
   const api = () => request(ctx.app.getHttpServer());
 
+  let seq = 0;
   const payload = () => ({
     listingType: 'SALE',
     governorate: 'الفروانية',
     district: 'غرناطة',
     block: '3',
-    plotNumber: '12',
+    plotNumber: String(900000 + ++seq),
     sizeSqm: '400.00',
     askingPrice: '250000.00',
     negotiable: true,
@@ -260,7 +261,8 @@ describeWithDatabase('Manager review notification — real changes', () => {
     );
     expect(alerts).toHaveLength(1);
     expect(alerts[0]?.title).toBe('عقار جديد بانتظار المراجعة');
-    expect(alerts[0]?.message).toMatch(/^رقم العقار: A-/);
+    // An employee submission carries the submission (P) code, not an A code.
+    expect(alerts[0]?.message).toMatch(/^رقم العقار: P-/);
     expect(alerts[0]?.message).not.toContain('التعديلات:');
     expect(created.id).toEqual(expect.any(String));
   });

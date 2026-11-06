@@ -20,6 +20,9 @@ import type {
 export const propertyDetailInclude = {
   contact: true,
   createdByUser: { select: { id: true, name: true, role: true } },
+  deletedBy: { select: { id: true, name: true } },
+  priorityHolder: { select: { id: true, name: true } },
+  registrants: { select: { employeeUserId: true, status: true } },
   floors: { orderBy: { sortOrder: 'asc' } },
   requestedProperty: true,
   approvals: { orderBy: { createdAt: 'desc' } },
@@ -32,6 +35,7 @@ export const propertyDetailInclude = {
 export interface PropertySerializationSource {
   id: string;
   reference: string;
+  approvedReference: string | null;
   title: string;
   area: string;
   address: string | null;
@@ -51,6 +55,10 @@ export interface PropertySerializationSource {
   contactId: string | null;
   createdByUserId: string | null;
   primaryImageId: string | null;
+  deletedAt: Date | null;
+  deletionReason: string | null;
+  proposedOwner: Prisma.JsonValue | null;
+  deletedBy: { id: string; name: string } | null;
   createdAt: Date;
   updatedAt: Date;
   contact: {
@@ -62,6 +70,11 @@ export interface PropertySerializationSource {
     responsibleUserId: string | null;
   } | null;
   createdByUser: { id: string; name: string; role: Role } | null;
+  priorityHolderUserId: string | null;
+  priorityHolder: { id: string; name: string } | null;
+  priorityDeadline: Date | null;
+  priorityLocked: boolean;
+  registrants: { employeeUserId: string; status: string }[];
   floors: {
     id: string;
     type: FloorType;
@@ -85,6 +98,7 @@ export interface PropertySerializationSource {
     notes: string | null;
     createdAt: Date;
     reviewedAt: Date | null;
+    duplicateCandidateIds: unknown;
   }[];
 }
 
@@ -145,7 +159,9 @@ export function toPublicPropertyDto(
 ): PublicPropertyDto {
   return {
     id: source.id,
-    reference: source.reference,
+    reference: source.approvedReference ?? source.reference,
+    submissionReference: source.reference,
+    approvedReference: source.approvedReference,
     title: source.title,
     listingType: source.listingType,
     status: source.status,
@@ -169,11 +185,30 @@ export function toPublicPropertyDto(
       : null,
     responsibleName: source.createdByUser?.name ?? null,
     responsibleRole: source.createdByUser?.role ?? null,
+    priorityHolderName: null,
     createdAt: source.createdAt.toISOString(),
     updatedAt: source.updatedAt.toISOString(),
     version: source.version,
-    // Viewer-derived ownership flag. `contact` access below stays independent.
+    deletedAt: source.deletedAt?.toISOString() ?? null,
+    deletedByName:
+      viewer.role === Role.MANAGER ? (source.deletedBy?.name ?? null) : null,
+    deletionReason: source.deletionReason,
+    // Viewer-derived ownership flag.
     isMine: viewer.id === source.createdByUserId,
+  };
+}
+
+function proposedOwnerDto(
+  value: Prisma.JsonValue | null,
+): { type: ContactType; name: string; phone: string; notes: string | null } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const v = value as Record<string, unknown>;
+  if (typeof v.name !== 'string' || typeof v.phone !== 'string') return null;
+  return {
+    type: v.type === 'BROKER' ? ContactType.BROKER : ContactType.OWNER,
+    name: v.name,
+    phone: v.phone,
+    notes: typeof v.notes === 'string' ? v.notes : null,
   };
 }
 
@@ -217,6 +252,11 @@ export function serializeProperty(
     contact: contactDto,
     reviewNotes: latestReviewNotes(source),
     reviewStatus: latestReviewStatus(source),
+    proposedOwner:
+      isManager || isCreator ? proposedOwnerDto(source.proposedOwner) : null,
+    duplicateCandidateIds: isManager && source.approvals.length > 0
+      ? (source.approvals[0]?.duplicateCandidateIds as string[] | null) ?? null
+      : null,
   };
   return privateDto;
 }

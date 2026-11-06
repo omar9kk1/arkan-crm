@@ -119,6 +119,23 @@ enum NotificationType {
   FOLLOWUP_CREATED
   CONTACT_CREATED
   CONTACT_UPDATED
+  // Client review workflow events (client review requests). APPENDED after the
+  // record events, same appends-only convention (PostgreSQL `ALTER TYPE ... ADD VALUE`).
+  CLIENT_REVIEW_SUBMITTED
+  CLIENT_REVIEW_RESUBMITTED
+  CLIENT_REVIEW_APPROVED
+  CLIENT_REVIEW_REJECTED
+  CLIENT_REVIEW_CHANGES_REQUESTED
+  // Employee follow-ups late-escalation events. APPENDED after the review
+  // events, same appends-only convention (PostgreSQL `ALTER TYPE ... ADD VALUE`).
+  FOLLOWUP_EMPLOYEE_LATE
+  FOLLOWUP_MANAGER_ESCALATION
+  // Manual manager reminder of ONE overdue employee follow-up. APPENDED after
+  // the escalation events, same appends-only convention (PostgreSQL
+  // `ALTER TYPE ... ADD VALUE`). The recipient is by construction the subject's
+  // responsible employee, so the row is never masked.
+  FOLLOWUP_EMPLOYEE_REMINDER
+  PROPERTY_PRIORITY_EXPIRED
 }
 
 model User {
@@ -145,8 +162,28 @@ model User {
   createdManualExpenses   ManualExpense[]
   responsibleContacts     Contact[]                 @relation("ContactResponsible")
   createdProperties       Property[]                @relation("PropertyCreatedByUser")
+  registeredProperties   PropertyRegistrant[]      @relation("PropertyRegistrantEmployee")
+  approvedRegistrations  PropertyRegistrant[]      @relation("PropertyRegistrantApprover")
+  priorityHeldProperties Property[]                @relation("PropertyPriorityHolder")
+  deletedProperties      Property[]                @relation("PropertyDeletedBy")
+  propertyTombstones     PropertyTombstone[]       @relation("PropertyTombstoneDeletedBy")
   requestedRevisions      PropertyRevision[]        @relation("RevisionRequester")
   reviewedRevisions       PropertyRevision[]        @relation("RevisionReviewer")
+  requestedClientReviews  ClientReviewRequest[]     @relation("ClientReviewRequester")
+  reviewedClientReviews   ClientReviewRequest[]     @relation("ClientReviewReviewer")
+  /// Manager-registered clients with NO responsible employee (the manager is
+  /// the follow-up's responsible user himself, see FollowUpSubject).
+  clientsCreatedByUser    Client[]                  @relation("ClientCreatedByUser")
+  /// Manager-owned follow-up subjects (responsible user = this manager).
+  responsibleFollowUpSubjects  FollowUpSubject[]    @relation("FollowUpSubjectResponsibleUser")
+  /// Manager-authored follow-up history entries (the manager saved the note).
+  authoredFollowUpEntries FollowUpEntry[]           @relation("FollowUpEntryAuthor")
+  /// Manual reminders this manager sent.
+  followUpRemindersSent   FollowUpReminder[]        @relation("FollowUpReminderSender")
+  /// Manual reminders this user received (always the responsible employee).
+  followUpRemindersReceived FollowUpReminder[]      @relation("FollowUpReminderRecipient")
+  /// Receive notifications when employees save new follow-ups (default off).
+  notifyEmployeeFollowUps Boolean                   @default(false)
 }
 
 model RefreshToken {
@@ -211,6 +248,8 @@ model EmployeeProfile {
   commissions        Commission[]
   payroll            PayrollEntry[]
   attendance         AttendanceRecord[]
+  followUpSubjects   FollowUpSubject[]
+  followUpEntries    FollowUpEntry[]
 }
 
 model Client {
@@ -220,19 +259,36 @@ model Client {
   notes                 String?
   source                String?
   status                String?
+  /**
+   * Structured wizard request state for THIS client (a JSON document packed
+   * and unpacked ONLY by the clients service, like the FollowUp notes
+   * contract). Nullable: every legacy row kept as-is and degrades to "no
+   * structured request recorded yet" — never a rewrite of human notes.
+   */
+  requestData           String?
   createdById           String?          @db.Uuid
   createdBy             EmployeeProfile? @relation("ClientCreator", fields: [createdById], references: [id], onDelete: Restrict)
   responsibleEmployeeId String?          @db.Uuid
   responsibleEmployee   EmployeeProfile? @relation("ClientResponsible", fields: [responsibleEmployeeId], references: [id], onDelete: Restrict)
+  /// The MANAGER who registered this client when NO employee is responsible —
+  /// the stable `User.id` relationship that makes the client's follow-up
+  /// MANAGER-owned (same dual-link precedent as `Property.createdByUserId`).
+  /// Null for every existing row: only manager saves without an assigned
+  /// employee ever write it, so nothing old changes meaning.
+  createdByUserId       String?          @db.Uuid
+  createdByUser         User?            @relation("ClientCreatedByUser", fields: [createdByUserId], references: [id], onDelete: Restrict)
   createdAt             DateTime         @default(now())
   updatedAt             DateTime         @updatedAt
   deals                 Deal[]
   followups             FollowUp[]
   notifications         Notification[]
   propertyInterests     ClientPropertyInterest[]
+  reviewRequests        ClientReviewRequest[]
+  followUpSubjects      FollowUpSubject[]
 
   @@index([responsibleEmployeeId])
   @@index([phone])
+  @@index([createdByUserId])
 }
 
 model Owner {
@@ -259,6 +315,8 @@ model Owner {
 model Property {
   id                String                    @id @default(uuid()) @db.Uuid
   reference         String                    @unique
+  /// Official A-code assigned ONLY at approval (null while pending/rejected).
+  approvedReference String?                   @unique
   title             String
   area              String
   address           String?
@@ -288,6 +346,14 @@ model Property {
   contact           Contact?                  @relation(fields: [contactId], references: [id], onDelete: Restrict)
   primaryImageId    String?                   @unique @db.Uuid
   primaryImage      FileAsset?                @relation("PropertyPrimaryImage", fields: [primaryImageId], references: [id], onDelete: Restrict)
+  /// Soft-delete (Trash) markers. NULL = active. Restore is Manager-only.
+  deletedAt         DateTime?
+  deletedByUserId   String?                   @db.Uuid
+  deletedBy         User?                     @relation("PropertyDeletedBy", fields: [deletedByUserId], references: [id], onDelete: Restrict)
+  deletionReason    String?
+  /// Provisional owner typed by an EMPLOYEE on a pending submission.
+  /// Promoted into an official Contact only when a Manager approves.
+  proposedOwner     Json?
   createdAt         DateTime                  @default(now())
   updatedAt         DateTime                  @updatedAt
   assignments       PropertyAssignment[]
@@ -301,11 +367,19 @@ model Property {
   requestedProperty RequestedProperty?
   revisions         PropertyRevision[]
   propertyInterests ClientPropertyInterest[]
+  followUpSubjects  FollowUpSubject[]
+  registrants       PropertyRegistrant[]
+  priorityHolderUserId String?                   @db.Uuid
+  priorityHolder    User?                      @relation("PropertyPriorityHolder", fields: [priorityHolderUserId], references: [id], onDelete: Restrict)
+  priorityDeadline  DateTime?
+  priorityExpiredNotifiedAt DateTime?
+  priorityLocked    Boolean                    @default(false)
 
   @@index([area, status])
   @@index([ownerId])
   @@index([contactId])
   @@index([createdByUserId])
+  @@index([deletedAt])
   @@index([governorate, district])
   // Indexed prefix lookup for the property code (`A-000123`): the pattern
   // operator lets a `LIKE 'A-0001%'` search use the index instead of a scan.
@@ -339,6 +413,20 @@ model Contact {
 
   @@index([type, responsibleUserId])
   @@index([phone])
+}
+
+/// Minimal, non-sensitive tombstone kept after a permanent deep delete. It
+/// reserves the original property code forever (unique reference) and records
+/// who deleted the property and when, without retaining house/owner details.
+model PropertyTombstone {
+  id              String   @id @default(uuid()) @db.Uuid
+  reference       String   @unique
+  deletedByUserId String?  @db.Uuid
+  deletedBy       User?    @relation("PropertyTombstoneDeletedBy", fields: [deletedByUserId], references: [id], onDelete: Restrict)
+  deletedAt       DateTime @default(now())
+  summary         Json?
+
+  @@index([deletedAt])
 }
 
 model PropertyFloor {
@@ -418,6 +506,74 @@ model PropertyRevision {
   @@index([requestedById])
 }
 
+/**
+ * A staged client change that an EMPLOYEE submits for manager approval.
+ *
+ * NOTHING here is an approved `Client` row until a manager approves, so a
+ * pending creation can never appear in any client list/search/statistic, and a
+ * pending edit never touches the approved client data.
+ *
+ * Constraints live in SQL (like `PropertyRevision_one_pending_per_property`):
+ * - `client_review_active_edit_per_client`: at most ONE ACTIVE review per
+ *   client (`kind='EDIT'` with status PENDING or CHANGES_REQUESTED) —
+ *   resubmission continues the SAME row.
+ * - `client_review_idempotency_per_requester`: a repeated accidental
+ *   submission with the same request-scoped key returns the same review
+ *   instead of a duplicate. It is scoped to the requester on purpose: two
+ *   employees may legitimately use equal keys (two wizard sessions) without
+ *   ever seeing one another.
+ * - Deliberately NO uniqueness on `requestedById` alone: an employee may have
+ *   several creation reviews in flight at once.
+ */
+model ClientReviewRequest {
+  id             String         @id @default(uuid()) @db.Uuid
+  /// `CREATION` = a proposed NEW client (no `clientId`); `EDIT` = a proposed
+  /// change to an existing approved client (always with a `clientId`).
+  kind           ClientReviewKind
+  clientId       String?        @db.Uuid
+  client         Client?        @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  status         ApprovalStatus @default(PENDING)
+  /**
+   * The proposed data, stored opaquely and decoded ONLY by the client review
+   * service (same convention as `Client.requestData`). For `EDIT` it holds the
+   * full proposed state; for `CREATION` it holds the whole proposed client.
+   */
+  payload        Json
+  /**
+   * `EDIT` only: a snapshot of the approved client (identity fields, the
+   * stored request document and the current linked interests) taken at
+   * submission time. Approval re-reads the client inside the SAME transaction
+   * and compares it: a mismatch means the row moved during review → safe 409,
+   * never a silent rebase of someone else's real change.
+   */
+  base           Json?
+  /**
+   * Requester-scoped idempotency key generated by the wizard session. A
+   * repeated accidental POST (double click, network retry) resolves to the
+   * SAME review row instead of creating a second one.
+   */
+  idempotencyKey String?        @db.Uuid
+  requestedById  String         @db.Uuid
+  requestedBy    User           @relation("ClientReviewRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  reviewedById   String?        @db.Uuid
+  reviewedBy     User?          @relation("ClientReviewReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+  reviewNotes    String?
+  createdAt      DateTime       @default(now())
+  reviewedAt     DateTime?
+
+  notifications  Notification[]
+
+  @@index([status, createdAt])
+  @@index([requestedById])
+  @@index([clientId])
+}
+
+/// The two review kinds: a proposed new client, or a proposed edit.
+enum ClientReviewKind {
+  CREATION
+  EDIT
+}
+
 model PropertyAssignment {
   id         String            @id @default(uuid()) @db.Uuid
   propertyId String            @db.Uuid
@@ -443,8 +599,32 @@ model PropertyApprovalRequest {
   notes         String?
   createdAt     DateTime       @default(now())
   reviewedAt    DateTime?
+  duplicateCandidateIds Json?
 
   @@index([status, createdAt])
+}
+
+model PropertyRegistrant {
+  id               String          @id @default(uuid()) @db.Uuid
+  propertyId       String          @db.Uuid
+  property         Property        @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  employeeUserId   String          @db.Uuid
+  employee         User            @relation("PropertyRegistrantEmployee", fields: [employeeUserId], references: [id], onDelete: Restrict)
+  registrationOrder Int
+  status           ApprovalStatus  @default(PENDING)
+  approvedById     String?         @db.Uuid
+  approvedBy       User?           @relation("PropertyRegistrantApprover", fields: [approvedById], references: [id], onDelete: Restrict)
+  approvedAt       DateTime?
+  createdAt        DateTime        @default(now())
+
+  @@unique([propertyId, employeeUserId])
+  @@index([employeeUserId])
+}
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
 }
 
 model FollowUp {
@@ -466,6 +646,172 @@ model FollowUp {
   notifications Notification[]
 
   @@index([employeeId, status, dueAt])
+}
+
+/**
+ * The kinds of follow-up SUBJECTS the employee follow-ups feature schedules.
+ *
+ * A subject is the durable scheduling unit behind ONE actual property, ONE
+ * approved client request, ONE property interest or ONE legacy client —
+ * never a whole person and never a pile of free-text notes.
+ */
+enum FollowUpSubjectKind {
+  /// The owner of ONE approved property (per property, not per person).
+  PROPERTY_OWNER
+  /// ONE approved structured request of a client (`BUYER`/`RENTER`/`EXCHANGER`
+  /// from the stored `Client.requestData` document — never inferred from notes).
+  CLIENT_REQUEST
+  /// ONE recorded `ClientPropertyInterest` (an inquiry about a real property).
+  INQUIRY
+  /// A legacy client with NO structured request document: ONE client-level
+  /// subject so old rows keep working WITHOUT fabricating request structure.
+  CLIENT
+}
+
+/**
+ * ONE durable follow-up subject per actual property/request — the scheduling
+ * unit of the employee follow-ups feature.
+ *
+ * Durability & de-duplication: `targetKey` is a database `@unique`, so
+ * repeated approvals, page reloads, retries and concurrent sync jobs always
+ * converge on the SAME row — a second subject for the same target is
+ * physically impossible.
+ *
+ * Schedule: every timestamp is stored in UTC and evaluated SERVER-side only.
+ * `cycle` starts at 1 and increments with every saved note; the escalation
+ * columns remember the last cycle each threshold fired in, so each threshold
+ * notifies at most once per cycle (the `Notification.eventKey` carries the
+ * cycle too, making retries no-ops at the database level).
+ *
+ * Grouping of subjects into people is a FRONTEND concern only: rows here stay
+ * strictly per-target, each with its own due date, history and responsibility.
+ */
+model FollowUpSubject {
+  id            String              @id @default(uuid()) @db.Uuid
+  /// Canonical target identity (`@@unique` = one subject per real target):
+  ///   PROPERTY_OWNER:<propertyId>
+  ///   CLIENT_REQUEST:<clientId>:<BUYER|RENTER|EXCHANGER>
+  ///   INQUIRY:<interestId>
+  ///   CLIENT:<clientId>
+  targetKey     String              @unique
+  kind          FollowUpSubjectKind
+  /// The employee responsible for this follow-up (the property's OWNER_FOLLOWUP
+  /// assignment or enterer, or the client's responsible employee) — the ONLY
+  /// scope employee list/history/save paths are ever filtered by. Null exactly
+  /// when a MANAGER is the responsible user instead (see `responsibleUserId`);
+  /// the two columns are mutually exclusive (exactly one is set — CHECK
+  /// constraint in the migration).
+  responsibleId String?             @db.Uuid
+  responsible   EmployeeProfile?    @relation(fields: [responsibleId], references: [id], onDelete: Restrict)
+  /// The responsible USER when the follow-up belongs to a MANAGER personally
+  /// (his own properties / registered clients with no assigned employee).
+  /// Null exactly when `responsibleId` is set; never both, never neither.
+  /// Employees' rows keep it null, so the employee `responsible.userId` scope
+  /// can never match a manager-owned row — and vice versa.
+  responsibleUserId String?         @db.Uuid
+  responsibleUser User?             @relation("FollowUpSubjectResponsibleUser", fields: [responsibleUserId], references: [id], onDelete: Restrict)
+
+  propertyId    String?             @db.Uuid
+  property      Property?           @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  clientId      String?             @db.Uuid
+  client        Client?             @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  /// Deliberately a plain id WITHOUT a foreign key: interest rows are
+  /// upserted/removed by every approved client edit, and a permanent
+  /// conversation history must never be deleted with them. The sync
+  /// deactivates the subject when the interest disappears.
+  interestId    String?             @db.Uuid
+
+  /// First activation (approval/first safe sync) — UTC.
+  activatedAt   DateTime
+  /// Set with the first saved note; null until then («لم تتم متابعتها»).
+  lastSavedAt   DateTime?
+  /// Next contact due = server save/activation timestamp + interval (UTC).
+  nextDueAt     DateTime
+  /// Follow-up cycle counter (starts at 1; +1 per saved note).
+  cycle             Int             @default(1)
+  /// The last cycle in which each escalation threshold fired (0 = never).
+  employeeWarnedCycle Int            @default(0)
+  managerEscalatedCycle Int          @default(0)
+
+  /// Inactive = terminal/no longer owed (property SOLD/RENTED/ARCHIVED,
+  /// interest gone, responsibility gone). History is always kept.
+  active        Boolean             @default(true)
+  deactivatedAt DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  entries       FollowUpEntry[]
+  notifications Notification[]
+  reminders     FollowUpReminder[]
+
+  @@index([responsibleId, active, nextDueAt])
+  @@index([responsibleUserId, active, nextDueAt])
+  @@index([active, kind])
+}
+
+/**
+ * A permanent, append-only follow-up history entry: notes are never edited,
+ * replaced or deleted through the API — corrections are NEW entries.
+ *
+ * One panel submit (ONE phone conversation covering several subjects) writes
+ * one entry PER SAVED SUBJECT, sharing `batchId` so they can be correlated
+ * WITHOUT ever merging the subjects' independent histories. The
+ * `(authorId, batchId, subjectId)` unique also makes a double-submitted batch
+ * resolve to the already-committed rows instead of duplicating them
+ * (PostgreSQL treats NULL `batchId`s as distinct, so single-note legacy
+ * writes stay unaffected).
+ */
+model FollowUpEntry {
+  id        String          @id @default(uuid()) @db.Uuid
+  subjectId String          @db.Uuid
+  subject   FollowUpSubject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  note      String
+  /// The EMPLOYEE author — null exactly when a MANAGER saved this note
+  /// (see `authorUserId`; the two are mutually exclusive, exactly one set).
+  authorId  String?         @db.Uuid
+  author    EmployeeProfile? @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  /// The MANAGER author (his own follow-ups): the actual, verified session
+  /// user of every manager-saved note — never a client claim.
+  authorUserId String?      @db.Uuid
+  authorUser User?           @relation("FollowUpEntryAuthor", fields: [authorUserId], references: [id], onDelete: Restrict)
+  batchId   String?         @db.Uuid
+  /// The subject's due date BEFORE this note reset it (null on first save).
+  prevDueAt DateTime?
+  /// The due date this note produced (server timestamp + interval).
+  nextDueAt DateTime?
+  createdAt DateTime        @default(now())
+
+  @@unique([authorId, batchId, subjectId])
+  @@unique([authorUserId, batchId, subjectId])
+  @@index([subjectId, createdAt])
+}
+
+/**
+ * ONE manual manager reminder of ONE overdue employee follow-up subject.
+ *
+ * A reminder is deliberately NOT a follow-up entry: it never touches the
+ * subject's due date, cycle or history — it only records (and notifies through
+ * the EXISTING notification pipeline) that the manager told the responsible
+ * employee to catch up. The `eventKey` is time-windowed cooldown key
+ * (`FOLLOWUP_EMPLOYEE_REMINDER:<subjectId>:<window>`), unique at the database
+ * level, so two concurrent clicks, retries or double taps can physically
+ * never send two reminders for the same subject inside one cooldown window.
+ */
+model FollowUpReminder {
+  id              String          @id @default(uuid()) @db.Uuid
+  subjectId       String          @db.Uuid
+  subject         FollowUpSubject @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  /// The MANAGER who sent the reminder — verified session user only.
+  senderUserId    String          @db.Uuid
+  senderUser      User            @relation("FollowUpReminderSender", fields: [senderUserId], references: [id], onDelete: Restrict)
+  /// The responsible EMPLOYEE who received it (snapshot of the recipient).
+  recipientUserId String          @db.Uuid
+  recipientUser   User            @relation("FollowUpReminderRecipient", fields: [recipientUserId], references: [id], onDelete: Restrict)
+  /// The cooldown-window deduplication key, unique in the database.
+  eventKey        String          @unique
+  sentAt          DateTime        @default(now())
+
+  @@index([subjectId, sentAt])
 }
 
 model Deal {
@@ -633,6 +979,17 @@ model Notification {
   followUp       FollowUp?     @relation(fields: [followUpId], references: [id], onDelete: Restrict)
   payrollEntryId String?       @db.Uuid
   payrollEntry   PayrollEntry? @relation(fields: [payrollEntryId], references: [id], onDelete: Restrict)
+  // Client review workflow deep-link target. The recipient of a review event
+  // is by construction ALWAYS authorized to open it (the requester, or a
+  // manager for the company-wide feed), so no extra visibility masking.
+  clientReviewId String?       @db.Uuid
+  clientReview   ClientReviewRequest? @relation(fields: [clientReviewId], references: [id], onDelete: Restrict)
+  // Employee follow-up escalation deep link. The EMPLOYEE rows are addressed
+  // to the subject's responsible employee by construction (the only person
+  // authorized to open the follow-ups page for that subject); the API masks
+  // this column for managers, who land on their existing pages instead.
+  followUpSubjectId String?    @db.Uuid
+  followUpSubject   FollowUpSubject? @relation(fields: [followUpSubjectId], references: [id], onDelete: Restrict)
 
   // Recipient + read state + chronological listing (the bell's hot path), plus
   // the per-recipient event deduplication guarantee.

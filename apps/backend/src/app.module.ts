@@ -21,6 +21,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { PushModule } from './push/push.module';
 import { FilesModule } from './files/files.module';
 import { SmartPasteModule } from './smart-paste/smart-paste.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -48,6 +49,7 @@ import { SmartPasteModule } from './smart-paste/smart-paste.module';
     PushModule,
     FilesModule,
     SmartPasteModule,
+    DashboardModule,
   ],
 })
 export class AppModule {}

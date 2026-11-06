@@ -77,6 +77,7 @@ const CLIENT_DTO_KEYS = [
   'name',
   'phone',
   'notes',
+  'requestData',
   'source',
   'status',
   'responsibleUserId',
@@ -362,23 +363,31 @@ describeWithDatabase(
       expect(orphan).toBeNull();
     });
 
-    it('makes an employee who registers a client its creator and responsible employee', async () => {
-      const created = await createClient(employeeAToken, {
+    it('routes an employee registration through the review workflow — the employee becomes creator AND responsible at approval', async () => {
+      const created = await createClient(managerToken, {
         name: 'زبون الجهراء',
         phone: '65000006',
+        responsibleUserId: employeeAId,
       });
       expect(created.responsibleUserId).toBe(employeeAId);
       expect(created.responsibleEmployeeName).toBe('Employee A');
-      expect(created.createdByUserId).toBe(employeeAId);
 
-      const row = await ctx.prisma.client.findUnique({
-        where: { id: created.id },
+      // The DIRECT employee path is gone: it answers 403 with guidance.
+      const blocked = await api()
+        .post('/clients')
+        .set(auth(employeeAToken))
+        .send({ name: 'زبون مباشر', phone: '65000017' });
+      expect(blocked.status).toBe(403);
+      expect(
+        (blocked.body as { error: { message: string } }).error.message,
+      ).toContain('طلب المراجعة');
+      const row = await ctx.prisma.client.findFirst({
+        where: { phone: '65000017' },
       });
-      expect(row?.createdById).toBe(profileAId);
-      expect(row?.responsibleEmployeeId).toBe(profileAId);
+      expect(row).toBeNull();
     });
 
-    it('forbids an employee from registering a client against a colleague', async () => {
+    it('forbids an employee from registering a client (even against a colleague)', async () => {
       const response = await api()
         .post('/clients')
         .set(auth(employeeAToken))
@@ -387,10 +396,9 @@ describeWithDatabase(
           phone: '65000007',
           responsibleUserId: employeeBId,
         });
+      // The role guard fires first — no responsibility exception can ever be
+      // probed, and no row is written.
       expect(response.status).toBe(403);
-      expect(
-        (response.body as { error: { message: string } }).error.message,
-      ).toContain('لا يمكن تخصيص عميل لموظف آخر');
       const row = await ctx.prisma.client.findFirst({
         where: { phone: '65000007' },
       });
@@ -443,10 +451,11 @@ describeWithDatabase(
       expect((scoped.body.data as { items: ClientDtoShape[] }).items).toHaveLength(0);
     });
 
-    it('scopes an employee list, detail, search, update and follow-ups to authorised rows', async () => {
-      const bClient = await createClient(employeeBToken, {
+    it('scopes an employee list, detail, search and follow-ups to authorised rows', async () => {
+      const bClient = await createClient(managerToken, {
         name: 'زبون مبارك القحطاني',
         phone: '65000008',
+        responsibleUserId: employeeBId,
       });
 
       const list = await api().get('/clients').set(auth(employeeAToken));
@@ -466,11 +475,13 @@ describeWithDatabase(
         'Client not found',
       );
 
+      // A direct write is refused at the ROLE level (bypass guard) — and a
+      // review submission for it is a scoped 404 without disclosure.
       const patched = await api()
         .patch(`/clients/${bClient.id}`)
         .set(auth(employeeAToken))
         .send({ name: 'مسروق' });
-      expect(patched.status).toBe(404);
+      expect(patched.status).toBe(403);
       const unchanged = await ctx.prisma.client.findUnique({
         where: { id: bClient.id },
       });
@@ -498,7 +509,7 @@ describeWithDatabase(
           .patch(`/clients/${ghost}`)
           .set(auth(employeeAToken))
           .send({ name: 'x' })).status,
-      ).toBe(404);
+      ).toBe(403);
       expect(
         (await api()
           .post(`/clients/${ghost}/follow-ups`)
@@ -569,18 +580,20 @@ describeWithDatabase(
     });
 
     it('never lets an employee reassign responsibility, even on their own client', async () => {
-      const own = await createClient(employeeAToken, {
+      const own = await createClient(managerToken, {
         name: 'زبون خاص بموظف أ',
         phone: '65000010',
+        responsibleUserId: employeeAId,
       });
       const toSelf = await api()
         .patch(`/clients/${own.id}`)
         .set(auth(employeeAToken))
         .send({ responsibleUserId: employeeAId });
+      // Role guard first: employee writes are routed to reviews entirely.
       expect(toSelf.status).toBe(403);
       expect(
         (toSelf.body as { error: { message: string } }).error.message,
-      ).toContain('إعادة تخصيص العميل إلى موظف آخر متاحة للمدير فقط');
+      ).toContain('طلب مراجعة');
 
       const toColleague = await api()
         .patch(`/clients/${own.id}`)
@@ -593,15 +606,17 @@ describeWithDatabase(
     });
 
     it('persists authorised edits, clears nullable fields and audits the actor', async () => {
-      const own = await createClient(employeeAToken, {
+      const own = await createClient(managerToken, {
         name: 'زبون قبل التعديل',
         phone: '65000011',
         notes: 'ملاحظة قديمة',
         source: 'مصدر قديم',
+        responsibleUserId: employeeAId,
       });
+      // The authorised editor is the MANAGER; employee edits go through reviews.
       const patched = await api()
         .patch(`/clients/${own.id}`)
-        .set(auth(employeeAToken))
+        .set(auth(managerToken))
         .send({
           name: 'زبون بعد التعديل',
           phone: '65000012',
@@ -623,7 +638,7 @@ describeWithDatabase(
       const audit = await ctx.prisma.auditLog.findFirst({
         where: { entityId: own.id, action: 'CLIENT_UPDATE' },
       });
-      expect(audit?.actorId).toBe(employeeAId);
+      expect(audit?.actorId).toBe(managerId);
 
       // A manager edit leaves the untouched fields alone and keeps visibility.
       const managerEdit = await api()
@@ -638,9 +653,10 @@ describeWithDatabase(
     });
 
     it('returns the full follow-up log with packed detail and the derived nextFollowUp', async () => {
-      const created = await createClient(employeeAToken, {
+      const created = await createClient(managerToken, {
         name: 'زبون المتابعات',
         phone: '65000013',
+        responsibleUserId: employeeAId,
       });
       const first = await api()
         .post(`/clients/${created.id}/follow-ups`)
@@ -754,14 +770,24 @@ describeWithDatabase(
         where: { phone: '65000012' },
       });
       expect(own).not.toBeNull();
+      // ValidationPipe rejects a malformed phone before any authorisation
+      // logic — regardless of the caller's role.
+      expect(
+        (
+          await api()
+            .patch(`/clients/${own?.id ?? ''}`)
+            .set(auth(managerToken))
+            .send({ phone: '1' })
+        ).status,
+      ).toBe(400);
       expect(
         (
           await api()
             .patch(`/clients/${own?.id ?? ''}`)
             .set(auth(employeeAToken))
-            .send({ phone: '1' })
+            .send({ phone: '65065012' })
         ).status,
-      ).toBe(400);
+      ).toBe(403);
 
       const target = own?.id ?? '';
       expect(
@@ -869,23 +895,43 @@ describeWithDatabase(
       expect(keys).toEqual([...CLIENT_DTO_KEYS].sort());
     });
 
-    it('auto-provisions the EmployeeProfile so an account created outside the employees flow OWNS the client it registers', async () => {
+    it('auto-provisions the EmployeeProfile at REVIEW APPROVAL so an account created outside the employees flow OWNS the client it submitted', async () => {
       const orphan = await createUser(ctx.prisma, {
         email: 'employee.orphan@clients.local',
         name: 'Employee Orphan',
         role: Role.EMPLOYEE,
       });
       const orphanToken = await login(ctx.app, orphan.email);
-      const created = await createClient(orphanToken, {
-        name: 'زبون مهجور',
-        phone: '65000016',
+      const submitted = await api()
+        .post('/client-reviews')
+        .set(auth(orphanToken))
+        .send({ kind: 'CREATION', name: 'زبون مهجور', phone: '65000016' });
+      expect(submitted.status).toBe(201);
+      const reviewId = (submitted.body.data as { id: string }).id;
+      const orphanBefore = await ctx.prisma.employeeProfile.findUnique({
+        where: { userId: orphan.id },
       });
-      // The save provisions a minimal profile on demand: the creator owns it.
-      expect(created.createdByUserId).toBe(orphan.id);
-      expect(created.responsibleUserId).toBe(orphan.id);
+      expect(orphanBefore).toBeNull();
+
+      const approve = await api()
+        .post(`/client-reviews/${reviewId}/approve`)
+        .set(auth(managerToken))
+        .send({});
+      expect(approve.status).toBe(201);
+      const clientId = (approve.body.data as { clientId: string }).clientId;
+
+      // The approval provisioned a minimal profile on demand: the requester
+      // owns the materialized client (creator AND responsible).
+      const profile = await ctx.prisma.employeeProfile.findUnique({
+        where: { userId: orphan.id },
+      });
+      expect(profile).not.toBeNull();
+      const row = await ctx.prisma.client.findUnique({ where: { id: clientId! } });
+      expect(row?.createdById).toBe(profile?.id);
+      expect(row?.responsibleEmployeeId).toBe(profile?.id);
 
       const read = await api()
-        .get(`/clients/${created.id}`)
+        .get(`/clients/${clientId}`)
         .set(auth(orphanToken));
       expect(read.status).toBe(200);
       const list = await api().get('/clients').set(auth(orphanToken));
@@ -895,7 +941,7 @@ describeWithDatabase(
 
       // The manager still sees it too.
       const managerRead = await api()
-        .get(`/clients/${created.id}`)
+        .get(`/clients/${clientId}`)
         .set(auth(managerToken));
       expect(managerRead.status).toBe(200);
     });
@@ -930,15 +976,26 @@ describeWithDatabase(
           },
         });
 
-      it('saves client + interest ATOMICALLY and returns it in the authorized read', async () => {
+      /** Approves a review and returns the materialized client id. */
+      const approveOnly = async (reviewId: string): Promise<string> => {
+        const response = await api()
+          .post(`/client-reviews/${reviewId}/approve`)
+          .set(auth(managerToken))
+          .send({});
+        expect(response.status).toBe(201);
+        return (response.body.data as { clientId: string }).clientId;
+      };
+
+      it('stages client + interest ATOMICALLY at approval and returns it in the authorized read', async () => {
         const property = await seedProperty();
         const response = await api()
-          .post('/clients')
+          .post('/client-reviews')
           .set(auth(employeeAToken))
           .send({
+            kind: 'CREATION',
             name: 'عميل اهتمام',
             phone: phoneKey('a'),
-            propertyInterests: [
+            addInterests: [
               {
                 propertyId: property.id,
                 reason: 'استفسار',
@@ -947,15 +1004,16 @@ describeWithDatabase(
             ],
           });
         expect(response.status).toBe(201);
-        const created = response.body.data as ClientDtoShape;
-        expect(created.propertyInterests).toHaveLength(1);
+        const createdId = await approveOnly(
+          (response.body.data as { id: string }).id,
+        );
         // Exactly one durable link row despite being created with the client.
         const rows = await ctx.prisma.clientPropertyInterest.count({
-          where: { clientId: created.id },
+          where: { clientId: createdId },
         });
         expect(rows).toBe(1);
 
-        const read = await api().get(`/clients/${created.id}`).set(auth(employeeAToken));
+        const read = await api().get(`/clients/${createdId}`).set(auth(employeeAToken));
         expect(read.status).toBe(200);
         const interests = (read.body.data as ClientDtoShape).propertyInterests;
         const interest = interests.at(0);
@@ -982,74 +1040,110 @@ describeWithDatabase(
         expect(interest?.notes).toBe('سأل عن السعر');
       });
 
-      it('handles repeated submissions with NO duplicate interest rows', async () => {
+      it('upserts interest rows at approval — NO duplicate rows across sequential reviews', async () => {
         const property = await seedProperty();
-        const client = await createClient(employeeAToken, {
-          name: 'عميل تكرار',
-          phone: phoneKey('b'),
-          propertyInterests: [{ propertyId: property.id, reason: 'استفسار' }],
-        });
-        // Same client, same property, new notes → update, never a duplicate.
+        const stageCreation = async (payload: Record<string, unknown>) => {
+          const submitted = await api()
+            .post('/client-reviews')
+            .set(auth(employeeAToken))
+            .send({ kind: 'CREATION', name: 'عميل تكرار', phone: phoneKey('b'), ...payload });
+          expect(submitted.status).toBe(201);
+          return (submitted.body.data as { id: string }).id;
+        };
+        const clientId = await approveOnly(
+          await stageCreation({ addInterests: [{ propertyId: property.id, reason: 'استفسار' }] }),
+        );
+
+        // Same client, same property, new notes → a SECOND REVIEWED update,
+        // applied as an UPDATE on the same link row, never a duplicate.
         const again = await api()
-          .patch(`/clients/${client.id}`)
+          .post('/client-reviews')
           .set(auth(employeeAToken))
           .send({
-            propertyInterests: [
+            kind: 'EDIT',
+            clientId,
+            name: 'عميل تكرار',
+            phone: phoneKey('b'),
+            addInterests: [
               { propertyId: property.id, reason: 'طلب معاينة', notes: 'متابعة لاحقة' },
             ],
           });
-        expect(again.status).toBe(200);
+        expect(again.status).toBe(201);
+        await approveOnly((again.body.data as { id: string }).id);
         const rows = await ctx.prisma.clientPropertyInterest.count({
-          where: { clientId: client.id },
+          where: { clientId },
         });
         expect(rows).toBe(1);
-        const interests = (again.body.data as ClientDtoShape).propertyInterests;
+        const read = await api().get(`/clients/${clientId}`).set(auth(employeeAToken));
+        expect(read.status).toBe(200);
+        const interests = (read.body.data as ClientDtoShape).propertyInterests;
         expect(interests).toHaveLength(1);
         expect(interests.at(0)?.reason).toBe('طلب معاينة');
         expect(interests.at(0)?.notes).toBe('متابعة لاحقة');
       });
 
-      it('links ANOTHER property to an existing client without recreating it', async () => {
+      it('links ANOTHER property through sequential approvals without recreating the client', async () => {
         const first = await seedProperty();
         const second = await seedProperty({ listingType: 'RENT' });
-        const client = await createClient(employeeAToken, {
-          name: 'عميل عقارين',
-          phone: phoneKey('c'),
-          propertyInterests: [{ propertyId: first.id }],
-        });
-        const before = client.id;
+        const stageCreation = async (payload: Record<string, unknown>) => {
+          const submitted = await api()
+            .post('/client-reviews')
+            .set(auth(employeeAToken))
+            .send({ kind: 'CREATION', name: 'عميل عقارين', phone: phoneKey('c'), ...payload });
+          expect(submitted.status).toBe(201);
+          return (submitted.body.data as { id: string }).id;
+        };
+        const clientId = await approveOnly(
+          await stageCreation({ addInterests: [{ propertyId: first.id }] }),
+        );
         const response = await api()
-          .patch(`/clients/${client.id}`)
+          .post('/client-reviews')
           .set(auth(employeeAToken))
-          .send({ propertyInterests: [{ propertyId: second.id }] });
-        expect(response.status).toBe(200);
-        const interests = (response.body.data as ClientDtoShape).propertyInterests;
+          .send({
+            kind: 'EDIT',
+            clientId,
+            name: 'عميل عقارين',
+            phone: phoneKey('c'),
+            addInterests: [{ propertyId: second.id }],
+          });
+        expect(response.status).toBe(201);
+        await approveOnly((response.body.data as { id: string }).id);
+        const read = await api().get(`/clients/${clientId}`).set(auth(employeeAToken));
+        expect(read.status).toBe(200);
+        const interests = (read.body.data as ClientDtoShape).propertyInterests;
         expect(interests.map((row) => row.propertyId).sort()).toEqual(
           [first.id, second.id].sort(),
         );
         // Same client row — no duplicate client.
-        expect(response.body.data.id).toBe(before);
         const relisted = (await api().get('/clients').set(auth(employeeAToken))).body
           .data as { items: ClientDtoShape[] };
         expect(
           relisted.items.filter((entry) => entry.name === 'عميل عقارين'),
         ).toHaveLength(1);
         expect(
-          relisted.items.find((entry) => entry.id === before)?.propertyInterests,
+          relisted.items.find((entry) => entry.id === clientId)?.propertyInterests,
         ).toHaveLength(2);
       });
 
-      it('rejects unknown or invisible property ids with 404, unavailable with 400', async () => {
+      it('rejects at SUBMISSION unknown or invisible property ids with 404, unavailable with 400', async () => {
+        const stageCreation = async (payload: Record<string, unknown>) =>
+          api().post('/client-reviews').set(auth(employeeAToken)).send({
+            kind: 'CREATION',
+            name: 'عميل مؤقت',
+            phone: phoneKey('z'),
+            ...payload,
+          });
         // Own PENDING property: visible to employee A, so the availability
-        // rule (not visibility) rejects it.
+        // rule (not visibility) rejects the submission itself.
         const ownPending = await seedProperty({
           status: 'PENDING',
           createdByUserId: employeeAId,
         });
-        const unavailable = await api()
-          .patch(`/clients/${(await createClient(employeeAToken, { name: 'عميل غير متاح', phone: phoneKey('d') })).id}`)
-          .set(auth(employeeAToken))
-          .send({ propertyInterests: [{ propertyId: ownPending.id }] });
+        const unavailable = await stageCreation({
+          name: 'عميل غير متاح',
+          phone: phoneKey('d'),
+          addInterests: [{ propertyId: ownPending.id }],
+        });
         expect(unavailable.status).toBe(400);
 
         // Another employee's PENDING property: invisible → 404, non-disclosing.
@@ -1057,33 +1151,52 @@ describeWithDatabase(
           status: 'PENDING',
           createdByUserId: employeeBId,
         });
-        const invisible = await api()
-          .patch(`/clients/${(await createClient(employeeAToken, { name: 'عميل خفي', phone: phoneKey('e') })).id}`)
-          .set(auth(employeeAToken))
-          .send({ propertyInterests: [{ propertyId: hidden.id }] });
+        const invisible = await stageCreation({
+          name: 'عميل خفي',
+          phone: phoneKey('e'),
+          addInterests: [{ propertyId: hidden.id }],
+        });
         expect(invisible.status).toBe(404);
 
         // Unknown id.
-        const unknown = await api()
-          .patch(`/clients/${(await createClient(employeeAToken, { name: 'عميل مجهول', phone: phoneKey('f') })).id}`)
-          .set(auth(employeeAToken))
-          .send({ propertyInterests: [{ propertyId: randomUUID() }] });
+        const unknown = await stageCreation({
+          name: 'عميل مجهول',
+          phone: phoneKey('f'),
+          addInterests: [{ propertyId: randomUUID() }],
+        });
         expect(unknown.status).toBe(404);
+
+        // No review row survived any refusal: the count is unchanged
+        // across the three refused submissions above.
+        const rowsBefore = await ctx.prisma.clientReviewRequest.count({
+          where: { requestedById: employeeAId, kind: 'CREATION' },
+        });
+        await stageCreation({
+          name: 'عميل مرفوض دائمًا',
+          phone: phoneKey('h'),
+          addInterests: [{ propertyId: randomUUID() }],
+        });
+        expect(
+          await ctx.prisma.clientReviewRequest.count({
+            where: { requestedById: employeeAId, kind: 'CREATION' },
+          }),
+        ).toBe(rowsBefore);
       });
 
-      it('lets a MANAGER attach interests to any client; employees only their own', async () => {
+      it('lets a MANAGER attach interests to any client directly; employees have no direct interest writes', async () => {
         const property = await seedProperty({ askingPrice: '150000.00' });
-        // A client owned by employee A is invisible to employee B by id (both
-        // the client AND its interest write), so nothing leaks across.
-        const aClient = await createClient(employeeAToken, {
+        // A client owned by employee A is invisible to employee B by id — and
+        // B's direct interest write is refused at the ROLE level anyway.
+        const aClient = await createClient(managerToken, {
           name: 'عميل الموظف أ',
           phone: phoneKey('g'),
+          responsibleUserId: employeeAId,
         });
         const asB = await api()
           .patch(`/clients/${aClient.id}`)
           .set(auth(employeeBToken))
           .send({ propertyInterests: [{ propertyId: property.id }] });
-        expect(asB.status).toBe(404);
+        expect(asB.status).toBe(403);
         const readAsB = await api().get(`/clients/${aClient.id}`).set(auth(employeeBToken));
         expect(readAsB.status).toBe(404);
 
@@ -1252,14 +1365,16 @@ describeWithDatabase(
       await addFollowUp(managerToken, c2.id, dayKey(-1));
 
       // c3/c4: employee A clients, one due today and one far in the future.
-      const c3 = await createClient(employeeAToken, {
+      const c3 = await createClient(managerToken, {
         name: 'إحصاء 3',
         phone: '66000003',
+        responsibleUserId: employeeA.id,
       });
       await addFollowUp(employeeAToken, c3.id, dayKey(0));
-      const c4 = await createClient(employeeAToken, {
+      const c4 = await createClient(managerToken, {
         name: 'إحصاء 4',
         phone: '66000004',
+        responsibleUserId: employeeA.id,
       });
       await addFollowUp(employeeAToken, c4.id, dayKey(10));
 

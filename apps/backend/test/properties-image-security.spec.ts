@@ -59,10 +59,12 @@ describeWithDatabase('Property image privacy hardening (Phase 3B)', () => {
   let employeeBToken: string;
   const api = () => request(ctx.app.getHttpServer());
 
+  let seq = 0;
   const payload = (overrides: Record<string, unknown> = {}) => ({
     listingType: 'SALE',
     district: 'السالمية',
     block: '5',
+    plotNumber: String(800000 + ++seq),
     newContact: { type: 'OWNER', name: 'Owner', phone: '22221111' },
     ...overrides,
   });

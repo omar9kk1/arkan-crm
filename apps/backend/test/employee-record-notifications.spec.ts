@@ -27,25 +27,25 @@ interface NotificationItem {
   contactId: string | null;
   contactType: string | null;
   followUpId: string | null;
+  clientReviewId: string | null;
   read: boolean;
   readAt: string | null;
   createdAt: string;
 }
 
 /**
- * Employee record-activity notifications: every successful employee save of a
- * client, an owner/broker contact, a follow-up or a property interest reports
- * the ACTIVE managers exactly once, inside the same transaction (so a failed
- * save notifies nobody), with a privacy-safe payload and the deep-link
- * references the bell needs. Manager actions never report anyone.
+ * Record-activity notifications in the REVIEWED era.
+ *
+ * Employee CLIENT writes no longer exist as direct saves: an employee client
+ * submission reports the ACTIVE managers through the CLIENT_REVIEW_* events
+ * (exactly once, inside the same transaction, privacy-safe). Follow-up and
+ * owner/broker contact saves keep reporting; manager actions never report
+ * anyone; a failed save notifies nobody.
  */
-describeWithDatabase('Employee record-activity notifications', () => {
+describeWithDatabase('Record-activity notifications (reviewed era)', () => {
   let ctx: TestContext;
-  let managerId: string;
-  let manager2Id: string;
   let inactiveManagerId: string;
   let employeeAId: string;
-  let employeeBId: string;
   let managerToken: string;
   let manager2Token: string;
   let employeeAToken: string;
@@ -53,11 +53,15 @@ describeWithDatabase('Employee record-activity notifications', () => {
 
   const api = () => request(ctx.app.getHttpServer());
 
-  const createClient = async (
-    token: string,
+  /** A manager-registered client assigned to employee A (authorized edits). */
+  const managerClient = async (
     payload: Record<string, unknown>,
+    responsibleUserId?: string,
   ): Promise<{ id: string }> => {
-    const response = await api().post('/clients').set(auth(token)).send(payload);
+    const response = await api()
+      .post('/clients')
+      .set(auth(managerToken))
+      .send({ ...payload, ...(responsibleUserId ? { responsibleUserId } : {}) });
     expect(response.status).toBe(201);
     return response.body.data as { id: string };
   };
@@ -102,11 +106,15 @@ describeWithDatabase('Employee record-activity notifications', () => {
       name: 'Employee B Records',
       role: Role.EMPLOYEE,
     });
-    managerId = manager.id;
-    manager2Id = manager2.id;
     inactiveManagerId = inactiveManager.id;
     employeeAId = employeeA.id;
-    employeeBId = employeeB.id;
+    // Ownership resolves ONLY through EmployeeProfile profiles — provision them.
+    await ctx.prisma.employeeProfile.create({
+      data: { userId: employeeA.id },
+    });
+    await ctx.prisma.employeeProfile.create({
+      data: { userId: employeeB.id },
+    });
     managerToken = await login(ctx.app, manager.email);
     manager2Token = await login(ctx.app, manager2.email);
     employeeAToken = await login(ctx.app, employeeA.email);
@@ -137,27 +145,35 @@ describeWithDatabase('Employee record-activity notifications', () => {
     return rows;
   };
 
-  it('reports CLIENT_CREATED to every active manager with deep links and a privacy-safe body', async () => {
+  it('reports CLIENT_REVIEW_SUBMITTED to every ACTIVE manager only, privacy-safe', async () => {
     const ownerPhone = '65001111';
     const ownerName = 'زبون الأنشطة القحطاني';
-    const created = await createClient(employeeAToken, {
-      name: ownerName,
-      phone: ownerPhone,
-      notes: 'ملاحظة سرية يجب ألا تظهر 7777',
-    });
+    const review = await api()
+      .post('/client-reviews')
+      .set(auth(employeeAToken))
+      .send({
+        kind: 'CREATION',
+        name: ownerName,
+        phone: ownerPhone,
+        notes: 'ملاحظة سرية يجب ألا تظهر 7777',
+      });
+    expect(review.status).toBe(201);
+    const reviewId = (review.body.data as { id: string }).id;
 
-    const rows = await managersRows('CLIENT_CREATED');
+    const rows = await managersRows('CLIENT_REVIEW_SUBMITTED');
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
-      title: 'عميل جديد',
-      message: 'موظف الأنشطة — أضاف عميلًا جديدًا',
+      title: 'طلب عميل بانتظار المراجعة',
       propertyId: null,
-      clientId: created.id,
+      clientId: null,
       contactId: null,
       contactType: null,
       followUpId: null,
+      clientReviewId: reviewId,
       read: false,
     });
+    expect(rows[0]?.message).toContain('موظف الأنشطة');
+    // A pending CREATION carries no clientId deep link (nothing approved yet).
 
     // The recipient set: active managers only — nobody else.
     expect(
@@ -165,165 +181,47 @@ describeWithDatabase('Employee record-activity notifications', () => {
     ).toBe(0);
     expect(await ctx.prisma.notification.count({ where: { userId: employeeAId } })).toBe(0);
     expect(await inbox(employeeBToken)).toHaveLength(0);
-    // The activity text never carries the client's private data.
+    // The activity text never carries the proposed private data.
     const serialized = JSON.stringify(rows[0]);
-    for (const secret of [ownerPhone, ownerName, 'ملاحظة سرية', '7777', employeeAId]) {
+    for (const secret of [ownerPhone, ownerName, 'ملاحظة سرية', '7777']) {
       expect(serialized).not.toContain(secret);
     }
   });
 
-  it('titles an inquiry client from the PERSISTED interest, never from free text', async () => {
-    // A manager-created property is directly AVAILABLE and therefore linkable.
-    const available = await postProperty(
-      ctx.app,
-      managerToken,
-      {
-        listingType: 'RENT',
-        governorate: 'الفروانية',
-        district: 'غرناطة',
-        block: '3',
-        plotNumber: '12',
-        sizeSqm: '400.00',
-        askingPrice: '250000.00',
-        negotiable: true,
-        description: 'شقة للاستفسار',
-        floors: [{ type: 'GROUND', details: 'صالة' }],
-        newContact: { type: 'BROKER', name: 'وسيط الاستفسار', phone: '66054321' },
-      },
-      image,
-    );
-    expect(available.body.data.status).toBe('AVAILABLE');
-    const propertyId = (available.body.data as { id: string }).id;
-
-    // The creation payload itself has no structured intent: the wording must
-    // come ONLY from the interest that is actually persisted with this save.
-    const created = await createClient(employeeAToken, {
-      name: 'زبون الاستفسار الكريمي',
-      phone: '65123456',
-      notes: 'يريد شراء أي شيء 4321',
-      propertyInterests: [{ propertyId, reason: '', notes: '' }],
-    });
-
-    const rows = await managersRows('CLIENT_CREATED');
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      title: 'عميل جديد — استفسار عن عقار',
-      message: 'موظف الأنشطة — أضاف عميلًا يسأل عن عقار في البرنامج',
-      clientId: created.id,
-      propertyId: null,
-      followUpId: null,
-    });
-    // The draft's free text is never copied (no intent guessing from notes).
-    expect(JSON.stringify(rows[0])).not.toContain('4321');
-    expect(JSON.stringify(rows[0])).not.toContain('65123456');
-  });
-
-  it('reports a real client edit once, and an identical resave never again', async () => {
-    const created = await createClient(employeeAToken, {
-      name: 'زبون التعديل',
-      phone: '65002222',
-    });
-
-    const changed = await api()
-      .patch(`/clients/${created.id}`)
+  it('no longer reports CLIENT record events: the direct paths are blocked for employees', async () => {
+    const blocked = await api()
+      .post('/clients')
       .set(auth(employeeAToken))
-      .send({ name: 'الاسم المعدل' });
-    expect(changed.status).toBe(200);
+      .send({ name: 'عميل محظور', phone: '65002222' });
+    expect(blocked.status).toBe(403);
 
-    let rows = await managersRows('CLIENT_UPDATED');
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      title: 'تحديث بيانات عميل',
-      message: 'موظف الأنشطة — عدّل بيانات عميل',
-      clientId: created.id,
-    });
-
-    // Saving the SAME values again is not new activity: no second occurrence.
-    const unchanged = await api()
-      .patch(`/clients/${created.id}`)
+    const client = await managerClient({
+      name: 'عميل سجات',
+      phone: '65002333',
+    }, employeeAId);
+    // Even an employee PATCH is refused — no CLIENT_UPDATED can ever exist.
+    const denied = await api()
+      .patch(`/clients/${client.id}`)
       .set(auth(employeeAToken))
-      .send({ name: 'الاسم المعدل' });
-    expect(unchanged.status).toBe(200);
-    expect(await managersRows('CLIENT_UPDATED')).toHaveLength(1);
+      .send({ name: 'ممنوع' });
+    expect(denied.status).toBe(403);
 
-    // A manager's own edit never reports anyone.
     const managerEdit = await api()
-      .patch(`/clients/${created.id}`)
+      .patch(`/clients/${client.id}`)
       .set(auth(managerToken))
-      .send({ name: 'تعديل المدير' });
+      .send({ name: 'تعديل المدير'});
     expect(managerEdit.status).toBe(200);
-    expect(await managersRows('CLIENT_UPDATED')).toHaveLength(1);
-  });
 
-  it('reports newly linked property interests, and an identical interest resave is silent', async () => {
-    // A manager-created property is directly AVAILABLE and therefore linkable.
-    const available = await postProperty(
-      ctx.app,
-      managerToken,
-      {
-        listingType: 'RENT',
-        governorate: 'الفروانية',
-        district: 'غرناطة',
-        block: '3',
-        plotNumber: '12',
-        sizeSqm: '400.00',
-        askingPrice: '250000.00',
-        negotiable: true,
-        description: 'شقة للإيجار',
-        floors: [{ type: 'GROUND', details: 'صالة' }],
-        newContact: { type: 'BROKER', name: 'وسيط للإيجار', phone: '66012345' },
-      },
-      image,
-    );
-    expect(available.body.data.status).toBe('AVAILABLE');
-    const propertyId = (available.body.data as { id: string }).id;
-    await ctx.prisma.notification.deleteMany({});
-
-    const created = await createClient(employeeAToken, {
-      name: 'زبون Интересات',
-      phone: '65003333',
-    });
-    // Save 1: a NEW interest.
-    const withInterest = await api()
-      .patch(`/clients/${created.id}`)
-      .set(auth(employeeAToken))
-      .send({
-        propertyInterests: [
-          { propertyId, reason: 'سبب سري 8888', notes: 'ملاحظة سرية 9999' },
-        ],
-      });
-    expect(withInterest.status).toBe(200);
-
-    const rows = await managersRows('CLIENT_INTEREST_UPDATED');
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      title: 'استفسار عقاري جديد',
-      message: 'موظف الأنشطة — سجّل استفسارًا عقاريًا لعميل',
-      clientId: created.id,
-    });
-    // The wizard's free text (reason/notes) is private and never leaves it.
-    const serialized = JSON.stringify(rows[0]);
-    expect(serialized).not.toContain('8888');
-    expect(serialized).not.toContain('9999');
-
-    // Save 2: identical values upsert on the same pair — no new activity.
-    const resave = await api()
-      .patch(`/clients/${created.id}`)
-      .set(auth(employeeAToken))
-      .send({
-        propertyInterests: [
-          { propertyId, reason: 'سبب سري 8888', notes: 'ملاحظة سرية 9999' },
-        ],
-      });
-    expect(resave.status).toBe(200);
-    expect(await managersRows('CLIENT_INTEREST_UPDATED')).toHaveLength(1);
+    expect(await managersRows('CLIENT_CREATED')).toHaveLength(0);
+    expect(await managersRows('CLIENT_UPDATED')).toHaveLength(0);
+    expect(await managersRows('CLIENT_INTEREST_UPDATED')).toHaveLength(0);
   });
 
   it('reports a follow-up creation with both the client and follow-up references', async () => {
-    const created = await createClient(employeeAToken, {
-      name: 'زبون المتابعة',
-      phone: '65004444',
-    });
+    const created = await managerClient(
+      { name: 'زبون المتابعة', phone: '65004444' },
+      employeeAId,
+    );
     const dueAt = new Date(Date.now() + 7 * 24 * 3600 * 1000)
       .toISOString()
       .slice(0, 10);
@@ -406,12 +304,12 @@ describeWithDatabase('Employee record-activity notifications', () => {
   });
 
   it('manager actions produce no record-activity notifications at all', async () => {
-    await createClient(managerToken, { name: 'عميل المدير', phone: '65008888' });
+    await managerClient({ name: 'عميل المدير', phone: '65008888' });
     await api()
       .post('/contacts')
       .set(auth(managerToken))
       .send({ type: 'OWNER', name: 'مالك المدير', phone: '65009999' });
-    const followed = await createClient(managerToken, {
+    const followed = await managerClient({
       name: 'عميل مدير متابعة',
       phone: '65010000',
     });
@@ -427,10 +325,8 @@ describeWithDatabase('Employee record-activity notifications', () => {
     expect(await ctx.prisma.notification.count()).toBe(0);
   });
 
-  it('a failed save rolls the notification back with the write', async () => {
-    // A refused or rolled-back save never leaves a notification behind. We clear
-    // the table after every legitimate save below, so any row left over after a
-    // failed request would be a leak.
+  it('a failed submission or decision rolls the notification back with the write', async () => {
+    // A PENDING property is visible to its employee but never linkable.
     const pending = await postProperty(ctx.app, employeeAToken, {
       listingType: 'SALE',
       governorate: 'الفروانية',
@@ -445,33 +341,35 @@ describeWithDatabase('Employee record-activity notifications', () => {
       newContact: { type: 'BROKER', name: 'وسيط خاص', phone: '66661111' },
     }, image);
     const pendingId = (pending.body?.data as { id?: string } | undefined)?.id;
+    // Clear the property-submission recording rows; only the failure below matters.
     await ctx.prisma.notification.deleteMany({});
 
-    const client = await createClient(employeeAToken, {
-      name: 'زبون السجل الفاشل',
-      phone: '65011111',
-    });
-    expect(
-      (
-        await api()
-          .patch(`/clients/${client.id}`)
-          .set(auth(employeeAToken))
-          .send({ propertyInterests: [{ propertyId: pendingId }] })
-      ).status,
-    ).toBe(400);
-
-    await ctx.prisma.notification.deleteMany({});
-    // The refused PATCH left nothing behind.
+    const reviewsBefore = await ctx.prisma.clientReviewRequest.count();
+    const refused = await api()
+      .post('/client-reviews')
+      .set(auth(employeeAToken))
+      .send({
+        kind: 'CREATION',
+        name: 'زبون السجل الفاشل',
+        phone: '65011111',
+        addInterests: [{ propertyId: pendingId }],
+      });
+    expect(refused.status).toBe(400);
     expect(await ctx.prisma.notification.count()).toBe(0);
-    // And a guessed client id is a 404 that notifies nobody (see count check).
-    expect(
-      (
-        await api()
-          .patch(`/clients/${randomUUID()}`)
-          .set(auth(employeeAToken))
-          .send({ name: 'طيف' })
-      ).status,
-    ).toBe(404);
+    expect(await ctx.prisma.clientReviewRequest.count()).toBe(reviewsBefore);
+
+    // A guessed EDIT target is a 404 that notifies nobody.
+    await ctx.prisma.notification.deleteMany({});
+    const ghost = await api()
+      .post('/client-reviews')
+      .set(auth(employeeAToken))
+      .send({
+        kind: 'EDIT',
+        clientId: randomUUID(),
+        name: 'طيف',
+        phone: '65012222',
+      });
+    expect(ghost.status).toBe(404);
     expect(await ctx.prisma.notification.count()).toBe(0);
   });
 });

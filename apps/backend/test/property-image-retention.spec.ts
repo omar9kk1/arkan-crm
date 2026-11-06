@@ -30,12 +30,13 @@ describeWithDatabase('Property image retention', () => {
 
   const api = () => request(ctx.app.getHttpServer());
 
+  let seq = 0;
   const payload = () => ({
     listingType: 'SALE',
     governorate: 'الفروانية',
     district: 'غرناطة',
     block: '3',
-    plotNumber: '12',
+    plotNumber: String(900000 + ++seq),
     sizeSqm: '400.00',
     askingPrice: '250000.00',
     negotiable: true,

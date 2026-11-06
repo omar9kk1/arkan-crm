@@ -16,6 +16,8 @@ import { ContactsModule } from '../../src/contacts/contacts.module';
 import { EmployeesModule } from '../../src/employees/employees.module';
 import { PropertiesModule } from '../../src/properties/properties.module';
 import { NotificationsModule } from '../../src/notifications/notifications.module';
+import { FollowupsModule } from '../../src/followups/followups.module';
+import { DashboardModule } from '../../src/dashboard/dashboard.module';
 import { PushModule } from '../../src/push/push.module';
 import { FilesModule } from '../../src/files/files.module';
 import { PrismaService } from '../../src/prisma/prisma.service';
@@ -107,6 +109,8 @@ export async function createTestApp(options?: {
       EmployeesModule,
       PropertiesModule,
       NotificationsModule,
+      FollowupsModule,
+      DashboardModule,
       PushModule,
     ],
   }).compile();

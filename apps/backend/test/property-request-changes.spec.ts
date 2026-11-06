@@ -33,12 +33,13 @@ describeWithDatabase('Request Changes workflow (Phase 4B)', () => {
   let employeeBToken: string;
   const api = () => request(ctx.app.getHttpServer());
 
+  let seq = 0;
   const employeePayload = (overrides: Record<string, unknown> = {}) => ({
     listingType: 'SALE',
     governorate: 'الفروانية',
     district: 'غرناطة',
     block: '3',
-    plotNumber: '12',
+    plotNumber: String(900000 + ++seq),
     sizeSqm: '400.00',
     askingPrice: '250000.00',
     negotiable: true,

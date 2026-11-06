@@ -9,6 +9,8 @@ import { ContactType, DealType } from '@prisma/client';
 export interface ContactPropertyRefDto {
   id: string;
   reference: string;
+  /** Official A-code, or the P-code while pending. */
+  approvedReference?: string | null;
   /**
    * The linked property's real transaction type (`DealType`). Required on every
    * `Property` row, so grouped pill counts can never be invented client-side:

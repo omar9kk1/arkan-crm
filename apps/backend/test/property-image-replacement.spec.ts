@@ -32,6 +32,7 @@ describeWithDatabase('Property image replacement', () => {
 
   const api = () => request(ctx.app.getHttpServer());
 
+  let seq = 0;
   const createProperty = async (token = creatorToken) => {
     const response = await postProperty(
       ctx.app,
@@ -41,7 +42,7 @@ describeWithDatabase('Property image replacement', () => {
         governorate: 'الفروانية',
         district: 'غرناطة',
         block: '3',
-        plotNumber: '12',
+        plotNumber: String(900000 + ++seq),
         sizeSqm: '400.00',
         askingPrice: '250000.00',
         negotiable: true,

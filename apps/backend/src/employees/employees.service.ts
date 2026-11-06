@@ -6,6 +6,7 @@ import {
 import { Prisma, PropertyStatus, Role } from '@prisma/client';
 import type { AuthUser } from '@arkan/shared';
 import { PrismaService } from '../prisma/prisma.service';
+import { dueBucket } from '../followups/followup-schedule';
 import { hashPassword } from '../auth/password';
 import type {
   EmployeeDto,
@@ -28,7 +29,9 @@ const EMPLOYEE_SELECT = {
   email: true,
   role: true,
   isActive: true,
-  employee: { select: { phone: true, hiredAt: true, baseSalary: true } },
+  employee: {
+    select: { id: true, phone: true, hiredAt: true, baseSalary: true },
+  },
   _count: { select: { createdProperties: true } },
 } satisfies Prisma.UserSelect;
 
@@ -62,10 +65,23 @@ export class EmployeesService {
       orderBy: { createdAt: 'asc' },
       select: EMPLOYEE_SELECT,
     });
-    const byEmployee = await this.propertiesByEmployee(users.map((u) => u.id));
+    const userIds = users.map((u) => u.id);
+    const profileIds = users
+      .map((u) => u.employee?.id)
+      .filter((id): id is string => Boolean(id));
+    const byEmployee = await this.propertiesByEmployee(userIds);
+    const clientsByEmployee = await this.clientsByEmployee(profileIds);
+    const assignmentsByEmployee = await this.assignmentsByEmployee(profileIds);
+    const lateByEmployee = await this.lateFollowUpsByEmployee(profileIds);
     return {
       items: users.map((user) =>
-        this.serialize(user, byEmployee.get(user.id) ?? []),
+        this.serialize(
+          user,
+          byEmployee.get(user.id) ?? [],
+          clientsByEmployee.get(user.employee?.id ?? '') ?? 0,
+          assignmentsByEmployee.get(user.employee?.id ?? '') ?? 0,
+          lateByEmployee.get(user.employee?.id ?? '') ?? 0,
+        ),
       ),
     };
   }
@@ -224,7 +240,23 @@ export class EmployeesService {
       select: EMPLOYEE_SELECT,
     });
     const byEmployee = await this.propertiesByEmployee([id]);
-    return this.serialize(user, byEmployee.get(id) ?? []);
+    const profileId = user.employee?.id ?? null;
+    const clientsCount = profileId
+      ? ((await this.clientsByEmployee([profileId])).get(profileId) ?? 0)
+      : 0;
+    const assignedCount = profileId
+      ? ((await this.assignmentsByEmployee([profileId])).get(profileId) ?? 0)
+      : 0;
+    const lateCount = profileId
+      ? ((await this.lateFollowUpsByEmployee([profileId])).get(profileId) ?? 0)
+      : 0;
+    return this.serialize(
+      user,
+      byEmployee.get(id) ?? [],
+      clientsCount,
+      assignedCount,
+      lateCount,
+    );
   }
 
   /**
@@ -256,13 +288,99 @@ export class EmployeesService {
     return byEmployee;
   }
 
-  private serialize(user: EmployeeRow, properties: PropertyRow[]): EmployeeDto {
+  /**
+   * Distinct clients owned (createdById) OR responsible (responsibleEmployeeId)
+   * for the given employee profiles. Dedups by client id.
+   */
+  private async clientsByEmployee(
+    profileIds: string[],
+  ): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (!profileIds.length) return out;
+    const rows = await this.prisma.client.findMany({
+      where: {
+        OR: [
+          { createdById: { in: profileIds } },
+          { responsibleEmployeeId: { in: profileIds } },
+        ],
+      },
+      select: { id: true, createdById: true, responsibleEmployeeId: true },
+    });
+    const sets = new Map<string, Set<string>>();
+    for (const row of rows) {
+      if (row.createdById && profileIds.includes(row.createdById)) {
+        if (!sets.has(row.createdById)) sets.set(row.createdById, new Set());
+        sets.get(row.createdById)!.add(row.id);
+      }
+      if (
+        row.responsibleEmployeeId &&
+        profileIds.includes(row.responsibleEmployeeId)
+      ) {
+        if (!sets.has(row.responsibleEmployeeId))
+          sets.set(row.responsibleEmployeeId, new Set());
+        sets.get(row.responsibleEmployeeId)!.add(row.id);
+      }
+    }
+    for (const [pid, set] of sets) out.set(pid, set.size);
+    return out;
+  }
+
+  /** Distinct properties actually assigned (PropertyAssignment) per employee. */
+  private async assignmentsByEmployee(
+    profileIds: string[],
+  ): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (!profileIds.length) return out;
+    const rows = await this.prisma.propertyAssignment.findMany({
+      where: { employeeId: { in: profileIds } },
+      select: { employeeId: true, propertyId: true },
+    });
+    const sets = new Map<string, Set<string>>();
+    for (const row of rows) {
+      if (!sets.has(row.employeeId)) sets.set(row.employeeId, new Set());
+      sets.get(row.employeeId)!.add(row.propertyId);
+    }
+    for (const [pid, set] of sets) out.set(pid, set.size);
+    return out;
+  }
+
+  /** Distinct overdue FollowUpSubject ids per responsible employee. */
+  private async lateFollowUpsByEmployee(
+    profileIds: string[],
+  ): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (!profileIds.length) return out;
+    const now = new Date();
+    const rows = await this.prisma.followUpSubject.findMany({
+      where: {
+        responsibleId: { in: profileIds },
+        active: true,
+      },
+      select: { id: true, responsibleId: true, nextDueAt: true },
+    });
+    const sets = new Map<string, Set<string>>();
+    for (const row of rows) {
+      if (!row.responsibleId) continue;
+      if (dueBucket(row.nextDueAt, now) !== 'OVERDUE') continue;
+      if (!sets.has(row.responsibleId)) sets.set(row.responsibleId, new Set());
+      sets.get(row.responsibleId)!.add(row.id);
+    }
+    for (const [pid, set] of sets) out.set(pid, set.size);
+    return out;
+  }
+
+  private serialize(
+    user: EmployeeRow,
+    properties: PropertyRow[],
+    clientsCount: number,
+    assignedCount: number,
+    lateCount: number,
+  ): EmployeeDto {
     const propertiesByStatus = Object.values(PropertyStatus).reduce(
       (acc, status) => ({ ...acc, [status]: 0 }),
       {} as Record<PropertyStatus, number>,
     );
-    for (const property of properties)
-      propertiesByStatus[property.status] += 1;
+    for (const property of properties) propertiesByStatus[property.status] += 1;
 
     return {
       id: user.id,
@@ -281,14 +399,15 @@ export class EmployeesService {
       propertiesByStatus,
       properties: properties
         .slice(0, PROPERTY_LIMIT)
-        .map(
-          (property): EmployeePropertyDto => ({
-            id: property.id,
-            reference: property.reference,
-            title: property.title,
-            status: property.status,
-          }),
-        ),
+        .map((property): EmployeePropertyDto => ({
+          id: property.id,
+          reference: property.reference,
+          title: property.title,
+          status: property.status,
+        })),
+      clientsCount,
+      assignedCount,
+      lateCount,
     };
   }
 }

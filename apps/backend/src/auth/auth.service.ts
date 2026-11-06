@@ -12,6 +12,19 @@ const REFRESH_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 export const hashRefreshToken = (token: string) =>
   createHash('sha256').update(token).digest('hex');
 
+/**
+ * The session-resolution projection: authentication reads EXACTLY these
+ * columns. Never a full `User` row / bare `include: { user: true }` — the auth
+ * path must not depend on unrelated (e.g. newly added, not yet migrated)
+ * columns, or a single pending schema change turns login, refresh and the
+ * JWT guard into 500/401 for every account.
+ */
+const SESSION_USER_SELECT = {
+  id: true,
+  role: true,
+  isActive: true,
+} as const;
+
 @Injectable()
 export class AuthService {
   private readonly dummyHash = hashPassword(randomBytes(32).toString('hex'));
@@ -24,6 +37,7 @@ export class AuthService {
   async login(credentials: LoginDto) {
     const user = await this.prisma.user.findUnique({
       where: { email: credentials.email.trim().toLowerCase() },
+      select: { id: true, passwordHash: true, isActive: true },
     });
     const valid = await verifyPassword(
       credentials.password,
@@ -33,7 +47,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     return this.prisma.$transaction(async (tx) => {
       // Recheck account state inside the session-creation transaction.
-      const current = await tx.user.findUnique({ where: { id: user.id } });
+      const current = await tx.user.findUnique({
+        where: { id: user.id },
+        select: { ...SESSION_USER_SELECT, passwordHash: true },
+      });
       if (!current?.isActive || current.passwordHash !== user.passwordHash)
         throw new UnauthorizedException('Invalid email or password');
       // A login starts a NEW lineage: the stable identity of this device's
@@ -49,7 +66,7 @@ export class AuthService {
     return this.prisma.$transaction(async (tx) => {
       const session = await tx.refreshToken.findUnique({
         where: { tokenHash },
-        include: { user: true },
+        include: { user: { select: SESSION_USER_SELECT } },
       });
       const now = new Date();
       if (
@@ -68,7 +85,7 @@ export class AuthService {
       // while this request waited for the lineage lock.
       const current = await tx.refreshToken.findUnique({
         where: { id: session.id },
-        include: { user: true },
+        include: { user: { select: SESSION_USER_SELECT } },
       });
       if (
         !current ||
@@ -146,7 +163,7 @@ export class AuthService {
 
   private async issueTokens(
     tx: Prisma.TransactionClient,
-    user: User,
+    user: Pick<User, 'id' | 'role'>,
     action: string,
     lineageId: string | null,
   ) {

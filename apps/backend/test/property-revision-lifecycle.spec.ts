@@ -45,6 +45,7 @@ describeWithDatabase('Property revision lifecycle', () => {
       where: { propertyId: id, status: 'PENDING' },
     });
 
+  let seq = 0;
   const createApprovedProperty = async () => {
     const created = await postProperty(
       ctx.app,
@@ -54,7 +55,7 @@ describeWithDatabase('Property revision lifecycle', () => {
         governorate: 'العاصمة',
         district: 'السالمية',
         block: '1',
-        plotNumber: '10',
+        plotNumber: String(900000 + ++seq),
         sizeSqm: '400.00',
         askingPrice: '250000.00',
         negotiable: true,
@@ -196,7 +197,8 @@ describeWithDatabase('Property revision lifecycle', () => {
     // repeats the first round's 250k ← 300k move.
     expect(approvedNotices.length).toBeGreaterThanOrEqual(2);
     const lastApproved = approvedNotices[0]?.message ?? '';
-    expect(lastApproved).toContain('رقم القسيمة (10 ← 31)');
+    expect(lastApproved).toContain('رقم القسيمة (');
+    expect(lastApproved).toContain('← 31)');
     expect(lastApproved).toContain('السعر (300,000 ← 340,000');
     expect(lastApproved).not.toContain('250,000');
     // And the FIRST round's notice is the earlier one, with its own move.

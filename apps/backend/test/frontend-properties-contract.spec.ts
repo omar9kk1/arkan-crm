@@ -242,7 +242,7 @@ describeWithDatabase('Phase 4A frontend API contract', () => {
 
     expect(created.status).toBe('PENDING');
     // The permanent sequential code: A-000001, A-000002, …
-    expect(created.reference).toMatch(/^A-\d{6}$/);
+    expect(created.reference).toMatch(/^P-\d{6}$/);
     expect(created.version).toBe(1);
     expect(created.primaryImageUrl).toBeTruthy();
     // Public description: the private phone must never be persisted there.
@@ -282,7 +282,7 @@ describeWithDatabase('Phase 4A frontend API contract', () => {
     // The creator sees their own PENDING row with the private contact.
     const own = (await getProperty(created.id)) as PrivatePropertyDto;
     expect(own.status).toBe('PENDING');
-    expect(own.contact?.phone).toBe('66661122');
+    expect(own.proposedOwner?.phone).toBe('66661122');
 
     const ownList = await listProperties({ limit: 100 });
     expect(ownList.items.map((item) => item.id)).toContain(created.id);
@@ -298,8 +298,8 @@ describeWithDatabase('Phase 4A frontend API contract', () => {
     const pending = await listProperties({ status: 'PENDING', limit: 100 });
     expect(pending.items.map((item) => item.id)).toContain(created.id);
     const managed = (await getProperty(created.id)) as PrivatePropertyDto;
-    expect(managed.contact?.phone).toBe('66661122');
-    expect(managed.contact?.name).toBe('أبو فهد');
+    expect(managed.proposedOwner?.phone).toBe('66661122');
+    expect(managed.proposedOwner?.name).toBe('أبو فهد');
 
     // Approve with the row version.
     const approved = await approveProperty(created.id, managed.version);
@@ -432,6 +432,51 @@ describeWithDatabase('Phase 4A frontend API contract', () => {
     expect(theirs.items.find((item) => item.id === created.id)?.isMine).toBe(
       false,
     );
+  });
+
+  it('surfaces the safe duplicate warning without leaking the existing property', async () => {
+    await signIn({ email: 'emp1@arkan.test', password: PASSWORD });
+    const created = await createProperty(
+      toCreatePropertyPayload(
+        form({ district: 'العمرية', block: '88', plotNumber: '88001' }),
+      ),
+      imageFile(),
+    );
+    const existingCode = created.reference;
+
+    await signIn({ email: 'emp2@arkan.test', password: PASSWORD });
+    const error = await createProperty(
+      toCreatePropertyPayload(
+        form({ district: 'العمرية', block: '88', plotNumber: '88001' }),
+      ),
+      imageFile(),
+    ).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(ApiError);
+    const duplicate = error as ApiError;
+    expect(duplicate.status).toBe(409);
+    expect(duplicate.message).toBe(
+      'لا يمكن إضافة العقار، لأنه مسجّل بالفعل في النظام.',
+    );
+    // No existing code, owner, employee or private data in the employee error.
+    expect(duplicate.message).not.toContain(existingCode);
+    expect(duplicate.message).not.toContain('أبو فهد');
+    expect(duplicate.message).not.toContain('66661122');
+  });
+
+  it('replays the same create for a retried idempotency key', async () => {
+    await signIn({ email: 'emp1@arkan.test', password: PASSWORD });
+    const payload = toCreatePropertyPayload(
+      form({ district: 'العارضية', block: '77', plotNumber: '77001' }),
+    );
+    const key = 'frontend-retry-77001';
+
+    const [first, second] = await Promise.all([
+      createProperty(payload, imageFile(), key),
+      createProperty(payload, imageFile(), key),
+    ]);
+    expect(first.id).toBe(second.id);
+    expect(first.reference).toBe(second.reference);
   });
 
   it('refuses a stale PATCH version with the contract 409 message', async () => {

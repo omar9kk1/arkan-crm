@@ -73,6 +73,7 @@ describeWithDatabase('Description change detection', () => {
       2,
     );
 
+  let seq = 0;
   const createProperty = async (description: string) => {
     const response = await postProperty(
       ctx.app,
@@ -82,7 +83,7 @@ describeWithDatabase('Description change detection', () => {
         governorate: 'الفروانية',
         district: 'غرناطة',
         block: '3',
-        plotNumber: '12',
+        plotNumber: String(900000 + ++seq),
         sizeSqm: '400.00',
         askingPrice: '250000.00',
         negotiable: true,

@@ -27,6 +27,12 @@ export interface PushableNotification {
   clientId: string | null;
   contactId: string | null;
   contactType: 'OWNER' | 'BROKER' | null;
+  /** Client review deep link (undefined on historical rows). */
+  clientReviewId?: string | null;
+  /** Follow-up subject deep link (undefined on historical rows). */
+  followUpSubjectId?: string | null;
+  /** The stored per-recipient dedup key (see push-target). */
+  eventKey?: string | null;
   createdAt: Date;
 }
 
@@ -154,7 +160,9 @@ export class PushService {
   }
 
   /** The caller's own subscriptions, restricted to their own lineage. */
-  private async ownSubscriptions(viewer: AuthUser): Promise<PushSubscription[]> {
+  private async ownSubscriptions(
+    viewer: AuthUser,
+  ): Promise<PushSubscription[]> {
     return this.prisma.pushSubscription.findMany({
       where: {
         userId: viewer.id,
@@ -169,9 +177,7 @@ export class PushService {
    * Sends one notification row to every subscription of its recipient that is
    * still allowed to receive it.
    */
-  async deliver(
-    row: PushableNotification,
-  ): Promise<PushAttempt> {
+  async deliver(row: PushableNotification): Promise<PushAttempt> {
     if (!this.configured || !this.ensureVapid()) {
       return { delivered: 0, retryable: 0 };
     }
@@ -179,7 +185,8 @@ export class PushService {
       where: { id: row.userId },
       select: { id: true, role: true, isActive: true },
     });
-    if (!recipient || !recipient.isActive) return { delivered: 0, retryable: 0 };
+    if (!recipient || !recipient.isActive)
+      return { delivered: 0, retryable: 0 };
     // Record-activity events are a manager feed: a demoted account must not
     // keep receiving them.
     if (isRecordEvent(row.type) && recipient.role !== Role.MANAGER) {
@@ -196,6 +203,9 @@ export class PushService {
         clientId: row.clientId,
         contactId: row.contactId,
         contactType: row.contactType,
+        clientReviewId: row.clientReviewId,
+        followUpSubjectId: row.followUpSubjectId,
+        eventKey: row.eventKey,
       },
       recipient.role,
     );

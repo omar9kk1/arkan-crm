@@ -24,7 +24,12 @@ function contactInclude(viewer: AuthUser) {
   return {
     properties: {
       where: propertyVisibilityWhere(viewer),
-      select: { id: true, reference: true, listingType: true },
+      select: {
+        id: true,
+        reference: true,
+        approvedReference: true,
+        listingType: true,
+      },
       orderBy: [{ reference: 'asc' }],
     },
     // Joined, not queried per row: the responsible employee's display name
@@ -47,7 +52,7 @@ export function serializeContact(
     responsibleEmployeeName: contact.responsibleUser?.name ?? null,
     properties: properties.map((property) => ({
       id: property.id,
-      reference: property.reference,
+      reference: property.approvedReference ?? property.reference,
       listingType: property.listingType,
     })),
     createdAt: contact.createdAt.toISOString(),

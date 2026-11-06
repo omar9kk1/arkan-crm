@@ -20,6 +20,8 @@ const image = [{ buffer: pngBytes(), filename: 'photo.png' }];
 interface CreatedProperty {
   id: string;
   reference: string;
+  /** Original P submission code, kept for traceability after approval. */
+  submissionReference: string;
   version: number;
   status: string;
   district: string | null;
@@ -52,6 +54,8 @@ describeWithDatabase(
       listingType: 'SALE',
       governorate: 'العاصمة',
       district: `حي-${randomUUID().slice(0, 8).toUpperCase()}`,
+      block: '1',
+      plotNumber: '1',
       sizeSqm: '300.00',
       askingPrice: '180000.00',
       negotiable: true,
@@ -130,20 +134,26 @@ describeWithDatabase(
       const results = await search(employeeBToken, marker);
       const found = results.find((row) => row.id === property.id);
       expect(found).toBeDefined();
-      expect(found?.reference).toBe(property.reference);
+      // Approved rows expose the OFFICIAL A code, while the original P
+      // submission code stays available for traceability.
+      expect(found?.reference).toBe(approved.body.data.reference);
+      expect(found?.reference).toMatch(/^A-/);
+      expect(found?.submissionReference).toBe(property.reference);
       expect(found?.status).toBe('AVAILABLE');
       // Privacy: no Contact object/owner phone travels to a non-creator.
       expect(found?.contact ?? null).toBeNull();
       expect(found?.contactId ?? null).toBeNull();
 
-      // 4) Employee B selects it for THEIR OWN client and saves successfully.
+      // 4) Employee B selects it for THEIR OWN client — staged as a review,
+      //    which the manager approves; only then is the client materialized.
       const saved = await api()
-        .post('/clients')
+        .post('/client-reviews')
         .set(auth(employeeBToken))
         .send({
+          kind: 'CREATION',
           name: 'عميل الموظف ب',
           phone: `71${randomUUID().slice(0, 8).replace(/[^0-9a-f]/g, '1')}`,
-          propertyInterests: [
+          addInterests: [
             {
               propertyId: property.id,
               reason: 'استفسار',
@@ -152,7 +162,14 @@ describeWithDatabase(
           ],
         });
       expect(saved.status).toBe(201);
-      const clientId = (saved.body.data as { id: string }).id;
+      const claimed = await api()
+        .post(
+          `/client-reviews/${(saved.body.data as { id: string }).id}/approve`,
+        )
+        .set(auth(managerToken))
+        .send({});
+      expect(claimed.status).toBe(201);
+      const clientId = (claimed.body.data as { clientId: string }).clientId;
 
       // 5) Reopening THEIR client shows the linked property, by Property.id.
       const reopened = await api()
@@ -169,7 +186,10 @@ describeWithDatabase(
       }).propertyInterests;
       expect(interests).toHaveLength(1);
       expect(interests[0]?.propertyId).toBe(property.id);
-      expect(interests[0]?.reference).toBe(property.reference);
+      // The durable interest exposes the CURRENT official code (A); the P
+      // submission code remains only on the property's own history fields.
+      expect(interests[0]?.reference).toBe(approved.body.data.reference);
+      expect(interests[0]?.reference).toMatch(/^A-/);
       expect(interests[0]?.reason).toBe('استفسار');
 
       // The durable relationship really exists — exactly one row.
@@ -186,8 +206,8 @@ describeWithDatabase(
         .set(auth(employeeBToken));
       expect(detail.status).toBe(200);
       expect(detail.body.data.contact ?? null).toBeNull();
-      // Fixture client of A (only rows A created are A's clients).
-      await api().post('/clients').set(auth(employeeAToken)).send({
+      // Fixture client of A (rows not owned/responsible by B stay invisible).
+      await api().post('/clients').set(auth(managerToken)).send({
         name: 'عميل الموظف أ',
         phone: `72${randomUUID().slice(0, 8).replace(/[^0-9a-f]/g, '2')}`,
       });
@@ -223,14 +243,22 @@ describeWithDatabase(
       expect(await search(employeeAToken, marker)).toHaveLength(1);
 
       const saved = await api()
-        .post('/clients')
+        .post('/client-reviews')
         .set(auth(employeeAToken))
         .send({
+          kind: 'CREATION',
           name: 'عميل الموظف أ',
           phone: `73${randomUUID().slice(0, 8).replace(/[^0-9a-f]/g, '3')}`,
-          propertyInterests: [{ propertyId: property.id }],
+          addInterests: [{ propertyId: property.id }],
         });
       expect(saved.status).toBe(201);
+      const claimed = await api()
+        .post(
+          `/client-reviews/${(saved.body.data as { id: string }).id}/approve`,
+        )
+        .set(auth(managerToken))
+        .send({});
+      expect(claimed.status).toBe(201);
       expect(
         await ctx.prisma.clientPropertyInterest.count({
           where: { propertyId: property.id },

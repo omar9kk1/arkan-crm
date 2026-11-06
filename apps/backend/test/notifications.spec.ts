@@ -27,6 +27,8 @@ interface NotificationItem {
   contactId: string | null;
   contactType: string | null;
   followUpId: string | null;
+  clientReviewId: string | null;
+  followUpSubjectId: string | null;
   read: boolean;
   readAt: string | null;
   createdAt: string;
@@ -65,12 +67,13 @@ describeWithDatabase('In-app notifications', () => {
 
   const api = () => request(ctx.app.getHttpServer());
 
+  let seq = 0;
   const payload = (overrides: Record<string, unknown> = {}) => ({
     listingType: 'SALE',
     governorate: 'الفروانية',
     district: 'غرناطة',
     block: '3',
-    plotNumber: '12',
+    plotNumber: String(900000 + ++seq),
     sizeSqm: '400.00',
     askingPrice: '250000.00',
     negotiable: true,
@@ -250,7 +253,8 @@ describeWithDatabase('In-app notifications', () => {
       propertyId: created.id,
     });
     // The manager's free-text instructions are never copied into the notification.
-    expect(JSON.stringify(items[0])).not.toContain('يرجى مراجعة السعر');
+    expect(JSON.stringify(items[0])).not.toContain('يرجى مراجعة السعر وتفاصيل الدور الأول');
+    expect(items[0]?.message).toContain('رقم العقار:');
     // Managers receive nothing for their own decision.
     expect(await inbox(managerToken)).toHaveLength(0);
     expect(await inbox(manager2Token)).toHaveLength(0);
@@ -259,7 +263,7 @@ describeWithDatabase('In-app notifications', () => {
   // ---------------------------------------------------------------------------
   // Event 3 — rejection
   // ---------------------------------------------------------------------------
-  it('notifies only the creator on rejection and never copies the free-text reason', async () => {
+  it('notifies only the creator on rejection with the reason and decision details', async () => {
     const created = await createProperty(employeeAToken);
     await ctx.prisma.notification.deleteMany({});
     const response = await reject(managerToken, created.id, 'السعر غير منطقي 5555');
@@ -269,10 +273,11 @@ describeWithDatabase('In-app notifications', () => {
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({
       type: 'PROPERTY_REJECTED',
-      title: 'تم رفض العقار',
+      title: 'تم رفض تسجيل العقار',
       propertyId: created.id,
     });
-    expect(JSON.stringify(items[0])).not.toContain('السعر غير منطقي');
+    expect(items[0]?.message).toContain('السعر غير منطقي 5555');
+    expect(items[0]?.message).toContain('رقم العقار:');
     expect(await inbox(managerToken)).toHaveLength(0);
   });
 
@@ -286,18 +291,25 @@ describeWithDatabase('In-app notifications', () => {
     const afterRequest = requested.body.data as { version: number };
     await ctx.prisma.notification.deleteMany({});
 
-    // Saving a correction (PATCH) must NOT notify the managers.
+    // Saving a genuine correction notifies the managers ONCE per manager; it
+    // still does not put the row back into the actionable queue.
     const patched = await api()
       .patch(`/properties/${created.id}`)
       .set(auth(employeeAToken))
       .send({ version: afterRequest.version, sizeSqm: '450.00' });
     expect(patched.status).toBe(200);
-    expect(await ctx.prisma.notification.count()).toBe(0);
+    expect(
+      await ctx.prisma.notification.count({
+        where: { title: 'تم تعديل عقار تحت المراجعة' },
+      }),
+    ).toBe(2); // one per active manager
 
     const response = await resubmit(employeeAToken, created.id);
     expect(response.status).toBe(200);
     for (const token of [managerToken, manager2Token]) {
-      const items = await inbox(token);
+      const items = (await inbox(token)).filter(
+        (item) => item.type === 'PROPERTY_RESUBMITTED',
+      );
       expect(items).toHaveLength(1);
       expect(items[0]).toMatchObject({
         type: 'PROPERTY_RESUBMITTED',
@@ -561,10 +573,14 @@ describeWithDatabase('In-app notifications', () => {
     expect(Object.keys(item).sort()).toEqual(
       [
         'clientId',
+        'clientReviewId',
         'contactId',
         'contactType',
         'createdAt',
+        'duplicate',
+        'eventKey',
         'followUpId',
+        'followUpSubjectId',
         'id',
         'message',
         'propertyId',
@@ -580,6 +596,9 @@ describeWithDatabase('In-app notifications', () => {
     expect(item.contactId).toBeNull();
     expect(item.contactType).toBeNull();
     expect(item.followUpId).toBeNull();
+    // A follow-up subject deep link is exposed to the RESPONSIBLE EMPLOYEE
+    // only; manager copies (and every non-follow-up row) carry null.
+    expect(item.followUpSubjectId).toBeNull();
     const serialized = JSON.stringify(item);
     for (const secret of ['66661111', 'وسيط خاص', managerId, employeeAId]) {
       expect(serialized).not.toContain(secret);

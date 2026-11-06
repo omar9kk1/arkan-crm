@@ -1,7 +1,9 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  Headers,
   HttpCode,
   Param,
   ParseUUIDPipe,
@@ -30,6 +32,8 @@ import { ListPropertiesQueryDto } from './dto/list-properties.query';
 import { ApprovePropertyDto } from './dto/approve-property.dto';
 import { RejectPropertyDto } from './dto/reject-property.dto';
 import { RequestChangesDto } from './dto/request-changes.dto';
+import { TrashPropertyDto } from './dto/trash-property.dto';
+import { PermanentDeletePropertyDto } from './dto/permanent-delete-property.dto';
 
 @Controller('properties')
 export class PropertiesController {
@@ -45,12 +49,18 @@ export class PropertiesController {
     @Req() request: { user: AuthUser },
     @Body() body: CreatePropertyMultipartDto,
     @UploadedFile() file?: UploadedImageFile,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
     const payload = await parseAndValidatePayload(
       CreatePropertyPayloadDto,
       body.payload,
     );
-    return this.properties.create(request.user, payload, file);
+    return this.properties.create(
+      request.user,
+      payload,
+      file,
+      idempotencyKey,
+    );
   }
 
   @Get()
@@ -80,6 +90,63 @@ export class PropertiesController {
       'X-Content-Type-Options': 'nosniff',
     });
     return new StreamableFile(stream);
+  }
+
+  /** Manager-only: soft-deleted properties (Trash). Must precede `:id`. */
+  @Roles(Role.MANAGER)
+  @Get('trash')
+  listTrash(@Req() request: { user: AuthUser }) {
+    return this.properties.listTrash(request.user);
+  }
+
+  @Roles(Role.MANAGER)
+  @Post(':id/trash')
+  @HttpCode(200)
+  trash(
+    @Req() request: { user: AuthUser },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: TrashPropertyDto,
+  ) {
+    return this.properties.softDelete(request.user, id, body.reason);
+  }
+
+  @Roles(Role.MANAGER)
+  @Post(':id/restore')
+  @HttpCode(200)
+  restore(
+    @Req() request: { user: AuthUser },
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.properties.restore(request.user, id);
+  }
+
+  @Roles(Role.MANAGER)
+  @Delete(':id/permanent')
+  @HttpCode(200)
+  permanentDelete(
+    @Req() request: { user: AuthUser },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: PermanentDeletePropertyDto,
+  ) {
+    return this.properties.permanentDelete(
+      request.user,
+      id,
+      body.confirmationCode,
+    );
+  }
+
+  @Get('stats/mine')
+  countMine(@Req() request: { user: AuthUser }) {
+    return this.properties.countMine(request.user);
+  }
+
+  /** Read-only historical detail for the ORIGINAL submitter (rejected/trashed). */
+  @Get(':id/history')
+  history(
+    @Req() request: { user: AuthUser },
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.properties.history(request.user, id);
   }
 
   @Get(':id')

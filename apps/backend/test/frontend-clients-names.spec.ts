@@ -61,6 +61,7 @@ function clientDto(overrides: Partial<ClientApiDto> = {}): ClientApiDto {
     notes: '',
     source: '',
     status: '',
+    requestData: null,
     responsibleUserId: 'user-2',
     responsibleEmployeeName: 'Employee B',
     createdByUserId: 'user-2',

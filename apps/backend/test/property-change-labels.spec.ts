@@ -31,6 +31,7 @@ describeWithDatabase('Precise property change labels', () => {
 
   const api = () => request(ctx.app.getHttpServer());
 
+  let seq = 0;
   const createProperty = async (withBasement = false) => {
     const response = await postProperty(
       ctx.app,
@@ -40,7 +41,7 @@ describeWithDatabase('Precise property change labels', () => {
         governorate: 'الفروانية',
         district: 'غرناطة',
         block: '3',
-        plotNumber: '12',
+        plotNumber: String(900000 + ++seq),
         address: 'قطعة 3 قسيمة 12',
         sizeSqm: '400.00',
         askingPrice: '250000.00',

@@ -13,6 +13,11 @@ import {
   recordEventBody,
   recordEventKeys,
   recordEventTitle,
+  clientReviewManagerBody,
+  clientReviewDecisionBody,
+  clientReviewEventKeys,
+  CLIENT_REVIEW_TITLES,
+  type ClientReviewDecision,
   type EmployeeRecordEvent,
   type NotificationDraft,
   type PropertyEventContext,
@@ -20,6 +25,7 @@ import {
 } from './notification-events';
 import {
   toNotificationDto,
+  type NotificationDuplicateContextDto,
   type NotificationPageDto,
   type UnreadCountDto,
 } from './notification.dto';
@@ -36,14 +42,31 @@ const NOTIFICATION_SELECT = {
   clientId: true,
   contactId: true,
   followUpId: true,
+  clientReviewId: true,
+  // Employee follow-up escalation deep link (masked for managers at the DTO).
+  followUpSubjectId: true,
+  // The stored per-recipient dedup key — the FOLLOWUP_CREATED entry target.
+  eventKey: true,
   // The CURRENT code of the linked property: historical notification bodies may
   // still carry a retired code, so the current one is resolved from the
   // property row (the stored text itself is never rewritten).
-  property: { select: { reference: true } },
+  property: { select: { reference: true, approvedReference: true } },
   // Only the contact's type is needed (for the bell's routing); the contact's
   // private fields (phone/notes) are never read for a notification row.
   contact: { select: { type: true } },
 } satisfies Prisma.NotificationSelect;
+
+function formatDecisionDate(date: Date): string {
+  try {
+    return new Intl.DateTimeFormat('ar-KW', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: 'Asia/Kuwait',
+    }).format(date);
+  } catch {
+    return date.toISOString();
+  }
+}
 
 /**
  * In-app notifications: the per-recipient inbox API plus the event writers that
@@ -82,6 +105,31 @@ export class NotificationsService {
     });
     if (unique.length === 0) return;
     await tx.notification.createMany({ data: unique, skipDuplicates: true });
+  }
+
+  /**
+   * Deliver drafts that were prepared outside a single "property transition"
+   * transaction (e.g. the follow-ups saveBatch). Idempotent like every other
+   * delivery path.
+   */
+  async deliverDrafts(
+    tx: Prisma.TransactionClient,
+    drafts: NotificationDraft[],
+  ): Promise<void> {
+    await this.deliver(tx, drafts);
+  }
+
+  /**
+   * Public delivery hook for the follow-ups scheduler: ONE call inserts every
+   * prepared escalation draft with the same `(userId, eventKey)` idempotency
+   * as every other event (the scheduler commits this together with its cycle
+   * flags, so a crash can never notify without recording — or vice versa).
+   */
+  async deliverFollowUpDrafts(
+    tx: Prisma.TransactionClient,
+    drafts: NotificationDraft[],
+  ): Promise<void> {
+    await this.deliver(tx, drafts);
   }
 
   /** Ids of active users with a role, optionally excluding one recipient. */
@@ -180,22 +228,206 @@ export class NotificationsService {
     ]);
   }
 
-  /** 3. Manager rejected a property → the property's creator. */
+  /**
+   * 3. Manager rejected a property → the property's creator.
+   *
+   * Includes the code, the Manager's actual reason and the decision date. The
+   * reason is shown ONLY to the creator (never to another employee) and is
+   * never part of a broadcast/manager notification.
+   */
   async notifyPropertyRejected(
     tx: Prisma.TransactionClient,
     context: PropertyEventContext,
+    details: { reason: string; decidedAt: Date; isDuplicate: boolean },
   ): Promise<void> {
     if (!context.creatorId) return;
     await this.deliver(tx, [
-      this.propertyDraft(context.creatorId, context, {
+      {
+        userId: context.creatorId,
         type: 'PROPERTY_REJECTED',
         title: PROPERTY_EVENT_TITLES.REJECTED,
+        body: this.decisionBody({
+          message:
+            'تم رفض طلب تسجيل عقارك. يمكنك الاطلاع على سبب الرفض وتفاصيل العقار.',
+          reference: context.reference,
+          reasonLabel: 'سبب الرفض',
+          reason: details.reason,
+          date: details.decidedAt,
+          isDuplicate: details.isDuplicate,
+        }),
+        propertyId: context.propertyId,
         eventKey: notificationEventKeys.rejected(
           context.approvalRequestId,
           context.propertyId,
         ),
-      }),
+      },
     ]);
+  }
+
+  /**
+   * Manager soft-deleted a property → its creator. The property still exists
+   * (Trash), so the notification remains clickable/readable; permanent deletion
+   * later nulls the link but keeps the decision row for history.
+   */
+  async notifyPropertyTrashed(
+    tx: Prisma.TransactionClient,
+    context: PropertyEventContext,
+    details: { reason: string | null; deletedAt: Date; isDuplicate: boolean },
+  ): Promise<void> {
+    if (!context.creatorId) return;
+    await this.deliver(tx, [
+      {
+        userId: context.creatorId,
+        type: 'SYSTEM',
+        title: PROPERTY_EVENT_TITLES.TRASHED,
+        body: this.decisionBody({
+          message:
+            'تم نقل عقارك إلى المحذوفات. يمكنك الاطلاع على تفاصيله وسبب الحذف.',
+          reference: context.reference,
+          reasonLabel: 'سبب الحذف',
+          reason: details.reason,
+          date: details.deletedAt,
+          isDuplicate: details.isDuplicate,
+        }),
+        propertyId: context.propertyId,
+        eventKey: notificationEventKeys.trashed(context.propertyId),
+      },
+    ]);
+  }
+
+  /**
+   * Manager restored a property → its creator. The property keeps its original
+   * status and P/A code; only the Trash marker is cleared.
+   */
+  async notifyPropertyRestored(
+    tx: Prisma.TransactionClient,
+    context: PropertyEventContext,
+    details: { restoredAt: Date; trashedAt: Date },
+  ): Promise<void> {
+    if (!context.creatorId) return;
+    await this.deliver(tx, [
+      {
+        userId: context.creatorId,
+        type: 'SYSTEM',
+        title: PROPERTY_EVENT_TITLES.RESTORED,
+        body: [
+          'قام مدير النظام باستعادة عقارك من المحذوفات، وأصبح متاحًا مرة أخرى في قائمة عقاراتك.',
+          `رقم العقار: ${context.reference}`,
+          `التاريخ: ${formatDecisionDate(details.restoredAt)}`,
+        ].join('\n'),
+        propertyId: context.propertyId,
+        eventKey: notificationEventKeys.restored(
+          context.propertyId,
+          details.trashedAt,
+        ),
+      },
+    ]);
+  }
+
+  /**
+   * An employee saved a genuine change to their own PENDING property → every
+   * active manager. The row stays PENDING; only the reviewer is told to look at
+   * the latest values before deciding.
+   *
+   * The body is built from server-authoritative data: the current property code,
+   * the employee's database name and the already-formatted public field labels.
+   * It never carries a contact, phone number, review note or a raw payload.
+   */
+  async notifyPropertyEdited(
+    tx: Prisma.TransactionClient,
+    context: PropertyEventContext,
+    details: {
+      employeeName: string;
+      changeSummary: string;
+      editedAt: Date;
+    },
+  ): Promise<void> {
+    const managers = await this.activeUserIds(tx, Role.MANAGER);
+    const lines = [
+      'قام الموظف بتحديث بيانات عقار بانتظار المراجعة. يُرجى الاطلاع على التعديلات.',
+      `رقم العقار: ${context.reference}`,
+      `الموظف: ${details.employeeName}`,
+      `التعديلات: ${details.changeSummary}`,
+      `التاريخ: ${formatDecisionDate(details.editedAt)}`,
+    ];
+    await this.deliver(
+      tx,
+      managers.map((userId) => ({
+        userId,
+        type: 'SYSTEM',
+        title: PROPERTY_EVENT_TITLES.EDITED,
+        body: lines.join('\n'),
+        propertyId: context.propertyId,
+        eventKey: notificationEventKeys.edited(
+          context.propertyId,
+          context.version,
+        ),
+      })),
+    );
+  }
+
+  /**
+   * An employee tried to register a property that is already in the system.
+   * The property itself is not created; only active Managers receive this
+   * durable alert. `context.propertyId` is the EXISTING property, so clicking
+   * the notification can open it through the normal Manager property drawer.
+   *
+   * The writer runs INSIDE the create transaction, which is committed before
+   * the caller turns the result into an HTTP 409. A rolled-back property
+   * creation therefore cannot take the alert with it.
+   */
+  async notifyDuplicateAttempt(
+    tx: Prisma.TransactionClient,
+    context: PropertyEventContext,
+    details: { fingerprint: string; attemptedAt: Date },
+  ): Promise<void> {
+    const [managers, actor] = await Promise.all([
+      this.activeUserIds(tx, Role.MANAGER),
+      context.creatorId
+        ? tx.user.findUnique({
+            where: { id: context.creatorId },
+            select: { name: true },
+          })
+        : Promise.resolve(null),
+    ]);
+    const employeeName = actor?.name ?? 'موظف';
+    const body = [
+      `حاول الموظف ${employeeName} تسجيل عقار موجود بالفعل في النظام، وتم منع التسجيل تلقائيًا.`,
+      `رقم العقار المسجّل: ${context.reference}`,
+      `التاريخ: ${formatDecisionDate(details.attemptedAt)}`,
+      'الحالة: تم منع التسجيل',
+    ].join('\n');
+    await this.deliver(
+      tx,
+      managers.map((userId) => ({
+        userId,
+        type: 'SYSTEM',
+        title: PROPERTY_EVENT_TITLES.DUPLICATE_ATTEMPT,
+        body,
+        propertyId: context.propertyId,
+        eventKey: notificationEventKeys.duplicateAttempt(
+          context.propertyId,
+          context.creatorId ?? 'unknown',
+          details.fingerprint,
+        ),
+      })),
+    );
+  }
+
+  private decisionBody(input: {
+    message: string;
+    reference: string;
+    reasonLabel: string;
+    reason: string | null;
+    date: Date;
+    isDuplicate: boolean;
+  }): string {
+    const lines = [input.message, `رقم العقار: ${input.reference}`];
+    const reason = input.reason?.trim();
+    if (reason) lines.push(`${input.reasonLabel}: ${reason}`);
+    lines.push(`التاريخ: ${formatDecisionDate(input.date)}`);
+    if (input.isDuplicate) lines.push('عقار مشابه');
+    return lines.join('\n');
   }
 
   /** 5. Manager approved the creator's property → the property's creator. */
@@ -304,6 +536,7 @@ export class NotificationsService {
           event,
           record.contactType,
           record.clientIntent,
+          record.clientChangeSummary,
         ),
         propertyId: null,
         clientId: record.clientId ?? null,
@@ -312,6 +545,95 @@ export class NotificationsService {
         eventKey,
       })),
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Client review workflow events
+  // ---------------------------------------------------------------------------
+
+  /**
+   * An employee submitted (or explicitly re-submitted) a client review forward
+   * to every ACTIVE manager — exactly once per real submission.
+   *
+   * `changeSummary`, when present, is the privacy-consistent review diff built
+   * by the caller (safe identity values only, never a phone/note/message).
+   */
+  async notifyClientReviewSubmitted(
+    tx: Prisma.TransactionClient,
+    actor: AuthUser,
+    event: 'CLIENT_REVIEW_SUBMITTED' | 'CLIENT_REVIEW_RESUBMITTED',
+    reviewId: string,
+    kind: 'CREATION' | 'EDIT',
+    changeSummary?: string,
+  ): Promise<void> {
+    const actorRow = await tx.user.findUnique({
+      where: { id: actor.id },
+      select: { name: true },
+    });
+    const managers = await this.activeUserIds(tx, Role.MANAGER, actor.id);
+    // ONE nonce for the whole business event: every manager receives the same
+    // deduplication key (the unique index is scoped by userId).
+    const nonce = randomUUID();
+    await this.deliver(
+      tx,
+      managers.map((userId) => ({
+        userId,
+        type: event,
+        title:
+          event === 'CLIENT_REVIEW_SUBMITTED'
+            ? CLIENT_REVIEW_TITLES.SUBMITTED
+            : CLIENT_REVIEW_TITLES.RESUBMITTED,
+        body: clientReviewManagerBody(
+          actorRow?.name ?? '',
+          event,
+          kind,
+          changeSummary,
+        ),
+        propertyId: null,
+        clientId: null,
+        clientReviewId: reviewId,
+        eventKey: clientReviewEventKeys.submission(event, reviewId, nonce),
+      })),
+    );
+  }
+
+  /**
+   * A manager decided a review → the requesting employee, keyed on
+   * (review, decision) so every retry of the SAME decision deduplicates
+   * while a genuinely new decision (changes → resubmit → approve) is new.
+   */
+  async notifyClientReviewDecision(
+    tx: Prisma.TransactionClient,
+    requesterId: string,
+    reviewId: string,
+    decision: ClientReviewDecision,
+    kind: 'CREATION' | 'EDIT',
+    clientId: string | null,
+  ): Promise<void> {
+    await this.deliver(tx, [
+      {
+        userId: requesterId,
+        type:
+          decision === 'APPROVED'
+            ? 'CLIENT_REVIEW_APPROVED'
+            : decision === 'REJECTED'
+              ? 'CLIENT_REVIEW_REJECTED'
+              : 'CLIENT_REVIEW_CHANGES_REQUESTED',
+        title:
+          decision === 'APPROVED'
+            ? kind === 'CREATION'
+              ? CLIENT_REVIEW_TITLES.APPROVED_CREATION
+              : CLIENT_REVIEW_TITLES.APPROVED_EDIT
+            : decision === 'REJECTED'
+              ? CLIENT_REVIEW_TITLES.REJECTED
+              : CLIENT_REVIEW_TITLES.CHANGES_REQUESTED,
+        body: clientReviewDecisionBody(decision, kind),
+        propertyId: null,
+        clientId,
+        clientReviewId: reviewId,
+        eventKey: clientReviewEventKeys.decision(decision, reviewId),
+      },
+    ]);
   }
 
   // ---------------------------------------------------------------------------
@@ -343,6 +665,20 @@ export class NotificationsService {
       viewer,
       items.map((row) => row.propertyId),
     );
+    // Follow-up subject deep links are exposed to the recipient that is
+    // authorized to open them: the responsible EMPLOYEE (late-warning and
+    // reminder rows are addressed to them) and the MANAGER monitors —
+    // creations/escalations addressed to managers open exactly that subject's
+    // read-only supervision history on /manager/followups.
+    const followUpSubjectVisibleFor = (type: (typeof items)[number]['type']) =>
+      viewer.role === Role.EMPLOYEE ||
+      (viewer.role === Role.MANAGER &&
+        (type === 'FOLLOWUP_CREATED' ||
+          type === 'FOLLOWUP_MANAGER_ESCALATION'));
+    const duplicateContexts = await this.potentialDuplicateContexts(
+      viewer,
+      items,
+    );
     return {
       items: items.map((row) =>
         toNotificationDto(
@@ -351,11 +687,12 @@ export class NotificationsService {
           {
             ...row,
             contactType: row.contact?.type ?? null,
-            propertyReference: row.property?.reference ?? null,
+            propertyReference:
+              row.property?.approvedReference ?? row.property?.reference ?? null,
           },
-          row.propertyId && visible.has(row.propertyId)
-            ? row.propertyId
-            : null,
+          row.propertyId && visible.has(row.propertyId) ? row.propertyId : null,
+          followUpSubjectVisibleFor(row.type) ? row.followUpSubjectId : null,
+          duplicateContexts.get(row.id) ?? null,
         ),
       ),
       nextCursor: hasMore ? (items[items.length - 1]?.id ?? null) : null,
@@ -363,6 +700,82 @@ export class NotificationsService {
   }
 
   /** How many of the caller's notifications are still unread. */
+  /**
+   * Read-time, Manager-only enrichment for POTENTIAL_DUPLICATE rows.
+   *
+   * Resolves the new property code, the similar existing property code (from
+   * the latest approval request's candidate ids), the submitting employee's
+   * display name and the property status. It never rewrites history and never
+   * exposes these identities to employees.
+   */
+  private async potentialDuplicateContexts(
+    viewer: AuthUser,
+    rows: { id: string; eventKey: string | null; propertyId: string | null }[],
+  ): Promise<Map<string, NotificationDuplicateContextDto>> {
+    const result = new Map<string, NotificationDuplicateContextDto>();
+    if (viewer.role !== Role.MANAGER) return result;
+    const duplicateRows = rows.filter(
+      (row) =>
+        row.eventKey?.startsWith('POTENTIAL_DUPLICATE:') && row.propertyId,
+    );
+    if (!duplicateRows.length) return result;
+
+    const propertyIds = [
+      ...new Set(duplicateRows.map((row) => row.propertyId as string)),
+    ];
+    const properties = await this.prisma.property.findMany({
+      where: { id: { in: propertyIds } },
+      select: {
+        id: true,
+        reference: true,
+        approvedReference: true,
+        status: true,
+        createdByUser: { select: { name: true } },
+        approvals: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { duplicateCandidateIds: true },
+        },
+      },
+    });
+    const propertyById = new Map(properties.map((p) => [p.id, p]));
+
+    const candidateIds = new Set<string>();
+    for (const property of properties) {
+      const ids = property.approvals[0]?.duplicateCandidateIds;
+      if (!Array.isArray(ids)) continue;
+      for (const id of ids) {
+        if (typeof id === 'string') candidateIds.add(id);
+      }
+    }
+    const candidates = candidateIds.size
+      ? await this.prisma.property.findMany({
+          where: { id: { in: [...candidateIds] } },
+          select: { id: true, reference: true, approvedReference: true },
+        })
+      : [];
+    const candidateById = new Map(
+      candidates.map((c) => [c.id, c.approvedReference ?? c.reference]),
+    );
+
+    for (const row of duplicateRows) {
+      const property = propertyById.get(row.propertyId as string);
+      const ids = property?.approvals[0]?.duplicateCandidateIds;
+      const firstCandidateId =
+        Array.isArray(ids) && typeof ids[0] === 'string' ? ids[0] : null;
+      result.set(row.id, {
+        newPropertyReference:
+          property?.approvedReference ?? property?.reference ?? null,
+        existingPropertyReference: firstCandidateId
+          ? (candidateById.get(firstCandidateId) ?? null)
+          : null,
+        employeeName: property?.createdByUser?.name ?? null,
+        status: property?.status ?? null,
+      });
+    }
+    return result;
+  }
+
   async unreadCount(viewer: AuthUser): Promise<UnreadCountDto> {
     const count = await this.prisma.notification.count({
       where: { userId: viewer.id, readAt: null },
@@ -410,7 +823,13 @@ export class NotificationsService {
     ];
     if (propertyIds.length === 0) return new Set();
     const visible = await this.prisma.property.findMany({
-      where: { id: { in: propertyIds }, ...propertyVisibilityWhere(viewer) },
+      where: {
+        id: { in: propertyIds },
+        // The creator may always open the decision notification for his OWN
+        // rejected/soft-deleted property (the read-only history endpoint still
+        // re-authorizes); every other viewer keeps the normal visibility rule.
+        OR: [propertyVisibilityWhere(viewer), { createdByUserId: viewer.id }],
+      },
       select: { id: true },
     });
     return new Set(visible.map((property) => property.id));

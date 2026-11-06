@@ -519,6 +519,27 @@ describe('toUpdatePropertyPayload', () => {
     expect(payload.version).toBe(7);
     expect(payload.listingType).toBe('SALE');
   });
+
+  it('sends an explicit null when the employee clears a stored field', () => {
+    const payload = toUpdatePropertyPayload(
+      baseForm({
+        governorate: '',
+        district: '',
+        block: '',
+        plotNumber: '',
+        area: '',
+        price: '',
+      }),
+      9,
+    );
+    // The server must receive the clear instead of keeping stale columns.
+    expect(payload.governorate).toBeNull();
+    expect(payload.district).toBeNull();
+    expect(payload.block).toBeNull();
+    expect(payload.plotNumber).toBeNull();
+    expect(payload.sizeSqm).toBeNull();
+    expect(payload.askingPrice).toBeNull();
+  });
 });
 
 describe('mapPropertyFromApi', () => {

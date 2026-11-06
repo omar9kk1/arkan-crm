@@ -42,6 +42,12 @@ export interface ClientDto {
   notes: string;
   source: string;
   status: string;
+  /**
+   * The structured wizard request document (opaque JSON string packed/owned by
+   * the frontend) or null when the row predates it or has no structured
+   * request — treated as "no structured request recorded yet".
+   */
+  requestData: string | null;
   /** Stable `User.id` of the responsible employee; null when unassigned. */
   responsibleUserId: string | null;
   responsibleEmployeeName: string | null;

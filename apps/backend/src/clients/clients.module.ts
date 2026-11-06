@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ClientsController } from './clients.controller';
 import { ClientsService } from './clients.service';
+import { ClientReviewsController } from './client-reviews.controller';
+import { ClientReviewsService } from './client-reviews.service';
 
 /**
  * CRM clients domain: authorised listing/search, detail, creation, editing,
@@ -11,7 +13,7 @@ import { ClientsService } from './clients.service';
  */
 @Module({
   imports: [NotificationsModule],
-  controllers: [ClientsController],
-  providers: [ClientsService],
+  controllers: [ClientsController, ClientReviewsController],
+  providers: [ClientsService, ClientReviewsService],
 })
 export class ClientsModule {}

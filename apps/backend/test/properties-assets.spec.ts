@@ -26,10 +26,12 @@ describeWithDatabase('Property images + EXCHANGE (storage, validation, mapping)'
   let employeeBToken: string;
   const api = () => request(ctx.app.getHttpServer());
 
+  let seq = 0;
   const payload = (overrides: Record<string, unknown> = {}) => ({
     listingType: 'SALE',
     district: 'السالمية',
     block: '5',
+    plotNumber: String(800000 + ++seq),
     newContact: { type: 'OWNER', name: 'Owner', phone: '22221111' },
     ...overrides,
   });
@@ -302,6 +304,39 @@ describeWithDatabase('Property images + EXCHANGE (storage, validation, mapping)'
       // `PushSubscription` table (additive only; existing sessions keep
       // working and simply carry no lineage).
       '20261021120000_push_subscriptions_and_session_lineage',
+      // Added by the wizard request-document hydration: an additive `requestData`
+      // text column on the client table only.
+      '20261021232825_client_request_data',
+      // Added by the OWNER-APPROVED client approval workflow: a new
+      // `ClientReviewRequest` table + partial unique indexes + `Notification.
+      // clientReviewId` FK + 5 appended ClientReviewKind/NotificationType
+      // enum values (no existing column or row is touched).
+      '20261022040000_client_review_requests',
+      // Added by the employee follow-ups: the durable `FollowUpSubject`/`FollowUpEntry`
+      // tables + 2 appended NotificationType values + the `Notification.
+      // followUpSubjectId` FK (additive only; no existing column or row touched).
+      '20261024120000_follow_up_subjects',
+      // Added by the MANAGER follow-ups (PREPARED — applied only where
+      // explicitly approved): nullable `responsibleUserId`/`authorUserId`
+      // user-level responsibility columns + `Client.createdByUserId` +
+      // `FollowUpReminder` audit table + 1 appended NotificationType value
+      // (additive only; every existing row keeps its exact current shape).
+      '20261025090000_manager_followups',
+      '20261026000000_manager_followup_notifications',
+      '20261030111823_property_registrants_priority',
+      '20261030111906_property_registrants_priority',
+      '20261030112154_priority_notification_type',
+      // Added by the Manager Trash: nullable soft-delete markers + the
+      // immutable `PropertyTombstone` table (additive only).
+      '20261104120000_property_trash_and_tombstone',
+      // Added by the employee-submitted owner lifecycle: the nullable
+      // `proposedOwner` JSON column, promoted to a real Contact only at
+      // approval.
+      '20261104130000_property_proposed_owner',
+      // Added by the P/A numbering: the nullable unique `approvedReference`
+      // column + the submission sequence row (existing rows are backfilled,
+      // never deleted).
+      '20261104160000_property_pa_numbering',
     ]);
   });
 });

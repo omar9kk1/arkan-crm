@@ -63,4 +63,16 @@ export const environmentSchema = Joi.object({
   PUSH_VAPID_PUBLIC_KEY: Joi.string().optional().allow(''),
   PUSH_VAPID_PRIVATE_KEY: Joi.string().optional().allow(''),
   PUSH_VAPID_SUBJECT: Joi.string().optional().allow(''),
+  // Employee follow-ups scheduling (task §4/§7) — centralized, optional,
+  // validated hours/minutes. Defaults live in `followup-schedule.ts` and match
+  // the product requirement exactly (property 72/96/120h, client 120/144/168h,
+  // background scan every 15 minutes).
+  FOLLOWUP_PROPERTY_INTERVAL_HOURS: Joi.number().integer().min(1).optional(),
+  FOLLOWUP_PROPERTY_EMPLOYEE_WARN_HOURS: Joi.number().integer().min(1).optional(),
+  FOLLOWUP_PROPERTY_MANAGER_ESCALATE_HOURS: Joi.number().integer().min(1).optional(),
+  FOLLOWUP_CLIENT_INTERVAL_HOURS: Joi.number().integer().min(1).optional(),
+  FOLLOWUP_CLIENT_EMPLOYEE_WARN_HOURS: Joi.number().integer().min(1).optional(),
+  FOLLOWUP_CLIENT_MANAGER_ESCALATE_HOURS: Joi.number().integer().min(1).optional(),
+  FOLLOWUP_SCAN_MINUTES: Joi.number().integer().min(1).optional(),
+  FOLLOWUP_REMINDER_COOLDOWN_HOURS: Joi.number().integer().min(1).optional(),
 });

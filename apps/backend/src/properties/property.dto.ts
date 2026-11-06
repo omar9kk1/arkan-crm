@@ -38,7 +38,12 @@ export interface ContactSummaryDto {
 /** The privacy-safe shape returned to any authorized viewer. */
 export interface PublicPropertyDto {
   id: string;
+  /** The ACTIVE display code: A-code when approved, P-code while pending. */
   reference: string;
+  /** The original submission code (P-000001) kept for history/traceability. */
+  submissionReference: string;
+  /** The official A-code, or null while no approval has happened. */
+  approvedReference: string | null;
   title: string;
   listingType: DealType;
   status: PropertyStatus;
@@ -76,6 +81,12 @@ export interface PublicPropertyDto {
    * row after the manager approves it.
    */
   isMine: boolean;
+  /** Public within the sales team: name of the current priority holder, if any. */
+  priorityHolderName: string | null;
+  /** Soft-delete markers (null on active rows). Manager Trash only. */
+  deletedAt: string | null;
+  deletedByName: string | null;
+  deletionReason: string | null;
 }
 
 /**
@@ -96,6 +107,15 @@ export interface PrivatePropertyDto extends PublicPropertyDto {
    * changes (`Property.status` alone cannot express this).
    */
   reviewStatus: ApprovalStatus | null;
+  /** Manager-only: possible duplicate candidate property IDs from latest approval. */
+  duplicateCandidateIds: string[] | null;
+  /** Provisional owner staged by an employee submission (promoted on approval). */
+  proposedOwner: {
+    type: ContactType;
+    name: string;
+    phone: string;
+    notes: string | null;
+  } | null;
 }
 
 export type PropertyViewDto = PublicPropertyDto | PrivatePropertyDto;

@@ -36,6 +36,9 @@ export interface EmployeeDto {
   propertyCount: number;
   propertiesByStatus: Record<PropertyStatus, number>;
   properties: EmployeePropertyDto[];
+  clientsCount: number;
+  assignedCount: number;
+  lateCount: number;
 }
 
 export interface EmployeeListDto {

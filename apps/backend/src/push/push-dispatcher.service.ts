@@ -31,6 +31,8 @@ export class PushDispatcherService implements OnModuleInit, OnModuleDestroy {
   private readonly attempts = new Map<string, number>();
   private readonly pending: PushableNotification[] = [];
   private timer: NodeJS.Timeout | null = null;
+  /** True while a pass is failing, so an outage logs once instead of every tick. */
+  private failing = false;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -45,7 +47,7 @@ export class PushDispatcherService implements OnModuleInit, OnModuleDestroy {
     // background timer never races the assertions.
     if (process.env.NODE_ENV === 'test') return;
     this.timer = setInterval(() => {
-      void this.runOnce();
+      void this.safeRunOnce();
     }, 3000);
     this.timer.unref?.();
   }
@@ -80,6 +82,9 @@ export class PushDispatcherService implements OnModuleInit, OnModuleDestroy {
         clientId: row.clientId,
         contactId: row.contactId,
         contactType: row.contact?.type ?? null,
+        clientReviewId: row.clientReviewId,
+        followUpSubjectId: row.followUpSubjectId,
+        eventKey: row.eventKey,
         createdAt: row.createdAt,
       }));
 
@@ -100,6 +105,30 @@ export class PushDispatcherService implements OnModuleInit, OnModuleDestroy {
         else this.logger.warn(`Giving up on push for notification ${row.id}`);
       }
       if (row.createdAt > (this.since ?? since)) this.since = row.createdAt;
+    }
+  }
+
+  /**
+   * Timer wrapper: a transient database failure (for example after the machine
+   * resumes from sleep) must not become an unhandled rejection that kills the
+   * whole API. Log once per outage, retry on the next tick, and log recovery.
+   */
+  private async safeRunOnce(): Promise<void> {
+    try {
+      await this.runOnce();
+      if (this.failing) {
+        this.failing = false;
+        this.logger.log('Push dispatcher recovered after a failed pass.');
+      }
+    } catch (error) {
+      if (!this.failing) {
+        this.failing = true;
+        this.logger.error(
+          `Push dispatcher pass failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
     }
   }
 

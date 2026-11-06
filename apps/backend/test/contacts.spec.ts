@@ -25,6 +25,8 @@ describeWithDatabase('Contacts API (real authorization, isolated DB)', () => {
   let employeeBToken: string;
   const api = () => request(ctx.app.getHttpServer());
 
+  let contactPropSeq = 0;
+
   beforeAll(async () => {
     ctx = await createTestApp();
     await resetDatabase(ctx.prisma);
@@ -177,6 +179,8 @@ describeWithDatabase('Contacts API (real authorization, isolated DB)', () => {
       {
         listingType: 'SALE',
         district: 'غرناطة',
+          plotNumber: String(700000 + ++contactPropSeq),
+          block: '3',
         contactId: ownedByA.body.data.id,
       },
       [{ buffer: pngBytes(), filename: 'a.png' }],
@@ -550,12 +554,23 @@ describeWithDatabase('Contacts API (real authorization, isolated DB)', () => {
         {
           listingType: 'SALE',
           district: 'غرناطة',
+          plotNumber: String(700000 + ++contactPropSeq),
+          block: '3',
           newContact: { type: 'OWNER', name: 'Reused Owner', phone: '65551111' },
         },
         image,
       );
       expect(first.status).toBe(201);
-      const ownerId = first.body.data.contactId as string;
+      // The owner is provisional until the Manager approves the property.
+      expect(first.body.data.contactId).toBeNull();
+      await api()
+        .post(`/properties/${first.body.data.id}/approve`)
+        .set(auth(managerToken))
+        .send({});
+      const approvedFirst = await ctx.prisma.property.findUniqueOrThrow({
+        where: { id: first.body.data.id },
+      });
+      const ownerId = approvedFirst.contactId as string;
       expect(ownerId).toBeTruthy();
 
       // Second property: the wizard picks the EXISTING owner (same id), so no
@@ -566,6 +581,8 @@ describeWithDatabase('Contacts API (real authorization, isolated DB)', () => {
         {
           listingType: 'SALE',
           district: 'غرناطة',
+          plotNumber: String(700000 + ++contactPropSeq),
+          block: '3',
           contactId: ownerId,
         },
         image,
@@ -592,17 +609,22 @@ describeWithDatabase('Contacts API (real authorization, isolated DB)', () => {
         {
           listingType: 'SALE',
           district: 'غرناطة',
+          plotNumber: String(700000 + ++contactPropSeq),
+          block: '3',
           newContact: { type: 'OWNER', name: 'Edit Owner', phone: '65552222' },
         },
         image,
       );
       const id = created.body.data.id as string;
-      const ownerId = created.body.data.contactId as string;
+      // The owner is provisional until approval; read the promoted contactId
+      // AFTER the Manager approves.
+      expect(created.body.data.contactId).toBeNull();
       await api()
         .post(`/properties/${id}/approve`)
         .set(auth(managerToken))
         .send({});
       const row = await ctx.prisma.property.findUniqueOrThrow({ where: { id } });
+      const ownerId = row.contactId as string;
       const contactsBefore = await ctx.prisma.contact.count();
 
       // The fixed wizard re-sends the SAME contactId (never `newContact`).
@@ -625,6 +647,8 @@ describeWithDatabase('Contacts API (real authorization, isolated DB)', () => {
         {
           listingType: 'SALE',
           district: 'غرناطة',
+          plotNumber: String(700000 + ++contactPropSeq),
+          block: '3',
           newContact: { type: 'OWNER', name: 'Cycle Owner', phone: '65553333' },
         },
         image,
@@ -668,6 +692,8 @@ describeWithDatabase('Contacts API (real authorization, isolated DB)', () => {
         {
           listingType: 'SALE',
           district: 'غرناطة',
+          plotNumber: String(700000 + ++contactPropSeq),
+          block: '3',
           contactId: ownedByA.body.data.id,
         },
         [{ buffer: pngBytes(), filename: 'b.png' }],
@@ -697,6 +723,8 @@ describeWithDatabase('Contacts API (real authorization, isolated DB)', () => {
         {
           listingType: 'SALE',
           district: 'غرناطة',
+          plotNumber: String(700000 + ++contactPropSeq),
+          block: '3',
           contactId: '0f0f0f0f-1a1a-4b4b-8c8c-2d2d2d2d2d2d',
         },
         image,

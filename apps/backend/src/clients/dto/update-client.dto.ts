@@ -57,4 +57,30 @@ export class UpdateClientDto {
   @ValidateNested({ each: true })
   @Type(() => PropertyInterestInputDto)
   propertyInterests?: PropertyInterestInputDto[];
+
+  /**
+   * The structured wizard request document for this client (packed by the
+   * frontend, stored opaquely — see `client-request-data.ts`). `null` clears
+   * the structured request; omitted leaves it unchanged. The service rejects
+   * a value that is not valid JSON and keeps the summary decode tolerant.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(20000)
+  requestData?: string | null;
+
+  /**
+   * Explicit interest REMOVAL choices of the wizard edit save: the
+   * `Property.id`s whose recorded interest the user abandoned. Removal is
+   * confined to the (already authorised) client row — the delete answers
+   * silently even for ids not currently linked.
+   */
+  @IsOptional()
+  @ArrayMaxSize(10)
+  @IsString({ each: true })
+  @Matches(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, {
+    each: true,
+    message: 'removePropertyInterestIds entries must be UUIDs',
+  })
+  removePropertyInterestIds?: string[];
 }

@@ -128,6 +128,7 @@ describe('Auth HTTP flow (Prisma test double)', () => {
         isActive: true,
         createdAt: new Date(),
         updatedAt: new Date(),
+        notifyEmployeeFollowUps: false,
       });
     }
     const module = await Test.createTestingModule({

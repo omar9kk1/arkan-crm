@@ -87,11 +87,12 @@ describeWithDatabase('Web Push (manager devices)', () => {
     return response.status;
   };
 
-  const createClient = async (token: string) => {
+  /** Stages a client CREATION review — the event manager devices receive. */
+  const stageReview = async (token: string) => {
     const response = await api()
-      .post('/clients')
+      .post('/client-reviews')
       .set(auth(token))
-      .send({ name: 'زبون الدفع', phone: '65119999' });
+      .send({ kind: 'CREATION', name: 'زبون الدفع', phone: '65119999' });
     expect(response.status).toBe(201);
     return response.body.data as { id: string };
   };
@@ -151,7 +152,7 @@ describeWithDatabase('Web Push (manager devices)', () => {
     expect(await subscribe(mobile.accessToken, MOBILE_ENDPOINT)).toBe(200);
 
     const employee = await loginAs(employeeEmail);
-    const client = await createClient(employee.accessToken);
+    const review = await stageReview(employee.accessToken);
     await dispatch();
 
     expect(pushedEndpoints().sort()).toEqual(
@@ -160,9 +161,10 @@ describeWithDatabase('Web Push (manager devices)', () => {
     const payload = JSON.parse(
       webpush.sendNotification.mock.calls[0]?.[1] as string,
     ) as { title: string; body: string; url: string };
-    expect(payload.title).toBe('عميل جديد');
+    expect(payload.title).toBe('طلب عميل بانتظار المراجعة');
     expect(payload.body).toContain('موظف الدفع');
-    expect(payload.url).toBe(`/manager/clients?client=${client.id}`);
+    // A pending CREATION review deep-links to the REVIEW (no client yet).
+    expect(payload.url).toBe(`/manager/clients?client-review=${review.id}`);
     // No private client data ever travels in a push preview.
     expect(JSON.stringify(payload)).not.toContain('65119999');
     expect(JSON.stringify(payload)).not.toContain('زبون الدفع');
@@ -185,7 +187,7 @@ describeWithDatabase('Web Push (manager devices)', () => {
     }
 
     const employee = await loginAs(employeeEmail);
-    await createClient(employee.accessToken);
+    await stageReview(employee.accessToken);
     await dispatch();
 
     expect(pushedEndpoints()).toEqual([DESKTOP_ENDPOINT]);
@@ -205,7 +207,7 @@ describeWithDatabase('Web Push (manager devices)', () => {
     expect(loggedOut.status).toBe(200);
 
     const employee = await loginAs(employeeEmail);
-    await createClient(employee.accessToken);
+    await stageReview(employee.accessToken);
     await dispatch();
 
     // Only the still-signed-in device is pushed to.
@@ -239,7 +241,7 @@ describeWithDatabase('Web Push (manager devices)', () => {
 
     // The lineage has no live session left, so no push can be delivered.
     const employee = await loginAs(employeeEmail);
-    await createClient(employee.accessToken);
+    await stageReview(employee.accessToken);
     await dispatch();
     expect(pushedEndpoints()).toEqual([]);
     expect(
@@ -262,7 +264,7 @@ describeWithDatabase('Web Push (manager devices)', () => {
       data: { role: 'EMPLOYEE' },
     });
     const employee = await loginAs(employeeEmail);
-    await createClient(employee.accessToken);
+    await stageReview(employee.accessToken);
     await dispatch();
     expect(pushedEndpoints()).toEqual([]);
 
@@ -276,7 +278,7 @@ describeWithDatabase('Web Push (manager devices)', () => {
     webpush.sendNotification.mockClear();
     const other = await loginAs(otherManagerEmail);
     expect(await subscribe(other.accessToken, MOBILE_ENDPOINT)).toBe(200);
-    await createClient(employee.accessToken);
+    await stageReview(employee.accessToken);
     await dispatch();
     expect(pushedEndpoints()).not.toContain(DESKTOP_ENDPOINT);
     expect(pushedEndpoints()).toContain(MOBILE_ENDPOINT);
@@ -302,7 +304,7 @@ describeWithDatabase('Web Push (manager devices)', () => {
     // The event is delivered ONCE to the shared endpoint (not once per
     // account that ever used it).
     const employee = await loginAs(employeeEmail);
-    await createClient(employee.accessToken);
+    await stageReview(employee.accessToken);
     await dispatch();
     expect(
       pushedEndpoints().filter((endpoint) => endpoint === SHARED_ENDPOINT),
@@ -325,7 +327,7 @@ describeWithDatabase('Web Push (manager devices)', () => {
     ).toBe(0);
 
     const employee = await loginAs(employeeEmail);
-    await createClient(employee.accessToken);
+    await stageReview(employee.accessToken);
     await dispatch();
     expect(pushedEndpoints()).toEqual([]);
   });
@@ -400,7 +402,7 @@ describeWithDatabase('Web Push (manager devices)', () => {
 
     // And the re-bound device keeps receiving pushes.
     const employee = await loginAs(employeeEmail);
-    await createClient(employee.accessToken);
+    await stageReview(employee.accessToken);
     await dispatch();
     expect(pushedEndpoints()).toEqual([DESKTOP_ENDPOINT]);
   });

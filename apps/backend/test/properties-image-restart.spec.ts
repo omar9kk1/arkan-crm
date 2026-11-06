@@ -33,6 +33,8 @@ describeWithDatabase('Property image durability across application restart', () 
       {
         listingType: 'SALE',
         district: 'الفنطاس',
+        block: '7',
+        plotNumber: '4242',
         newContact: { type: 'OWNER', name: 'Owner', phone: '22223333' },
       },
       [{ buffer: pngBytes(2048), filename: 'photo.png' }],

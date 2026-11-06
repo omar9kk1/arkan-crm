@@ -17,12 +17,20 @@ export interface NotificationDraft {
   clientId?: string | null;
   contactId?: string | null;
   followUpId?: string | null;
+  /** Deep-link column for client review workflow rows. */
+  clientReviewId?: string | null;
   /**
    * Deduplication key for one occurrence of one event. Combined with `userId` in
    * a database unique index, so the same event can never notify the same person
    * twice.
    */
   eventKey: string;
+  /**
+   * Employee follow-up escalation deep link (nullable — every other event type
+   * leaves it unset). The recipient is the subject's responsible employee by
+   * construction; the inbox masks the column for managers.
+   */
+  followUpSubjectId?: string | null;
 }
 
 /**
@@ -63,9 +71,13 @@ export interface PropertyEventContext {
 export const PROPERTY_EVENT_TITLES = {
   SUBMITTED: 'عقار جديد بانتظار المراجعة',
   CHANGES_REQUESTED: 'مطلوب تعديل بيانات العقار',
-  REJECTED: 'تم رفض العقار',
+  REJECTED: 'تم رفض تسجيل العقار',
+  TRASHED: 'تم حذف العقار بقرار المدير',
+  RESTORED: 'تم استعادة العقار',
   RESUBMITTED: 'تمت إعادة إرسال عقار للمراجعة',
   RESUBMITTED_UPDATED: 'عقار مُعدّل بانتظار موافقتك',
+  EDITED: 'تم تعديل عقار تحت المراجعة',
+  DUPLICATE_ATTEMPT: 'محاولة تسجيل عقار مكرر',
   APPROVED: 'تمت الموافقة على عقارك',
   AVAILABLE: 'عقار جديد متاح في البرنامج',
   AVAILABLE_UPDATED: 'تم تعديل عقار وأصبح متاحًا',
@@ -100,10 +112,32 @@ export const notificationEventKeys = {
   submitted: (propertyId: string) => `PROPERTY_SUBMITTED:${propertyId}`,
   resubmitted: (approvalRequestId: string | null, propertyId: string) =>
     `PROPERTY_RESUBMITTED:${approvalRequestId ?? propertyId}`,
+  /**
+   * One employee edit of a PENDING property. The version AFTER the save is the
+   * occurrence id: a retried request that changed nothing is rejected by the
+   * optimistic-version guard, so the same save can never notify twice, while
+   * every genuinely new save gets its own key.
+   */
+  edited: (propertyId: string, version: number) =>
+    `PROPERTY_EDITED:${propertyId}:v${version}`,
+  /**
+   * One blocked registration attempt against an existing property. The
+   * fingerprint covers the real identifying fields, so an identical retry is
+   * deduplicated while a materially changed attempt becomes a new event.
+   */
+  duplicateAttempt: (
+    propertyId: string,
+    employeeId: string,
+    fingerprint: string,
+  ) =>
+    `DUPLICATE_ATTEMPT:${propertyId}:${employeeId}:${fingerprint}`,
   changesRequested: (approvalRequestId: string | null, propertyId: string) =>
     `PROPERTY_CHANGES_REQUESTED:${approvalRequestId ?? propertyId}`,
   rejected: (approvalRequestId: string | null, propertyId: string) =>
     `PROPERTY_REJECTED:${approvalRequestId ?? propertyId}`,
+  trashed: (propertyId: string) => `PROPERTY_TRASHED:${propertyId}`,
+  restored: (propertyId: string, trashedAt: Date) =>
+    `PROPERTY_RESTORED:${propertyId}:${trashedAt.getTime()}`,
   approved: (
     approvalRequestId: string | null,
     propertyId: string,
@@ -154,12 +188,20 @@ export interface RecordEventContext {
   contactType?: ContactType;
   /** Refined wording for the client-creation event (persisted data only). */
   clientIntent?: ClientIntent;
+  /**
+   * The privacy-safe Arabic summary of the changed client fields, built by the
+   * writer itself (e.g. `الاسم: من أحمد إلى محمد، تم تغيير رقم الهاتف`).
+   * Value contents are shown ONLY for plain identity fields — the phone, the
+   * notes and the responsible employee never travel, only the fact that they
+   * changed.
+   */
+  clientChangeSummary?: string;
 }
 
 /** Exact Arabic title for every record event — one source of truth. */
 export const RECORD_EVENT_TITLES: Record<EmployeeRecordEvent, string> = {
   CLIENT_CREATED: 'عميل جديد',
-  CLIENT_UPDATED: 'تحديث بيانات عميل',
+  CLIENT_UPDATED: 'تم تعديل بيانات عميل',
   CLIENT_INTEREST_UPDATED: 'استفسار عقاري جديد',
   FOLLOWUP_CREATED: 'متابعة جديدة',
   CONTACT_CREATED: 'جهة اتصال جديدة',
@@ -213,6 +255,7 @@ export function recordEventBody(
   event: EmployeeRecordEvent,
   contactType?: ContactType,
   clientIntent?: ClientIntent,
+  clientChangeSummary?: string,
 ): string {
   const actor = actorName.trim() || 'موظف';
   if (event === 'CLIENT_CREATED') {
@@ -222,7 +265,11 @@ export function recordEventBody(
   const kind: string = contactType === 'BROKER' ? 'وسيط' : 'مالك';
   switch (event) {
     case 'CLIENT_UPDATED':
-      return `${actor} — عدّل بيانات عميل`;
+      // The summary lists the REAL changed field names, with old → new values
+      // for the safe concise ones; sensitive fields appear as a fact only.
+      return clientChangeSummary
+        ? `${actor} — عدّل: ${clientChangeSummary}`
+        : `${actor} — عدّل بيانات عميل`;
     case 'CLIENT_INTEREST_UPDATED':
       return `${actor} — سجّل استفسارًا عقاريًا لعميل`;
     case 'FOLLOWUP_CREATED':
@@ -249,3 +296,276 @@ export const recordEventKeys = {
   occurrence: (event: EmployeeRecordEvent, entityId: string, nonce: string) =>
     `${event}:${entityId}:${nonce}`,
 } as const;
+
+// ---------------------------------------------------------------------------
+// Employee follow-up save (the manager fan-out wording)
+// ---------------------------------------------------------------------------
+
+/** Follow-up subject categories; plain duplicates of the follow-up store's. */
+export type FollowUpEventSubjectKind =
+  'PROPERTY_OWNER' | 'CLIENT_REQUEST' | 'INQUIRY' | 'CLIENT';
+
+/** The structured wizard request type that one `CLIENT_REQUEST` subject keys on. */
+export type FollowUpEventRequestType = 'BUYER' | 'RENTER' | 'EXCHANGER';
+
+/**
+ * What the follow-up writer already knows about ONE committed subject.
+ * Everything is authoritative persisted data (the target key's own structure,
+ * the related row's fields) — never inferred from free text or a name.
+ */
+export interface FollowUpEventSubject {
+  kind: FollowUpEventSubjectKind;
+  requestType?: FollowUpEventRequestType | null;
+  /** The person's OWN registry type (owner vs broker contact card). */
+  personType?: ContactType | null;
+  /** Human name of the actual person the follow-up is WITH (never a phone). */
+  personName?: string | null;
+  /** The subject's property code (`A-000123`), when one exists. */
+  propertyReference?: string | null;
+}
+
+/** Neutral wording when the subject carries no classifiable identity at all. */
+const FOLLOWUP_CREATED_FALLBACK = 'متابعة جديدة';
+
+const FOLLOWUP_REQUEST_PERSON_ROLES: Record<FollowUpEventRequestType, string> =
+  {
+    BUYER: 'المشتري',
+    RENTER: 'المستأجر',
+    EXCHANGER: 'مبدل عقار',
+  };
+
+const FOLLOWUP_REQUEST_DETAILS: Record<FollowUpEventRequestType, string> = {
+  BUYER: 'طلب شراء',
+  RENTER: 'طلب إيجار',
+  EXCHANGER: 'طلب بدل',
+};
+
+/**
+ * The exact body of the employee-follow-up notification: WHICH person the
+ * follow-up is with (real role + name from persisted data) and WHICH record it
+ * concerns (property code / structured request), never a blanket «عميل».
+ *
+ * Categories with no reliable identity fall back to the neutral
+ * «متابعة جديدة» — a legacy/ambiguous subject is never shoehorned into one
+ * wrong category. Phones, notes and review text never travel; the name and
+ * property code are already visible to every manager in the authorized feed.
+ */
+export function followUpCreatedBody(
+  actorName: string,
+  subject: FollowUpEventSubject,
+): string {
+  const actor = actorName.trim() || 'موظف';
+  const name = subject.personName?.trim() || null;
+  const reference = subject.propertyReference?.trim() || null;
+
+  if (
+    subject.kind === 'PROPERTY_OWNER' &&
+    (subject.personType === 'OWNER' || subject.personType === 'BROKER')
+  ) {
+    // The person's OWN registry type decides مالك/وسيط; the subject type alone
+    // (owner-side property) never does.
+    const role = subject.personType === 'BROKER' ? 'الوسيط' : 'المالك';
+    const phrase = name ? `${role} ${name}` : role;
+    // The owner example carries its property code; the broker sentence stays
+    // as specified.
+    const detail =
+      subject.personType === 'OWNER' && reference
+        ? ` بخصوص العقار ${reference}`
+        : '';
+    return `سجّل ${actor} متابعة مع ${phrase}${detail}.`;
+  }
+
+  if (
+    subject.kind === 'CLIENT_REQUEST' &&
+    subject.requestType &&
+    subject.requestType in FOLLOWUP_REQUEST_PERSON_ROLES
+  ) {
+    const type = subject.requestType;
+    const role = FOLLOWUP_REQUEST_PERSON_ROLES[type];
+    const phrase = name ? `${role} ${name}` : role;
+    return `سجّل ${actor} متابعة مع ${phrase} بخصوص ${FOLLOWUP_REQUEST_DETAILS[type]}.`;
+  }
+
+  if (subject.kind === 'INQUIRY') {
+    const phrase = name ? `العميل ${name}` : 'العميل';
+    const detail = reference
+      ? `بخصوص استفسار العقار ${reference}`
+      : 'بخصوص استفسار';
+    return `سجّل ${actor} متابعة مع ${phrase} ${detail}.`;
+  }
+
+  // Legacy `CLIENT` subjects, malformed keys and any unknown shape: the
+  // neutral fallback, never a guessed category.
+  return name
+    ? `سجّل ${actor} ${FOLLOWUP_CREATED_FALLBACK} مع ${name}.`
+    : `سجّل ${actor} ${FOLLOWUP_CREATED_FALLBACK}.`;
+}
+
+// ---------------------------------------------------------------------------
+// Client review workflow (employee submissions awaiting manager approval)
+// ---------------------------------------------------------------------------
+
+/** Client review workflow events. */
+export type ClientReviewEvent =
+  | 'CLIENT_REVIEW_SUBMITTED'
+  | 'CLIENT_REVIEW_RESUBMITTED'
+  | 'CLIENT_REVIEW_APPROVED'
+  | 'CLIENT_REVIEW_REJECTED'
+  | 'CLIENT_REVIEW_CHANGES_REQUESTED';
+
+export type ClientReviewDecision = 'APPROVED' | 'REJECTED' | 'CHANGES_REQUESTED';
+
+/** Exact Arabic copy — one source of truth for the wording. */
+export const CLIENT_REVIEW_TITLES = {
+  SUBMITTED: 'طلب عميل بانتظار المراجعة',
+  RESUBMITTED: 'طلب عميل أعيد إرساله للمراجعة',
+  APPROVED_CREATION: 'تمت الموافقة على إضافة عميل',
+  APPROVED_EDIT: 'تمت الموافقة على تعديل بيانات عميل',
+  REJECTED: 'تم رفض طلب العميل',
+  CHANGES_REQUESTED: 'مطلوب تعديل طلب العميل',
+} as const;
+
+/**
+ * The short privacy-safe body of a submission/resubmission event for the
+ * managers. It names the requester (already a visible manager fact), states
+ * the fact, and may carry the same privacy-consistent change summary the
+ * review UI shows — values for safe identity fields only, and NEVER a phone
+ * number, a note text or a submission note.
+ */
+export function clientReviewManagerBody(
+  actorName: string,
+  event: 'CLIENT_REVIEW_SUBMITTED' | 'CLIENT_REVIEW_RESUBMITTED',
+  kind: 'CREATION' | 'EDIT',
+  changeSummary?: string,
+): string {
+  const actor = actorName.trim() || 'موظف';
+  const action =
+    event === 'CLIENT_REVIEW_RESUBMITTED'
+      ? kind === 'CREATION'
+        ? 'أعد إرسال طلب عميل للمراجعة'
+        : 'أعد إرسال تعديلات عميل للمراجعة'
+      : kind === 'CREATION'
+        ? 'أرسل طلب إضافة عميل جديد'
+        : 'أرسل تعديلات على بيانات عميل';
+  return changeSummary ? `${actor} — ${action} — ${changeSummary}` : `${actor} — ${action}`;
+}
+
+/**
+ * The short body of a decision event for the requesting employee: the FACT of
+ * the decision only — never the reviewer's name, never a replay of the data.
+ */
+export function clientReviewDecisionBody(
+  decision: ClientReviewDecision,
+  kind: 'CREATION' | 'EDIT',
+): string {
+  switch (decision) {
+    case 'APPROVED':
+      return kind === 'CREATION'
+        ? 'وافقت الإدارة على طلب إضافة العميل.'
+        : 'وافقت الإدارة على تعديلات بيانات العميل.';
+    case 'REJECTED':
+      return 'رُفض طلب العميل. راجع ملاحظات المراجعة.';
+    case 'CHANGES_REQUESTED':
+      return 'مطلوب تعديل طلب العميل قبل اعتماده.';
+  }
+}
+
+/** Deduplication keys of the review events (per real occurrence). */
+export const clientReviewEventKeys = {
+  submission: (
+    event: 'CLIENT_REVIEW_SUBMITTED' | 'CLIENT_REVIEW_RESUBMITTED',
+    reviewId: string,
+    nonce: string,
+  ) => `${event}:${reviewId}:${nonce}`,
+  decision: (
+    decision: ClientReviewDecision,
+    reviewId: string,
+  ) => `CLIENT_REVIEW_DECIDED:${reviewId}:${decision}`,
+} as const;
+
+// ---------------------------------------------------------------------------
+// Employee follow-ups late escalations (background scheduler)
+// ---------------------------------------------------------------------------
+
+/** Follow-up escalation events (task §7). */
+export type FollowUpLateEvent = 'FOLLOWUP_EMPLOYEE_LATE' | 'FOLLOWUP_MANAGER_ESCALATION';
+
+/** Exact Arabic copy — one source of truth for the wording. */
+export const FOLLOWUP_EVENT_TITLES: Record<FollowUpLateEvent, string> = {
+  FOLLOWUP_EMPLOYEE_LATE: 'متابعة متأخرة',
+  FOLLOWUP_MANAGER_ESCALATION: 'تأخر متابعة موظف',
+};
+
+/**
+ * The employee's own warning body: WHICH person/property/request needs the
+ * follow-up and for how long it is late (task §7). The recipient is the
+ * subject's responsible employee — the person already authorized to read that
+ * exact subject — so naming the person/property here is not a side channel.
+ */
+export function followUpEmployeeBody(
+  label: string,
+  overdueDuration: string,
+): string {
+  return `${label} — متابعة متأخرة ${overdueDuration} عن موعدها.`;
+}
+
+/**
+ * The manager escalation body: responsible employee, authorized subject
+ * identity, due date (Kuwait day) and lateness duration (task §7). Recipients
+ * are the active managers, who are authorized for company records by design.
+ */
+export function followUpManagerBody(input: {
+  employeeName: string;
+  label: string;
+  dueDay: string;
+  overdueDuration: string;
+}): string {
+  const employee = input.employeeName.trim() || 'موظف';
+  return `${employee} — متابعة متأخرة: ${input.label}، استحقت ${input.dueDay}، متأخر ${input.overdueDuration}.`;
+}
+
+/**
+ * Per-recipient deduplication keys: one key per SUBJECT per CYCLE. The cycle
+ * counter only advances when a genuinely new follow-up note is saved, so the
+ * same threshold can never notify twice within a cycle — retries, duplicate
+ * jobs and restarts all collapse into the same `(userId, eventKey)` unique.
+ */
+export const followUpEventKeys = {
+  employeeLate: (subjectId: string, cycle: number) =>
+    `FOLLOWUP_EMPLOYEE_LATE:${subjectId}:${cycle}`,
+  managerEscalation: (subjectId: string, cycle: number) =>
+    `FOLLOWUP_MANAGER_ESCALATION:${subjectId}:${cycle}`,
+} as const;
+
+// ---------------------------------------------------------------------------
+// Manual manager reminder of ONE overdue employee follow-up
+// ---------------------------------------------------------------------------
+
+/** Exact Arabic title of the manual reminder event. */
+export const FOLLOWUP_REMINDER_TITLE = 'تذكير من الإدارة' as const;
+
+/**
+ * The reminder body: WHO is reminding (the actual manager), WHICH subject and
+ * for how long it has been overdue (task §6: identity + duration, never a
+ * fabricated conversation). The recipient is the subject's responsible
+ * employee — the only person authorized for the subject — so the wording is
+ * not a side channel for anyone else's data.
+ */
+export function followUpReminderBody(input: {
+  managerName: string;
+  hint: string;
+  overdueDuration: string;
+}): string {
+  const manager = input.managerName.trim() || 'الإدارة';
+  return `${manager} يذكّرك بمتابعة متأخرة: ${input.hint} — متأخرة ${input.overdueDuration} عن موعدها.`;
+}
+
+/**
+ * The reminder's cooldown-window dedup keys — one key per SUBJECT per window,
+ * shared by the `FollowUpReminder` audit row and the `Notification` row. Two
+ * concurrent clicks land on ONE window, and the database unique keys collapse
+ * them into a single sent reminder (persistent server-side throttling §6).
+ */
+export function followUpReminderEventKey(subjectId: string, window: number): string {
+  return `FOLLOWUP_EMPLOYEE_REMINDER:${subjectId}:${window}`;
+}

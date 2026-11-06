@@ -17,8 +17,11 @@ import { Role, type AuthUser } from '@arkan/shared';
 export function propertyVisibilityWhere(
   viewer: AuthUser,
 ): Prisma.PropertyWhereInput {
-  if (viewer.role === Role.MANAGER) return {};
+  // Soft-deleted (Trash) rows are invisible to EVERY normal read path,
+  // including managers. Only the explicit Trash endpoints bypass this filter.
+  if (viewer.role === Role.MANAGER) return { deletedAt: null };
   return {
+    deletedAt: null,
     OR: [
       { status: PropertyStatus.AVAILABLE },
       {
