@@ -116,9 +116,14 @@
 .sidebarFooter {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: var(--space-3);
   padding: var(--space-4);
   border-top: 1px solid var(--border);
+  text-align: center;
+  font-size: var(--text-caption);
+  color: var(--muted);
+  line-height: 1.6;
 }
 .sidebarFooter strong {
   font-size: var(--text-small);
@@ -156,12 +161,21 @@
   box-shadow: var(--shadow-card);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
+  max-width: var(--manager-content-width);
+  margin-inline: auto;
 }
 .topbarTitle {
   display: grid;
   gap: var(--space-1);
   min-width: 0;
   flex: 1 1 200px;
+}
+/* Topbar WITHOUT the title block (route-specific): keep the account group
+   at the container's inline-end edge — visually identical to where it sat
+   while the flex-growing title filled the leading space (RTL row: flex-end
+   = the visual left, exactly the account's previous position). */
+.topbarEnd {
+  justify-content: flex-end;
 }
 .overline {
   color: var(--muted);
@@ -460,4 +474,29 @@
   .moreHeader p {
     display: none;
   }
+}
+
+.employeeTopbar {
+  max-width: var(--manager-content-width);
+  margin-inline: auto;
+}
+.logoutIconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--manager-button-surface);
+  color: var(--ink);
+  cursor: pointer;
+  box-shadow: none;
+}
+.logoutIconButton:hover {
+  background: var(--surface);
+}
+.logoutIconButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }

@@ -1,7 +1,7 @@
 'use client';
 import { Toast } from '../../../components/ui/toast';
 
-import { useState } from 'react';
+import { useEffect, useReducer, useRef, useState } from 'react';
 import { ManagerPageShell } from '../../../components/layout/manager/manager-page-shell';
 import { GlassSelect } from '../../../components/ui/glass-select';
 import { SettingsSectionCard } from './settings-section-card';
@@ -10,9 +10,80 @@ import { SettingsToggle } from './settings-toggle';
 import { SettingsPermissionList } from './settings-permission-list';
 import { PushNotificationToggle } from './push-notification-toggle';
 import styles from './settings.module.css';
+import { authorizedRequest } from '../../../lib/api/authorized';
+import {
+  NOTIFICATION_PREFERENCE_ERROR,
+  NOTIFICATION_PREFERENCE_PATH,
+  NOTIFICATION_PREFERENCE_SAVED,
+  NOTIFICATION_PREFERENCE_SAVING,
+  initialNotificationPreferenceState,
+  notificationPreferenceCanSave,
+  notificationPreferenceReducer,
+  saveNotificationPreference,
+  type NotificationPreferenceResponse,
+} from '../notification-preference-model';
+
 export function SettingsPage() {
-  const [notice, setNotice] = useState(0);
-  const save = () => setNotice((previous) => previous + 1);
+  const [notice, setNotice] = useState({ message: '', key: 0 });
+  const notify = (message: string) =>
+    setNotice((previous) => ({ message, key: previous.key + 1 }));
+  const save = () => notify('تم حفظ الإعدادات مؤقتًا');
+  const [followUp, dispatchFollowUp] = useReducer(
+    notificationPreferenceReducer,
+    initialNotificationPreferenceState,
+  );
+  const [followUpLoading, setFollowUpLoading] = useState(true);
+  const followUpSavingRef = useRef(false);
+
+  useEffect(() => {
+    let active = true;
+    void authorizedRequest<NotificationPreferenceResponse>(
+      NOTIFICATION_PREFERENCE_PATH,
+    )
+      .then((res) => {
+        if (active)
+          dispatchFollowUp({
+            type: 'loaded',
+            enabled: res.notifyEmployeeFollowUps,
+          });
+      })
+      .catch(() => {
+        if (active) dispatchFollowUp({ type: 'loaded', enabled: false });
+      })
+      .finally(() => {
+        if (active) setFollowUpLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const toggleFollowUpNotify = async (enabled: boolean) => {
+    // Ignore rapid repeats: the switch is disabled while saving, and this
+    // synchronous ref also covers two clicks landing in the same tick.
+    if (
+      followUpSavingRef.current ||
+      !notificationPreferenceCanSave(followUp, enabled)
+    )
+      return;
+    followUpSavingRef.current = true;
+    dispatchFollowUp({ type: 'toggle', enabled });
+    try {
+      const saved = await saveNotificationPreference(
+        (path, options) =>
+          authorizedRequest<NotificationPreferenceResponse>(path, options),
+        enabled,
+      );
+      dispatchFollowUp({ type: 'saved', enabled: saved });
+      notify(NOTIFICATION_PREFERENCE_SAVED);
+    } catch {
+      dispatchFollowUp({ type: 'failed' });
+      notify(NOTIFICATION_PREFERENCE_ERROR);
+    } finally {
+      followUpSavingRef.current = false;
+    }
+  };
+
   return (
     <ManagerPageShell
       title="الإعدادات"
@@ -56,6 +127,7 @@ export function SettingsPage() {
             ['متابعة العميل بعد (أيام)', 5],
             ['تنبيه طلب بدون عقار مناسب بعد (أيام)', 10],
             ['انتهاء أولوية العمولة بعد (أيام)', 60],
+            ['مدة أولوية العقار (بالأيام)', 60],
           ].map(([label, value]) => (
             <SettingsField
               key={label}
@@ -107,7 +179,20 @@ export function SettingsPage() {
         <SettingsSectionCard title="الصلاحيات">
           <SettingsPermissionList />
         </SettingsSectionCard>
-        <SettingsSectionCard title="إعدادات التنبيهات" onSave={save}>
+        <SettingsSectionCard title="إعدادات التنبيهات">
+          <SettingsToggle
+            label="تفعيل إشعارات المتابعة"
+            description="استقبال إشعار عند تسجيل الموظفين متابعات جديدة مع الملاك والعملاء."
+            checked={followUp.visible}
+            disabled={followUpLoading || followUp.saving}
+            busy={followUp.saving}
+            onChange={(checked) => void toggleFollowUpNotify(checked)}
+          />
+          {followUp.saving ? (
+            <p className={styles.note} role="status" aria-live="polite">
+              {NOTIFICATION_PREFERENCE_SAVING}
+            </p>
+          ) : null}
           {[
             'تنبيه العقارات الجديدة',
             'تنبيه المتابعات المتأخرة',
@@ -123,9 +208,11 @@ export function SettingsPage() {
         </SettingsSectionCard>
       </div>
       <Toast
-        message={notice ? 'تم حفظ الإعدادات مؤقتًا' : ''}
-        eventKey={notice}
-        onDismiss={() => setNotice(0)}
+        message={notice.message}
+        eventKey={notice.key}
+        onDismiss={() =>
+          setNotice((previous) => ({ ...previous, message: '' }))
+        }
       />
     </ManagerPageShell>
   );

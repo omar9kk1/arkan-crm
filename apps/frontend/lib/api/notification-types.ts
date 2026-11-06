@@ -6,6 +6,8 @@
  * caller's own, already-privacy-filtered rows, and the record references are
  * only ever populated for the manager's own authorized rows.
  */
+import type { PropertyStatusApi } from './property-types';
+
 export type NotificationTypeApi =
   | 'PROPERTY_SUBMITTED'
   | 'PROPERTY_CHANGES_REQUESTED'
@@ -19,6 +21,13 @@ export type NotificationTypeApi =
   | 'FOLLOWUP_CREATED'
   | 'CONTACT_CREATED'
   | 'CONTACT_UPDATED'
+  | 'FOLLOWUP_EMPLOYEE_LATE'
+  | 'FOLLOWUP_MANAGER_ESCALATION'
+  | 'CLIENT_REVIEW_SUBMITTED'
+  | 'CLIENT_REVIEW_RESUBMITTED'
+  | 'CLIENT_REVIEW_APPROVED'
+  | 'CLIENT_REVIEW_REJECTED'
+  | 'CLIENT_REVIEW_CHANGES_REQUESTED'
   | 'SYSTEM';
 
 export interface NotificationDto {
@@ -39,6 +48,29 @@ export interface NotificationDto {
   /** The linked contact card's kind — where the manager tab has to land. */
   contactType: 'OWNER' | 'BROKER' | null;
   followUpId: string | null;
+  /**
+   * The stored per-recipient dedup key. On `FOLLOWUP_CREATED` rows it is
+   * exactly `FOLLOWUP_CREATED:<entryId>` — the authoritative entry the deep
+   * link scrolls/highlights; null on older rows.
+   */
+  eventKey: string | null;
+  /**
+   * The staged client review the row belongs to (submissions to managers,
+   * decisions to the requesting employee); null on every other row.
+   */
+  clientReviewId: string | null;
+  /**
+   * The employee follow-up subject deep link, exposed ONLY to the responsible
+   * employee (manager copies are masked server-side); null on every other row.
+   */
+  followUpSubjectId: string | null;
+  /** Manager-only human-readable potential-duplicate context. */
+  duplicate?: {
+    newPropertyReference: string | null;
+    existingPropertyReference: string | null;
+    employeeName: string | null;
+    status: PropertyStatusApi | null;
+  } | null;
   read: boolean;
   readAt: string | null;
   createdAt: string;

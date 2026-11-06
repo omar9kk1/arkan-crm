@@ -6,11 +6,9 @@ import { Toast } from '../../../components/ui/toast';
 import { ManagerPageShell } from '../../../components/layout/manager/manager-page-shell';
 import { Button } from '../../../components/ui/button';
 import { Card } from '../../../components/ui/card';
-import { StatCard } from '../../../components/ui/stat-card';
 import type { NotificationDto } from '../../../lib/api/notification-types';
 import { useNotifications } from '../../notifications/store';
 import {
-  awaitingReviewCount,
   filterManagerNotifications,
   notificationFilters,
   type ManagerFilter,
@@ -29,7 +27,6 @@ export function NotificationsPage() {
   const router = useRouter();
   const {
     items,
-    unreadCount,
     status,
     refresh,
     markRead,
@@ -43,15 +40,6 @@ export function NotificationsPage() {
   const [notice, setNotice] = useState('');
 
   const selected = items.find((item) => item.id === selectedId) ?? null;
-
-  // Real counters derived from the persisted rows. Follow-ups and deals have no
-  // backend events, so those two stay at a genuine zero.
-  const counts: [string, number, string][] = [
-    ['إشعارات جديدة', unreadCount, 'غير مقروء'],
-    ['عقارات بانتظار الموافقة', awaitingReviewCount(items), 'بانتظار المراجعة'],
-    ['متابعات متأخرة', 0, 'لا توجد أحداث مدعومة'],
-    ['صفقات/عمولات تحتاج مراجعة', 0, 'لا توجد أحداث مدعومة'],
-  ];
 
   const openNotification = (item: NotificationDto) => {
     setSelectedId(item.id);
@@ -80,17 +68,6 @@ export function NotificationsPage() {
       actions={<Button onClick={markAll}>تعليم الكل كمقروء</Button>}
     >
       <div className={styles.scope}>
-        <div className={styles.stats}>
-          {counts.map(([title, value, hint]) => (
-            <StatCard
-              key={title}
-              title={title}
-              value={value}
-              hint={hint}
-              icon="bell"
-            />
-          ))}
-        </div>
         <NotificationFilters
           items={items}
           value={filter}

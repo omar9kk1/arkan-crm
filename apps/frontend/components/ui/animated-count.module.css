@@ -1,0 +1,6 @@
+/* The generic counter surface outside the statistics cards: tabular figures
+   so a counting badge never shifts the tab layout; otherwise visually silent
+   (the contributed Astra styling of the host element is untouched). */
+.count {
+  font-variant-numeric: tabular-nums;
+}

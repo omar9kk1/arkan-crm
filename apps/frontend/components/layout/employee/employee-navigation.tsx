@@ -9,6 +9,8 @@ export const employeeNavigation: { label: string; icon: IconName }[] = [
   { label: 'المتابعات', icon: 'clock' },
   { label: 'الإشعارات', icon: 'bell' },
   { label: 'الحضور', icon: 'clock' },
+  { label: 'تسويق', icon: 'megaphone' },
+  { label: 'الإعدادات', icon: 'settings' },
 ];
 export function EmployeeNavItem({
   index,
@@ -35,7 +37,11 @@ export function EmployeeNavItem({
               ? '/employee/notifications'
               : index === 5
                 ? '/employee/attendance'
-                : undefined;
+                : index === 6
+                  ? '/employee/marketing'
+                  : index === 7
+                    ? '/employee/settings'
+                    : undefined;
   if (href)
     return (
       <Link

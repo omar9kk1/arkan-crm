@@ -49,6 +49,7 @@ export function getProperty(id: string): Promise<PropertyViewDto> {
 export function createProperty(
   payload: CreatePropertyPayload,
   image: File,
+  idempotencyKey?: string,
 ): Promise<PropertyViewDto> {
   const body = new FormData();
   body.append('payload', JSON.stringify(payload));
@@ -56,6 +57,9 @@ export function createProperty(
   return authorizedRequest<PropertyViewDto>(BASE, {
     method: 'POST',
     formData: body,
+    // Server-side idempotency: a timeout retry of the same logical operation
+    // replays the committed outcome instead of creating a second property.
+    ...(idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : {}),
   });
 }
 
@@ -91,10 +95,11 @@ export function updateProperty(
 export function approveProperty(
   id: string,
   version: number,
+  approveAsDistinct?: boolean,
 ): Promise<PropertyViewDto> {
   return authorizedRequest<PropertyViewDto>(`${BASE}/${id}/approve`, {
     method: 'POST',
-    body: { version },
+    body: { version, approveAsDistinct },
   });
 }
 
@@ -126,6 +131,16 @@ export function requestChangesProperty(
   });
 }
 
+export function linkPropertyToExisting(
+  submittedId: string,
+  existingPropertyId: string,
+): Promise<void> {
+  return authorizedRequest<void>(`${BASE}/${submittedId}/link-to-existing`, {
+    method: 'POST',
+    body: { existingPropertyId },
+  });
+}
+
 /** `POST /properties/:id/resubmit` — creator only, REJECTED/CHANGES_REQUESTED → PENDING. */
 export function resubmitProperty(id: string): Promise<PropertyViewDto> {
   return authorizedRequest<PropertyViewDto>(`${BASE}/${id}/resubmit`, {
@@ -142,4 +157,48 @@ export function getPropertyImage(id: string): Promise<Blob> {
   return authorizedRequest<Blob>(`${BASE}/${id}/image`, {
     responseType: 'blob',
   });
+}
+
+
+/** `GET /properties/trash` — Manager-only soft-deleted rows. */
+export function listTrashedProperties(): Promise<PropertyPageDto> {
+  return authorizedRequest<PropertyPageDto>(`${BASE}/trash`);
+}
+
+/** `POST /properties/:id/trash` — Manager-only soft delete (recoverable). */
+export function trashProperty(
+  id: string,
+  reason?: string,
+): Promise<PropertyViewDto> {
+  return authorizedRequest<PropertyViewDto>(`${BASE}/${id}/trash`, {
+    method: 'POST',
+    body: { reason },
+  });
+}
+
+/** `POST /properties/:id/restore` — Manager-only restore from Trash. */
+export function restoreProperty(id: string): Promise<PropertyViewDto> {
+  return authorizedRequest<PropertyViewDto>(`${BASE}/${id}/restore`, {
+    method: 'POST',
+  });
+}
+
+/** `DELETE /properties/:id/permanent` — Manager-only irreversible deep delete. */
+export function permanentDeleteProperty(
+  id: string,
+  confirmationCode: string,
+): Promise<{ id: string; reference: string }> {
+  return authorizedRequest<{ id: string; reference: string }>(
+    `${BASE}/${id}/permanent`,
+    { method: 'DELETE', body: { confirmationCode } },
+  );
+}
+
+
+/**
+ * `GET /properties/:id/history` — read-only detail for the ORIGINAL submitter
+ * of a rejected or soft-deleted property. Other employees receive 404.
+ */
+export function getPropertyHistory(id: string): Promise<PropertyViewDto> {
+  return authorizedRequest<PropertyViewDto>(`${BASE}/${id}/history`);
 }

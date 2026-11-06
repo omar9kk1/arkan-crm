@@ -50,8 +50,13 @@ function translateServerMessage(message: string): string | null {
 }
 
 function displayMessage(status: number, messages: string[]): string {
-  if (status === 409)
+  if (status === 409) {
+    // A duplicate-property rejection carries its own Arabic message; surface it
+    // instead of the generic stale-version wording that other 409s use.
+    const duplicate = messages.find((m) => /مسجّل بالفعل/.test(m));
+    if (duplicate) return duplicate;
     return 'تغيّر هذا العقار أو تمت مراجعته بالفعل. حدّث الصفحة لعرض أحدث حالته.';
+  }
   if (status === 413) {
     const translated = messages
       .map(translateServerMessage)

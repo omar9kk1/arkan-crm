@@ -5,8 +5,9 @@ import { Button } from '../../../components/ui/button';
 import type { NotificationDto } from '../../../lib/api/notification-types';
 import {
   displayDate,
+  isDecisionNotification,
+  notificationDisplay,
   notificationTypeLabel,
-  resolvePropertyCode,
 } from '../../notifications/view';
 import styles from '../../manager-notifications/components/notifications.module.css';
 
@@ -27,8 +28,9 @@ export function EmployeeNotificationDetailsDrawer({
   onOpenProperty: (propertyId: string) => void;
 }) {
   const [notice, setNotice] = useState('');
+  const view = notificationDisplay(item);
   return (
-    <PropertyOverlay title={item.title} drawer onClose={onClose}>
+    <PropertyOverlay title={view.title} drawer onClose={onClose}>
       <div className={styles.badges}>
         <span className={styles.badge}>
           {notificationTypeLabel(item.type)}
@@ -37,7 +39,12 @@ export function EmployeeNotificationDetailsDrawer({
           {item.read ? 'مقروء' : 'غير مقروء'}
         </span>
       </div>
-      <p>{resolvePropertyCode(item.message, item.propertyReference)}</p>
+      <p className={styles.messageBody}>{view.message}</p>
+      {isDecisionNotification(item) && !item.propertyId && (
+        <p className={styles.decisionUnavailable} role="status">
+          تفاصيل العقار لم تعد متاحة بعد الحذف النهائي.
+        </p>
+      )}
       <dl className={styles.facts}>
         {(
           [

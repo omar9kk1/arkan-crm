@@ -26,6 +26,8 @@ import {
   type RegistryContact,
 } from '../../../lib/contact-registry';
 import { useAuth } from '../../auth/components/auth-provider';
+import { ApiError } from '../../../lib/api-client';
+import { DuplicateSubmitGuard } from './duplicate-submit-guard';
 import {
   createProperty,
   resubmitProperty,
@@ -94,7 +96,9 @@ function formFromPropertyV2(property?: Property): NewPropertyFormV2 {
   if (!property) return initialNewPropertyFormV2;
   try {
     const parsed: unknown = JSON.parse(
-      (property.description || '').split('\n\n=== العقار المطلوب في البدل ===')[0] ?? '',
+      (property.description || '').split(
+        '\n\n=== العقار المطلوب في البدل ===',
+      )[0] ?? '',
     );
     if (
       parsed &&
@@ -111,7 +115,10 @@ function formFromPropertyV2(property?: Property): NewPropertyFormV2 {
           ownerName: property.owner,
           contactPhone: property.phone,
           area: propertyAreaV2(parsed as Partial<NewPropertyFormV2>),
-          floors: (parsed as NewPropertyFormV2).floors.map((floor) => ({ ...floor, id: floor.id || uid() })),
+          floors: (parsed as NewPropertyFormV2).floors.map((floor) => ({
+            ...floor,
+            id: floor.id || uid(),
+          })),
           image: null,
         },
         property,
@@ -278,12 +285,23 @@ export function AddPropertyModalV2({
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  /**
+   * Confirmed-duplicate lock. The guard owns the normalized comparison and the
+   * Idempotency-Key; the state mirror only drives the button/Enter block.
+   */
+  const [duplicateLocked, setDuplicateLocked] = useState(false);
+  const [duplicateGuard] = useState(() => new DuplicateSubmitGuard());
+  const duplicateMessage = useRef('');
   const heading = useRef<HTMLHeadingElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const errorMessage = useRef<HTMLParagraphElement>(null);
   const imageRef = useRef<PropertyImage | null>(null);
+  const draftRef = useRef(draft);
   const inFlight = useRef(false);
+  /** The same completed form must never post again. */
+  const completed = useRef(false);
   imageRef.current = image;
+  draftRef.current = draft;
 
   const showError = (message: string) => {
     setError(message);
@@ -319,7 +337,9 @@ export function AddPropertyModalV2({
       ),
     }));
 
-  const updateRequestedProperty = (value: Partial<typeof initialNewPropertyFormV2.requestedProperty>) =>
+  const updateRequestedProperty = (
+    value: Partial<typeof initialNewPropertyFormV2.requestedProperty>,
+  ) =>
     setDraft((previous) => ({
       ...previous,
       requestedProperty: { ...previous.requestedProperty, ...value },
@@ -404,9 +424,54 @@ export function AddPropertyModalV2({
     editingExisting,
   });
   const linkedContactId = property?.linkedContactId ?? null;
+  const derivedGovernorate = draft.district
+    ? governorateForArea(draft.district)
+    : '';
+
+  // Re-evaluate the duplicate lock on EVERY form change. The comparison is on
+  // the normalized create payload, so whitespace-only edits do not unlock and
+  // reverting to the rejected values locks Submit again.
+  useEffect(() => {
+    if (property?.id) return;
+    const result = duplicateGuard.reevaluate(
+      toCreatePropertyPayload(draft, { derivedGovernorate }),
+    );
+    if (!result.changed) return;
+    setDuplicateLocked(result.locked);
+    if (result.locked && duplicateMessage.current) {
+      setError(duplicateMessage.current);
+    } else if (!result.locked) {
+      setError('');
+    }
+  }, [draft, image, property?.id, derivedGovernorate]);
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (completed.current) return;
+
+    const options = { derivedGovernorate };
+    const createPayload = property?.id
+      ? null
+      : toCreatePropertyPayload(draft, options);
+    // Confirmed-duplicate lock: click, Enter and programmatic submit all exit
+    // here, before any request is constructed. Re-evaluating synchronously also
+    // rotates the operation id if the employee edited and pressed Enter before
+    // React had a chance to run the change effect.
+    if (step === STEPS.length - 1 && createPayload) {
+      const guardState = duplicateGuard.reevaluate(createPayload);
+      if (guardState.changed) {
+        setDuplicateLocked(guardState.locked);
+        if (guardState.locked && duplicateMessage.current) {
+          setError(duplicateMessage.current);
+        }
+      }
+      if (duplicateGuard.blocks(createPayload)) {
+        setDuplicateLocked(true);
+        if (duplicateMessage.current) setError(duplicateMessage.current);
+        return;
+      }
+    }
+
     const message = validateStepV2(
       draft,
       step,
@@ -439,12 +504,12 @@ export function AddPropertyModalV2({
         return;
       }
     }
-    // Synchronous guard so a fast double click cannot post twice.
-    if (inFlight.current) return;
+    // Synchronous guard so a fast double click cannot post twice, even before
+    // React renders the disabled button.
+    if (inFlight.current || completed.current) return;
     inFlight.current = true;
     setSubmitting(true);
 
-    const options = { derivedGovernorate };
     try {
       if (property?.id) {
         if (property.version === undefined)
@@ -464,9 +529,11 @@ export function AddPropertyModalV2({
         if (needsResubmitAfterCorrection(patched)) {
           try {
             const resubmitted = await resubmitProperty(patched.id);
+            completed.current = true;
             onSave([mapPropertyFromApi(resubmitted, user)]);
             clearFormDraft();
           } catch (cause) {
+            completed.current = true;
             onSave([mapPropertyFromApi(patched, user)]);
             showError(
               `${cause instanceof Error ? cause.message : 'تعذّرت إعادة الإرسال للمراجعة.'} — تم حفظ التعديلات فقط.`,
@@ -474,6 +541,7 @@ export function AddPropertyModalV2({
           }
           return;
         }
+        completed.current = true;
         onSave([mapPropertyFromApi(patched, user)]);
         clearFormDraft();
         return;
@@ -483,18 +551,38 @@ export function AddPropertyModalV2({
         return;
       }
       const created = await createProperty(
-        toCreatePropertyPayload(draft, options),
+        createPayload!,
         image.file,
+        duplicateGuard.id,
       );
+      completed.current = true;
       onSave([mapPropertyFromApi(created, user)]);
       clearFormDraft();
-    } catch (cause) {
-      // The modal stays open and every entered value is preserved on failure.
-      showError(
-        cause instanceof Error
+    } catch (cause: unknown) {
+      // A confirmed-duplicate 409 keeps this operation id until the employee
+      // actually changes the form (then `patch` starts a new attempt). The
+      // modal stays open with every entered value preserved.
+      if (
+        createPayload &&
+        cause instanceof ApiError &&
+        cause.status === 409 &&
+        cause.messages.some((message) => message.includes('مسجّل بالفعل'))
+      ) {
+        duplicateGuard.markRejected(createPayload);
+        duplicateMessage.current = cause.message;
+        // If the employee edited while the rejected request was in flight, the
+        // current data is already different: unlock with a fresh operation id.
+        setDuplicateLocked(
+          duplicateGuard.reevaluate(
+            toCreatePropertyPayload(draftRef.current, options),
+          ).locked,
+        );
+      }
+      const message =
+        cause instanceof Error && cause.message
           ? cause.message
-          : 'تعذر حفظ العقار. حاول مرة أخرى.',
-      );
+          : 'تعذر حفظ العقار. حاول مرة أخرى.';
+      showError(message);
     } finally {
       inFlight.current = false;
       setSubmitting(false);
@@ -502,9 +590,6 @@ export function AddPropertyModalV2({
   };
 
   const blocks = draft.district ? blocksForArea(draft.district) : [];
-  const derivedGovernorate = draft.district
-    ? governorateForArea(draft.district)
-    : '';
   const isExchange = draft.operation === 'بدل';
   const isBroker = draft.contactType === 'BROKER';
 
@@ -521,7 +606,8 @@ export function AddPropertyModalV2({
     : isBroker
       ? draft.brokerMode
       : draft.ownerMode;
-  const contactId = linkedSelection ?? (isBroker ? draft.brokerId : draft.ownerId);
+  const contactId =
+    linkedSelection ?? (isBroker ? draft.brokerId : draft.ownerId);
   const contactName = isBroker ? draft.brokerName : draft.ownerName;
   const contactPhone = isBroker ? draft.brokerPhone : draft.contactPhone;
   const selectedContact = contactRecords.find(
@@ -542,8 +628,8 @@ export function AddPropertyModalV2({
           ? { brokerMode: mode, brokerId: '', brokerName: '', brokerPhone: '' }
           : { brokerMode: mode }
         : mode === 'NEW'
-        ? { ownerMode: mode, ownerId: '', ownerName: '', contactPhone: '' }
-        : { ownerMode: mode },
+          ? { ownerMode: mode, ownerId: '', ownerName: '', contactPhone: '' }
+          : { ownerMode: mode },
     );
   };
 
@@ -587,7 +673,9 @@ export function AddPropertyModalV2({
           },
     );
 
-  const previewTitle = `${draft.operation} · ${draft.district || draft.governorate || ''}`.trim() || draft.operation;
+  const previewTitle =
+    `${draft.operation} · ${draft.district || draft.governorate || ''}`.trim() ||
+    draft.operation;
 
   return (
     <PropertyOverlay
@@ -595,20 +683,66 @@ export function AddPropertyModalV2({
       className={styles.modal}
       onClose={onClose}
     >
-      <ol className={styles.steps} aria-label="مراحل إضافة العقار">
-        {STEPS.map((title, index) => (
-          <li key={title} data-complete={index < step} aria-current={step === index ? 'step' : undefined}>
-            <span className={styles.stepNumber}>{index < step ? '✓' : index + 1}</span>
-            <span>{title}</span>
-          </li>
-        ))}
-      </ol>
+      <div
+        className={styles.steps}
+        role="group"
+        aria-label="خطوات إضافة العقار"
+      >
+        <span
+          className={styles.stepNumber}
+          data-state={step === 0 ? 'active' : step > 0 ? 'done' : 'upcoming'}
+          aria-current={step === 0 ? 'step' : undefined}
+        >
+          {step > 0 ? '✓' : 1}
+        </span>
+        <span
+          className={styles.connector}
+          data-active={step >= 1 ? 'true' : 'false'}
+          aria-hidden="true"
+        />
+        <span
+          className={styles.stepNumber}
+          data-state={step === 1 ? 'active' : step > 1 ? 'done' : 'upcoming'}
+          aria-current={step === 1 ? 'step' : undefined}
+        >
+          {step > 1 ? '✓' : 2}
+        </span>
+        <span
+          className={styles.connector}
+          data-active={step >= 2 ? 'true' : 'false'}
+          aria-hidden="true"
+        />
+        <span
+          className={styles.stepNumber}
+          data-state={step === 2 ? 'active' : 'upcoming'}
+          aria-current={step === 2 ? 'step' : undefined}
+        >
+          3
+        </span>
+        <span className={styles.stepLabel} style={{ gridColumn: 1 }}>
+          {STEPS[0]}
+        </span>
+        <span className={styles.stepLabel} style={{ gridColumn: 3 }}>
+          {STEPS[1]}
+        </span>
+        <span className={styles.stepLabel} style={{ gridColumn: 5 }}>
+          {STEPS[2]}
+        </span>
+      </div>
       <div className={styles.stageHeader}>
-      <span className={styles.eyebrow}>الخطوة {step + 1} من 3</span>
-      <h2 className={styles.stageTitle} ref={heading} tabIndex={-1}>
-        {STEPS[step] || STEPS[0]}
-      </h2>
-      <p>{['حدّد نوع العرض والطريقة الأنسب لإدخال بياناتك.', 'أضف الموقع والتفاصيل وصورة واضحة للعقار.', 'اربط جهة التواصل وراجع الملخص قبل الحفظ.'][step]}</p>
+        <span className={styles.eyebrow}>الخطوة {step + 1} من 3</span>
+        <h2 className={styles.stageTitle} ref={heading} tabIndex={-1}>
+          {STEPS[step] || STEPS[0]}
+        </h2>
+        <p>
+          {
+            [
+              'حدّد نوع العرض والطريقة الأنسب لإدخال بياناتك.',
+              'أضف الموقع والتفاصيل وصورة واضحة للعقار.',
+              'اربط جهة التواصل وراجع الملخص قبل الحفظ.',
+            ][step]
+          }
+        </p>
       </div>
       <DraftTools formKey={formKey} />
       <form className={styles.form} noValidate onSubmit={submit}>
@@ -616,7 +750,11 @@ export function AddPropertyModalV2({
           {step === 0 && (
             <section className={styles.panel}>
               <h3>نوع العملية</h3>
-              <div className={styles.operationChoices} role="group" aria-label="نوع العملية">
+              <div
+                className={styles.operationChoices}
+                role="group"
+                aria-label="نوع العملية"
+              >
                 {OPERATIONS.map((op) => (
                   <button
                     key={op}
@@ -625,16 +763,44 @@ export function AddPropertyModalV2({
                     aria-pressed={draft.operation === op}
                     onClick={() => patch({ operation: op })}
                   >
-                    <svg className={styles.operationIcon} aria-hidden="true" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                      {op === 'بيع' ? <path d="m3 10 9-7 9 7M5 9v12h14V9M9 21v-8h6v8" /> : op === 'إيجار' ? <><circle cx="8" cy="8" r="5" /><path d="m12 12 9 9m-4-4 3-3m-6 3 3-3" /></> : <path d="M4 7h16m-4-4 4 4-4 4M20 17H4m4-4-4 4 4 4" />}
+                    <svg
+                      className={styles.operationIcon}
+                      aria-hidden="true"
+                      width="28"
+                      height="28"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      {op === 'بيع' ? (
+                        <path d="m3 10 9-7 9 7M5 9v12h14V9M9 21v-8h6v8" />
+                      ) : op === 'إيجار' ? (
+                        <>
+                          <circle cx="8" cy="8" r="5" />
+                          <path d="m12 12 9 9m-4-4 3-3m-6 3 3-3" />
+                        </>
+                      ) : (
+                        <path d="M4 7h16m-4-4 4 4-4 4M20 17H4m4-4-4 4 4 4" />
+                      )}
                     </svg>
                     <strong>{op}</strong>
-                    <small>{op === 'بيع' ? 'عرض العقار للبيع' : op === 'إيجار' ? 'عرض العقار للإيجار' : 'مبادلة بعقار آخر'}</small>
+                    <small>
+                      {op === 'بيع'
+                        ? 'عرض العقار للبيع'
+                        : op === 'إيجار'
+                          ? 'عرض العقار للإيجار'
+                          : 'مبادلة بعقار آخر'}
+                    </small>
                   </button>
                 ))}
               </div>
 
-              <h3 className={styles.subheading}>كيف تريد إدخال بيانات العقار؟</h3>
+              <h3 className={styles.subheading}>
+                كيف تريد إدخال بيانات العقار؟
+              </h3>
               <div className={styles.flexRow}>
                 <button
                   type="button"
@@ -691,7 +857,9 @@ export function AddPropertyModalV2({
           {step === 1 && (
             <>
               <section className={styles.panel}>
-                <h3>{isExchange ? 'العقار المعروض للبدل' : 'موقع العقار ومساحته'}</h3>
+                <h3>
+                  {isExchange ? 'العقار المعروض للبدل' : 'موقع العقار ومساحته'}
+                </h3>
                 <div className={styles.grid}>
                   <label className={styles.field}>
                     المحافظة
@@ -751,13 +919,30 @@ export function AddPropertyModalV2({
                     />
                   </label>
                   <label className={styles.field}>
-                    المساحة (م²) <span className={styles.optional}>اختياري</span>
+                    المساحة (م²){' '}
+                    <span className={styles.optional}>اختياري</span>
                     <input
                       inputMode="decimal"
                       value={propertyAreaV2(draft)}
-                      onChange={(event) =>
-                        patch({ area: event.target.value })
-                      }
+                      onChange={(event) => patch({ area: event.target.value })}
+                    />
+                  </label>
+                  <label className={styles.field}>
+                    رابط موقع العقار{' '}
+                    <span className={styles.optional}>اختياري</span>
+                    <input
+                      type="url"
+                      inputMode="url"
+                      placeholder="الصق رابط Google Maps..."
+                      value={draft.locationUrl || ''}
+                      onChange={(event) => {
+                        const v = event.target.value.trim();
+                        if (v && !/^https?:\/\//i.test(v)) {
+                          // reject unsafe/invalid schemes (e.g. javascript:)
+                          return;
+                        }
+                        patch({ locationUrl: v });
+                      }}
                     />
                   </label>
                 </div>
@@ -784,14 +969,17 @@ export function AddPropertyModalV2({
                 </div>
                 {!draft.floors.length && (
                   <p className={styles.hint}>
-                    لا توجد أدوار مضافة. يمكنك المتابعة دون أدوار، أو إضافة تفاصيل المبنى هنا.
+                    لا توجد أدوار مضافة. يمكنك المتابعة دون أدوار، أو إضافة
+                    تفاصيل المبنى هنا.
                   </p>
                 )}
                 {draft.floors.map((floor, floorIndex) => (
                   <div className={styles.floor} key={floor.id}>
                     <div className={styles.floorHeader}>
                       <strong>
-                        {floor.customLabel || floor.label || `الدور ${floorIndex + 1}`}
+                        {floor.customLabel ||
+                          floor.label ||
+                          `الدور ${floorIndex + 1}`}
                       </strong>
                       <Button
                         type="button"
@@ -853,80 +1041,112 @@ export function AddPropertyModalV2({
                   </div>
                 ))}
 
-                <div className={`${styles.grid} ${styles.extraFloors}`}>
-                  <label className={styles.checkbox}>
-                    <input
-                      type="checkbox"
-                      checked={draft.hasBasement}
-                      onChange={(event) =>
-                        patch({ hasBasement: event.target.checked })
-                      }
-                    />
-                    <strong>سرداب</strong>
-                  </label>
-                  {draft.hasBasement && (
-                    <label className={`${styles.field} ${styles.wideField}`}>
-                      تفاصيل السرداب
-                      <textarea
-                        value={draft.basementDetails || ''}
-                        placeholder="تفاصيل السرداب: مساحته، استخدامه، عدد الغرف..."
-                        onChange={(event) =>
-                          patch({ basementDetails: event.target.value })
-                        }
-                      />
-                    </label>
+                <div className={styles.floorAddRow}>
+                  {!draft.hasBasement && (
+                    <Button
+                      type="button"
+                      className={styles.floorAddButton}
+                      onClick={() => patch({ hasBasement: true })}
+                    >
+                      + إضافة سرداب
+                    </Button>
                   )}
-
-                  <label className={styles.checkbox}>
-                    <input
-                      type="checkbox"
-                      checked={draft.hasHalfFloor}
-                      onChange={(event) =>
-                        patch({ hasHalfFloor: event.target.checked })
-                      }
-                    />
-                    <strong>نصف دور</strong>
-                  </label>
-                  {draft.hasHalfFloor && (
-                    <label className={`${styles.field} ${styles.wideField}`}>
-                      تفاصيل نصف الدور
-                      <textarea
-                        value={draft.halfFloorDetails || ''}
-                        placeholder="تفاصيل نصف الدور..."
-                        onChange={(event) =>
-                          patch({ halfFloorDetails: event.target.value })
-                        }
-                      />
-                    </label>
+                  {!draft.hasHalfFloor && (
+                    <Button
+                      type="button"
+                      className={styles.floorAddButton}
+                      onClick={() => patch({ hasHalfFloor: true })}
+                    >
+                      + إضافة نصف دور
+                    </Button>
                   )}
-
-                  <label className={styles.checkbox}>
-                    <input
-                      type="checkbox"
-                      checked={draft.hasQuarterFloor}
-                      onChange={(event) =>
-                        patch({ hasQuarterFloor: event.target.checked })
-                      }
-                    />
-                    <strong>ربع دور</strong>
-                  </label>
-                  {draft.hasQuarterFloor && (
-                    <label className={`${styles.field} ${styles.wideField}`}>
-                      تفاصيل ربع الدور
-                      <textarea
-                        value={draft.quarterFloorDetails || ''}
-                        placeholder="تفاصيل ربع الدور..."
-                        onChange={(event) =>
-                          patch({ quarterFloorDetails: event.target.value })
-                        }
-                      />
-                    </label>
+                  {!draft.hasQuarterFloor && (
+                    <Button
+                      type="button"
+                      className={styles.floorAddButton}
+                      onClick={() => patch({ hasQuarterFloor: true })}
+                    >
+                      + إضافة ربع دور
+                    </Button>
                   )}
                 </div>
+                {draft.hasBasement && (
+                  <label className={`${styles.field} ${styles.wideField}`}>
+                    تفاصيل السرداب
+                    <textarea
+                      value={draft.basementDetails || ''}
+                      placeholder="تفاصيل السرداب: ..."
+                      onChange={(event) =>
+                        patch({ basementDetails: event.target.value })
+                      }
+                    />
+                    <Button
+                      type="button"
+                      className={styles.floorRemoveButton}
+                      onClick={() =>
+                        patch({ hasBasement: false, basementDetails: '' })
+                      }
+                    >
+                      إزالة
+                    </Button>
+                  </label>
+                )}
+                {draft.hasHalfFloor && (
+                  <label className={`${styles.field} ${styles.wideField}`}>
+                    تفاصيل نصف الدور
+                    <textarea
+                      value={draft.halfFloorDetails || ''}
+                      placeholder="تفاصيل نصف الدور..."
+                      onChange={(event) =>
+                        patch({ halfFloorDetails: event.target.value })
+                      }
+                    />
+                    <Button
+                      type="button"
+                      className={styles.floorRemoveButton}
+                      onClick={() =>
+                        patch({ hasHalfFloor: false, halfFloorDetails: '' })
+                      }
+                    >
+                      إزالة
+                    </Button>
+                  </label>
+                )}
+                {draft.hasQuarterFloor && (
+                  <label className={`${styles.field} ${styles.wideField}`}>
+                    تفاصيل ربع الدور
+                    <textarea
+                      value={draft.quarterFloorDetails || ''}
+                      placeholder="تفاصيل ربع الدور..."
+                      onChange={(event) =>
+                        patch({ quarterFloorDetails: event.target.value })
+                      }
+                    />
+                    <Button
+                      type="button"
+                      className={styles.floorRemoveButton}
+                      onClick={() =>
+                        patch({
+                          hasQuarterFloor: false,
+                          quarterFloorDetails: '',
+                        })
+                      }
+                    >
+                      إزالة
+                    </Button>
+                  </label>
+                )}
               </section>
 
               <section className={styles.panel}>
-                <h3>{draft.operation === 'بيع' ? 'سعر البيع' : draft.operation === 'إيجار' ? 'سعر الإيجار' : 'سعر العقار المعروض'} (د.ك)</h3>
+                <h3>
+                  {draft.operation === 'بيع'
+                    ? 'سعر البيع'
+                    : draft.operation === 'إيجار'
+                      ? 'سعر الإيجار'
+                      : 'سعر العقار المعروض'}{' '}
+                  (د.ك)
+                </h3>
                 <div className={styles.grid}>
                   <label className={styles.field}>
                     السعر <span className={styles.optional}>اختياري</span>
@@ -941,7 +1161,10 @@ export function AddPropertyModalV2({
                     <GlassSelect
                       value={draft.negotiable}
                       onChange={(event) =>
-                        patch({ negotiable: event.target.value as typeof draft.negotiable })
+                        patch({
+                          negotiable: event.target
+                            .value as typeof draft.negotiable,
+                        })
                       }
                     >
                       {NEGOTIABLES.map((value) => (
@@ -994,7 +1217,10 @@ export function AddPropertyModalV2({
                           </Button>
                         ) : (
                           <label className={styles.uploadArea}>
-                            <span className={styles.uploadIcon} aria-hidden="true">
+                            <span
+                              className={styles.uploadIcon}
+                              aria-hidden="true"
+                            >
                               ＋
                             </span>
                             <strong>استبدال الصورة</strong>
@@ -1022,7 +1248,11 @@ export function AddPropertyModalV2({
                       </span>
                       <strong>اختر صورة من جهازك</strong>
                       <span>صورة واحدة واضحة للعقار · اضغط للاختيار</span>
-                      <input type="file" accept="image/*" onChange={setImageFile} />
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={setImageFile}
+                      />
                     </label>
                     {image ? (
                       <div className={styles.uploadPreview}>
@@ -1052,7 +1282,8 @@ export function AddPropertyModalV2({
                   <section className={styles.panel}>
                     <h3>العقار المطلوب في البدل</h3>
                     <p className={styles.hint}>
-                      هذه البيانات تصف ما تريد الحصول عليه في البدل. جميع الحقول اختيارية.
+                      هذه البيانات تصف ما تريد الحصول عليه في البدل. جميع الحقول
+                      اختيارية.
                     </p>
                     <div className={styles.grid}>
                       <label className={styles.field}>
@@ -1217,7 +1448,9 @@ export function AddPropertyModalV2({
                     aria-pressed={contactMode === 'NEW'}
                     onClick={() => setContactMode('NEW')}
                   >
-                    <strong>{isBroker ? 'إضافة وسيط جديد' : 'إضافة مالك جديد'}</strong>
+                    <strong>
+                      {isBroker ? 'إضافة وسيط جديد' : 'إضافة مالك جديد'}
+                    </strong>
                     <small>أدخل الاسم ورقم الهاتف.</small>
                   </button>
                 </div>
@@ -1310,33 +1543,36 @@ export function AddPropertyModalV2({
                     />
                   ) : (
                     <p className={styles.errorText}>
-                      لا توجد صورة للعقار بعد. ارجع إلى الخطوة الثانية وارفع صورة.
+                      لا توجد صورة للعقار بعد. ارجع إلى الخطوة الثانية وارفع
+                      صورة.
                     </p>
                   )}
                   <div className={styles.summaryDetails}>
-                  <strong>{previewTitle}</strong>
-                  <p>
-                    {draft.price
-                      ? `${Number(draft.price).toLocaleString('ar-KW')} د.ك`
-                      : 'السعر غير محدد'}{' '}
-                    · {draft.operation}
-                    {draft.negotiable !== 'غير محدد' && ` · ${draft.negotiable}`}
-                  </p>
-                  <p className={styles.hint}>
-                    {draft.district || 'المنطقة غير محددة'} ·{' '}
-                    {propertyAreaV2(draft) || '—'} م² ·{' '}
-                    {draft.floors.length
-                      ? `${draft.floors.length} دور`
-                      : 'عدد الأدوار غير محدد'}
-                    {draft.hasBasement && ' · سرداب'}
-                    {draft.hasHalfFloor && ' · نصف دور'}
-                    {draft.hasQuarterFloor && ' · ربع دور'}
-                    {isExchange && ' · بدل'}
-                  </p>
-                  <p className={styles.summaryContact}>
-                    جهة التواصل: {isBroker ? 'وسيط' : 'مالك'} — {contactName || '—'}{' '}
-                    {contactPhone && <bdi dir="ltr">({contactPhone})</bdi>}
-                  </p>
+                    <strong>{previewTitle}</strong>
+                    <p>
+                      {draft.price
+                        ? `${Number(draft.price).toLocaleString('ar-KW')} د.ك`
+                        : 'السعر غير محدد'}{' '}
+                      · {draft.operation}
+                      {draft.negotiable !== 'غير محدد' &&
+                        ` · ${draft.negotiable}`}
+                    </p>
+                    <p className={styles.hint}>
+                      {draft.district || 'المنطقة غير محددة'} ·{' '}
+                      {propertyAreaV2(draft) || '—'} م² ·{' '}
+                      {draft.floors.length
+                        ? `${draft.floors.length} دور`
+                        : 'عدد الأدوار غير محدد'}
+                      {draft.hasBasement && ' · سرداب'}
+                      {draft.hasHalfFloor && ' · نصف دور'}
+                      {draft.hasQuarterFloor && ' · ربع دور'}
+                      {isExchange && ' · بدل'}
+                    </p>
+                    <p className={styles.summaryContact}>
+                      جهة التواصل: {isBroker ? 'وسيط' : 'مالك'} —{' '}
+                      {contactName || '—'}{' '}
+                      {contactPhone && <bdi dir="ltr">({contactPhone})</bdi>}
+                    </p>
                   </div>
                 </div>
               </section>
@@ -1354,7 +1590,12 @@ export function AddPropertyModalV2({
           </p>
         )}
         <div className={styles.actions}>
-          <Button className={styles.cancelAction} variant="ghost" type="button" onClick={onClose}>
+          <Button
+            className={styles.cancelAction}
+            variant="ghost"
+            type="button"
+            onClick={onClose}
+          >
             إلغاء
           </Button>
           {step > 0 && (
@@ -1364,12 +1605,12 @@ export function AddPropertyModalV2({
           )}
           <Button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || duplicateLocked}
             aria-busy={submitting}
           >
             {step === STEPS.length - 1
               ? submitting
-                ? 'جارٍ الحفظ…'
+                ? 'جارٍ الإرسال…'
                 : property
                   ? 'حفظ التعديلات وإعادة الإرسال'
                   : manager

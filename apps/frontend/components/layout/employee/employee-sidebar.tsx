@@ -21,7 +21,9 @@ export function EmployeeSidebar({
           />
         ))}
       </nav>
-      <div className={styles.sidebarFooter}>أدوات العمل اليومي — معاينة</div>
+      <div className={styles.sidebarFooter}>
+        الفرص لا تنتظر... بل نصنعها معا
+      </div>
     </aside>
   );
 }

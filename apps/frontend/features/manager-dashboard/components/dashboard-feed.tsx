@@ -20,9 +20,12 @@ export function DashboardFeed({
       className={styles.feedPanel}
     >
       <ul className={styles.feed}>
-        {items.map((item) => (
+        {items.map((item, index) => (
           <li
-            key={item.title}
+            // Two real actions may legitimately share a title (e.g. two blocked
+            // duplicates); the index keeps the list key unique without changing
+            // any visible content or styling.
+            key={`${item.title}:${index}`}
             className={item.warning ? styles.warning : undefined}
           >
             <strong>{item.title}</strong>

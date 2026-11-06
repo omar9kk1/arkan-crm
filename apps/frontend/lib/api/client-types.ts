@@ -55,6 +55,11 @@ export interface ClientApiDto {
   notes: string;
   source: string;
   status: string;
+  /**
+   * Structured wizard request document (opaque JSON string) the backend owns
+   * the store of — null when the row predates it ("no structured request yet").
+   */
+  requestData: string | null;
   /** Stable `User.id` of the responsible employee; null when unassigned. */
   responsibleUserId: string | null;
   responsibleEmployeeName: string | null;
@@ -106,6 +111,10 @@ export interface UpdateClientPayload {
   responsibleUserId?: string | null;
   /** Upserted on the authorised client; repeated ids never duplicate rows. */
   propertyInterests?: PropertyInterestPayload[];
+  /** Stored wizard request document; `null` clears the structured request. */
+  requestData?: string | null;
+  /** Explicit interest removals confined to this client (wizard edit choices). */
+  removePropertyInterestIds?: string[];
 }
 
 export interface CreateClientFollowUpPayload {

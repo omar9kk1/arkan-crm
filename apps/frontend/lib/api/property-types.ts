@@ -79,7 +79,12 @@ export interface ContactSummaryDto {
 /** Returned to every authorised viewer. Contains no private contact data. */
 export interface PublicPropertyDto {
   id: string;
+  /** Active display code: A when approved, P while pending. */
   reference: string;
+  /** Original submission P-code, for traceability. */
+  submissionReference?: string;
+  /** Official A-code, or null before approval. */
+  approvedReference?: string | null;
   title: string;
   listingType: DealType;
   status: PropertyStatusApi;
@@ -112,6 +117,10 @@ export interface PublicPropertyDto {
    * ownership and never grants contact access (that stays server-authoritative).
    */
   isMine: boolean;
+  /** Soft-delete markers (null/undefined on active rows). Manager Trash only. */
+  deletedAt?: string | null;
+  deletedByName?: string | null;
+  deletionReason?: string | null;
 }
 
 /**
@@ -125,6 +134,15 @@ export interface PrivatePropertyDto extends PublicPropertyDto {
   contact: ContactSummaryDto | null;
   reviewNotes: string | null;
   reviewStatus: ApprovalStatusApi | null;
+  /** Manager-only: potential duplicate candidate property IDs (null/undefined when none). */
+  duplicateCandidateIds?: string[] | null;
+  /** Provisional owner staged by an employee submission (promoted on approval). */
+  proposedOwner?: {
+    type: ContactTypeApi;
+    name: string;
+    phone: string;
+    notes: string | null;
+  } | null;
 }
 
 export type PropertyViewDto = PublicPropertyDto | PrivatePropertyDto;

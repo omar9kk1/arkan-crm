@@ -1,3 +1,4 @@
+import { AnimatedCount } from '../../../components/ui/animated-count';
 import type { RegistryContact } from '../../../lib/contact-registry';
 import styles from './clients.module.css';
 
@@ -43,7 +44,9 @@ export function ContactCard({
       </span>
       <span>
         <span className={styles.secondary}>عدد العقارات</span>
-        <strong>{contact.propertyCodes.length}</strong>
+        <strong>
+          <AnimatedCount value={contact.propertyCodes.length} />
+        </strong>
       </span>
       <span className={styles.badge}>{scopeLabel}</span>
     </button>

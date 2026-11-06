@@ -8,10 +8,10 @@ export function EmployeeStatCard({
   value,
 }: {
   title: string;
-  value: number;
+  value: number | string;
 }) {
   return (
-    <StatCard title={title} value={value} hint="بيانات تجريبية" icon="users" />
+    <StatCard title={title} value={value} hint="" icon="users" />
   );
 }
 export function FollowUpCard({

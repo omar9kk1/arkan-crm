@@ -4,6 +4,7 @@ import { useDraftState } from '../../../lib/drafts/use-form-draft';
 import { Toast } from '../../../components/ui/toast';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { ManagerPageShell } from '../../../components/layout/manager/manager-page-shell';
 import { Button } from '../../../components/ui/button';
 import { StatCard } from '../../../components/ui/stat-card';
@@ -14,6 +15,7 @@ import {
   approveProperty,
   rejectProperty,
   requestChangesProperty,
+  trashProperty,
 } from '../../../lib/api/properties-api';
 import { mapPreviewFromApi } from '../../../lib/property-adapter';
 import { usePropertyList } from '../../../lib/use-property-list';
@@ -27,6 +29,7 @@ import { PropertiesSegmentedTabs } from '../../../components/ui/properties-segme
 import { PropertyCard } from './property-card';
 import { PropertyDetailsDrawer } from './property-details-drawer';
 import { ReviewActionDialog } from './review-action-dialog';
+import { TrashDeleteDialog } from './trash-dialogs';
 import { AddPropertyModal } from './add-property-modal';
 import { useAuth } from '../../auth/components/auth-provider';
 import styles from './properties.module.css';
@@ -37,6 +40,7 @@ const MAX_PAGES_PER_LOAD = 3;
 
 export function ManagerProperties() {
   const { user } = useAuth();
+  const router = useRouter();
   const [tab, setTab] = useState('program');
   const [query, setQuery] = useState('');
   const [adding, setAdding] = useDraftState(
@@ -51,12 +55,19 @@ export function ManagerProperties() {
     action: 'reject' | 'changes';
   } | null>(null);
   const [reviewError, setReviewError] = useState('');
+  const [, setCompareProperty] = useState<PreviewProperty | null>(null);
+  // Soft-delete (move to Trash) dialog state.
+  const [trashTarget, setTrashTarget] = useState<PreviewProperty | null>(null);
+  const [trashBusy, setTrashBusy] = useState(false);
+  const [trashDialogError, setTrashDialogError] = useState('');
 
   const notify = useCallback(
     (text: string) =>
       setNotice((previous) => ({ text, sequence: previous.sequence + 1 })),
     [],
   );
+
+
 
   // The rows, the cursor, the loading/error flags, the notification refresh
   // signal and the notification deep-link all come from the shared list core.
@@ -81,6 +92,9 @@ export function ManagerProperties() {
     mapProperty: mapPreviewFromApi,
     viewer: user,
     onOpenError: notify,
+    // An employee edit (or any other cross-session change) must refresh the
+    // Pending Review list and its already-open drawer without a page reload.
+    autoSyncMs: 20_000,
   });
 
   const matches = (property: PreviewProperty) =>
@@ -150,12 +164,12 @@ export function ManagerProperties() {
   // is re-read and the drawer reflects the new status without being closed. The
   // revealed deep-link target is part of `rows`, so it stays in sync too.
   const selectedLive = selected
-    ? (selected.id
+    ? ((selected.id
         ? rows.find((property) => property.id === selected.id)
-        : undefined) ?? selected
+        : undefined) ?? selected)
     : null;
 
-  const approve = async (property: PreviewProperty) => {
+  const approve = async (property: PreviewProperty, approveAsDistinct = false) => {
     if (busyId) return;
     if (!property.id || property.version === undefined) {
       notify('تعذّر تحديد إصدار السجل. حدّث الصفحة ثم حاول مرة أخرى.');
@@ -163,18 +177,20 @@ export function ManagerProperties() {
     }
     setBusyId(property.id);
     try {
-      await approveProperty(property.id, property.version);
+      await approveProperty(property.id, property.version, approveAsDistinct);
       notify(`تم اعتماد العقار ${property.code}.`);
       refetch();
     } catch (cause) {
-      notify(
-        cause instanceof Error ? cause.message : 'تعذر اعتماد العقار.',
-      );
+      notify(cause instanceof Error ? cause.message : 'تعذر اعتماد العقار.');
       // Stale version: re-read so the manager sees the real latest status.
       if (cause instanceof ApiError && cause.status === 409) refetch();
     } finally {
       setBusyId(null);
     }
+  };
+
+  const approveDistinct = async (property: PreviewProperty) => {
+    await approve(property, true);
   };
 
   const submitDecision = async (reason: string) => {
@@ -201,13 +217,12 @@ export function ManagerProperties() {
       refetch();
     } catch (cause) {
       const stale =
-        cause instanceof ApiError && (cause.status === 409 || cause.status === 404);
+        cause instanceof ApiError &&
+        (cause.status === 409 || cause.status === 404);
       if (stale) {
         setReview(null);
         setReviewError('');
-        notify(
-          cause instanceof Error ? cause.message : 'تغيّر هذا العقار.',
-        );
+        notify(cause instanceof Error ? cause.message : 'تغيّر هذا العقار.');
         refetch();
       } else {
         // Keep the dialog (and the typed reason) open on a recoverable failure.
@@ -228,20 +243,36 @@ export function ManagerProperties() {
     } else if (action === 'رفض') {
       setReviewError('');
       setReview({ property, action: 'reject' });
+    } else if (action === 'حذف') {
+      setTrashDialogError('');
+      setTrashTarget(property);
+    }
+  };
+
+  const confirmTrash = async (reason: string) => {
+    if (!trashTarget?.id || trashBusy) return;
+    setTrashBusy(true);
+    setTrashDialogError('');
+    try {
+      await trashProperty(trashTarget.id, reason || undefined);
+      notify(`تم نقل العقار ${trashTarget.code} إلى سلة المحذوفات.`);
+      setTrashTarget(null);
+      refetch();
+    } catch (cause) {
+      setTrashDialogError(
+        cause instanceof Error ? cause.message : 'تعذّر حذف العقار.',
+      );
+    } finally {
+      setTrashBusy(false);
     }
   };
 
   return (
     <ManagerPageShell
       title="عقارات المدير"
-      description="صفحة واحدة لإدارة العقارات داخل النظام، ومراجعة العقارات المرسلة من الموظفين قبل اعتمادها."
       actions={<Button onClick={() => setAdding(true)}>إضافة عقار</Button>}
     >
       <div className={styles.scope}>
-        <p className={styles.preview}>
-          القوائم مبنية على سجلات الخادم الفعلية • الإحصاءات تُحسب من العقارات
-          المحمّلة{nextCursor ? ' (جزء من الإجمالي)' : ''}.
-        </p>
         <div className={styles.stats}>
           {[
             { title: 'عقار داخل البرنامج', value: rows.length },
@@ -325,9 +356,7 @@ export function ManagerProperties() {
                           key={property.id ?? property.code}
                           property={property}
                           onOpen={() => setSelected(property)}
-                          selected={
-                            !!targetId && property.id === targetId
-                          }
+                          selected={!!targetId && property.id === targetId}
                         />
                       ))}
                   </div>
@@ -387,8 +416,32 @@ export function ManagerProperties() {
           <PropertyDetailsDrawer
             key={selectedLive.id ?? selectedLive.code}
             property={selectedLive}
-            onClose={closeSelected}
+            onClose={() => {
+              setCompareProperty(null);
+              closeSelected();
+            }}
+            onBack={() => {
+              setCompareProperty(null);
+              let origin: { subjectId?: string; tab?: string } | null = null;
+              try {
+                origin = JSON.parse(
+                  sessionStorage.getItem('propertyDetailsOrigin') || 'null',
+                );
+              } catch {
+                origin = null;
+              }
+              sessionStorage.removeItem('propertyDetailsOrigin');
+              if (origin?.subjectId) {
+                const tab = origin.tab || 'history';
+                router.push(
+                  `/manager/followups?follow-up=${encodeURIComponent(origin.subjectId)}&follow-up-tab=${encodeURIComponent(tab)}`,
+                );
+              } else {
+                router.back();
+              }
+            }}
             onAction={onAction}
+            onApproveDistinct={approveDistinct}
             busy={busyId === selectedLive.id}
           />
         )}
@@ -415,6 +468,19 @@ export function ManagerProperties() {
               setQuery('');
               notify('تم حفظ العقار');
               refetch();
+            }}
+          />
+        )}
+        {trashTarget && (
+          <TrashDeleteDialog
+            propertyCode={trashTarget.code}
+            busy={trashBusy}
+            error={trashDialogError}
+            onConfirm={(reason) => void confirmTrash(reason)}
+            onClose={() => {
+              if (trashBusy) return;
+              setTrashTarget(null);
+              setTrashDialogError('');
             }}
           />
         )}

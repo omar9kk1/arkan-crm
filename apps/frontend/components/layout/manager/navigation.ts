@@ -36,6 +36,18 @@ export const moreNavigation: ManagerNavItem[] = [
     icon: 'bell',
     href: '/manager/notifications',
   },
+  {
+    id: 'followups',
+    label: 'المتابعات',
+    icon: 'checkCircle',
+    href: '/manager/followups',
+  },
+  {
+    id: 'trash',
+    label: 'المحذوفات',
+    icon: 'trash',
+    href: '/manager/trash',
+  },
   { id: 'reports', label: 'التقارير', icon: 'chart', href: '/manager/reports' },
   {
     id: 'marketing',

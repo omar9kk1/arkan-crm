@@ -28,6 +28,8 @@ export type PropertyDetails = Pick<
   contact: Pick<ContactSummaryDto, 'type' | 'name' | 'phone'> | null;
   reviewStatus: ApprovalStatusApi | null;
   reviewNotes: string | null;
+  deletedAt: string | null;
+  deletionReason: string | null;
 };
 
 /** Recognize the wizard envelope only to omit its duplicate generated summary.
@@ -58,7 +60,8 @@ export function generalPropertyDescription(value: string | null): string {
 
 export function mapPropertyDetails(dto: PropertyViewDto): PropertyDetails {
   const privateDto = isPrivatePropertyDto(dto);
-  const contact = hasPrivateContact(dto) ? dto.contact : null;
+  const official = hasPrivateContact(dto) ? dto.contact : null;
+  const contact = official ?? (privateDto ? dto.proposedOwner ?? null : null);
   return {
     listingType: dto.listingType,
     status: dto.status,
@@ -85,5 +88,7 @@ export function mapPropertyDetails(dto: PropertyViewDto): PropertyDetails {
       : null,
     reviewStatus: privateDto ? dto.reviewStatus : null,
     reviewNotes: privateDto ? dto.reviewNotes : null,
+    deletedAt: dto.deletedAt ?? null,
+    deletionReason: dto.deletionReason ?? null,
   };
 }

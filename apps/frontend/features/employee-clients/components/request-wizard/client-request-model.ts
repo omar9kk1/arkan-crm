@@ -1,4 +1,5 @@
 import type { DealType } from '../../../../lib/api/property-types';
+import type { ClientRequestBundle } from './client-request-bundle';
 
 export type ClientType = 'BUYER' | 'RENTER' | 'EXCHANGER';
 export interface RequestFloor {
@@ -154,6 +155,55 @@ export function initialRequest(): ClientRequestDraft {
     requestDetails: null,
   };
 }
+
+/**
+ * The decoded reading of `Client.requestData` — the wizard bundle the backend
+ * stores for an existing client (the pack lives only in this directory, and
+ * the backend keeps the string opaquely). ANY legacy, null or unparsable
+ * value reads as "no structured request recorded yet" — a prefill is never
+ * invented: the identity comes from the client columns, the request types and
+ * details start EMPTY.
+ */
+export function parseStoredRequestData(
+  raw: string | null | undefined,
+): Pick<ClientRequestBundle, 'types' | 'requests'> | null {
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+      return null;
+    const doc = parsed as Partial<ClientRequestBundle> & { version?: number };
+    if (doc.version !== 1) return null;
+    const types = Array.isArray(doc.types)
+      ? (doc.types.filter(
+          (type): type is ClientType =>
+            type === 'BUYER' || type === 'RENTER' || type === 'EXCHANGER',
+        ) as ClientType[])
+      : [];
+    if (!types.length) return null;
+    const storedRequests = (doc.requests ?? {}) as Record<
+      string,
+      ClientRequestDraft | undefined
+    >;
+    const requests: Record<ClientType, ClientRequestDraft> = {
+      BUYER: { ...initialRequest(), clientType: 'BUYER' },
+      RENTER: { ...initialRequest(), clientType: 'RENTER' },
+      EXCHANGER: { ...initialRequest(), clientType: 'EXCHANGER' },
+    };
+    for (const type of types) {
+      const stored = storedRequests[type];
+      // Defensively overlay the stored draft on a healthy skeleton — a
+      // corrupt or partial draft can never break the edit mode open.
+      requests[type] = stored
+        ? { ...initialRequest(), ...stored, clientType: type }
+        : { ...initialRequest(), clientType: type };
+    }
+    return { types, requests };
+  } catch {
+    return null;
+  }
+}
+
 function parsePart(text: string, operationType: string): ParsedRequestData {
   const normalized = text.replace(/[٠-٩]/g, (n) =>
     String('٠١٢٣٤٥٦٧٨٩'.indexOf(n)),

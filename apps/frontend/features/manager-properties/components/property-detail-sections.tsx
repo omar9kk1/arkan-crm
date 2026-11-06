@@ -192,6 +192,12 @@ export function PropertyDetailSections({
               <p className={styles.prose}>{d.reviewNotes}</p>
             </>
           )}
+          {d?.deletionReason?.trim() && (
+            <>
+              <h4>سبب الحذف</h4>
+              <p className={styles.prose}>{d.deletionReason}</p>
+            </>
+          )}
           {children}
         </Section>
       )}

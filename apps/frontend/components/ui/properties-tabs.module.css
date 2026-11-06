@@ -41,16 +41,25 @@
 .scroller::-webkit-scrollbar {
   display: none;
 }
-/* The painted scrollbar: a slim gold thumb inside the bar, DRAGGABLE like a
+/* The painted scrollbar: a slim Astra thumb inside the bar, DRAGGABLE like a
    native one. The track is an interactive hit band inside the wrapper's own
    padding (below the tab buttons, so it never steals their clicks) and is
-   inset from the pill edges — it can never reach the rounded corners in
-   either direction. */
+   inset from the pill edges — refined ONCE here for every pill bar (page
+   category bars + drawer bars): the capsule's fully-rounded ends
+   (--radius-pill: 999px ⇒ effective radius ≈ half the bar height ≈ 30px)
+   curve inward PAST the original 14px horizontal inset where a
+   bottom-anchored thumb used to sit, so the thumb poked outside the surface.
+   Computed placement: a 5px transparent hit band at y ∈ [2, 7] above the
+   inner bottom edge carrying a 3px warm-neutral translucent thumb centered
+   at y ∈ [3, 6] — visually 3px thin, its ends requiring only ~14px of side
+   inset at that lifted position, comfortably inside the 18px kept here, so
+   it can never protrude past the rounded corners. RTL-safe via the logical
+   inset properties. */
 .scrollTrack {
   position: absolute;
-  inset-inline: 14px;
-  inset-block-end: 0;
-  block-size: 8px;
+  inset-inline: 18px;
+  inset-block-end: 2px;
+  block-size: 5px;
   touch-action: none;
   cursor: pointer;
   user-select: none;
@@ -58,18 +67,98 @@
 .scrollThumb {
   position: absolute;
   inset-block-start: 1px;
-  block-size: 5px;
+  block-size: 3px;
   inset-inline-start: 0;
   display: block;
   border-radius: 999px;
   cursor: grab;
-  background: rgba(128, 98, 56, 0.35);
+  background: rgba(128, 98, 56, 0.4);
+}
+
+/* Touch-primary devices AND narrow windows (phones and tablets at ANY
+   viewport width, Chrome DevTools mobile/tablet emulation, plus any desktop
+   browser window resized to ≤900px regardless of mouse or touch): the
+   painted horizontal tab scrollbar is HIDDEN ENTIRELY — display:none removes
+   it visually AND from hit-targeting, so near-bottom taps reach the pills
+   and touch gestures reach the scroller. ONE shared rule for every pill bar
+   (page category bars + drawer bars), covering narrow DESKTOP chrome windows
+   too — the detached scrollbar line seen in the owner's narrow-window
+   screenshots was exactly this painted thumb, which the touch-only media
+   never matched on a mouse device.
+   Scrolling itself is NEVER disabled: the tablist keeps its
+   overflow-x: auto, native scrollbar already hidden by `.scroller`
+   cross-browser (scrollbar-width / -ms-overflow-style / ::-webkit-scrollbar),
+   one-row nowrap, RTL direction, and the selected tab is auto-revealed on
+   every switch. Wide (>900px) mouse/touchpad desktop keeps the approved
+   draggable Astra thumb exactly as before; drawer BODY scrollbars and the
+   vertical page scrollbar are untouched — these conditions only match the
+   painted horizontal tab thumb. */
+@media (hover: none) and (pointer: coarse), (max-width: 900px) {
+  .scrollTrack {
+    display: none;
+  }
+}
+
+/* Subtle Astra EDGE FADES marking hidden tabs beyond the visible area of an
+   overflowing pill bar (purely decorative overlays INSIDE the wrapper):
+   a 16px-wide warm-neutral gradient from (near-)solid at the outer edge to
+   fully transparent toward the center — wide enough to hint at more content,
+   narrow enough to never cover a real label or count badge of a reachable
+   tab. They sit at inset-block 0 (full pill height) and are CLIPPED by the
+   wrapper's rounded corners (`.segmented` gained overflow: hidden), so they
+   can never leak past the capsule. Pointer-events: none + aria-hidden: taps,
+   swipes, trackpad scrolling, keyboard focus and the painted scrollbar's
+   drag band beneath all keep working. Presence is state-driven from the
+   component (same measure() that already updates on scroll + ResizeObserver,
+   so no extra listeners): each edge's fade appears ONLY while that edge
+   still hides content (progress < 1 for the inline-end edge / progress > 0
+   for the inline-start one) and vanishes — via opacity — exactly when the
+   scroll limit is reached; if all tabs fit the spans are not rendered at
+   all. Logical inset-* keeps placement RTL-correct at any width; the
+   gradient itself is flipped for RTL by `.edgeFadeFlipped` (scaleX) so the
+   solid side always hugs the physical outer edge. */
+.edgeFade {
+  position: absolute;
+  inset-block: 0;
+  inline-size: 16px;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity var(--motion-fast, 150ms) linear;
+  background-image: linear-gradient(
+    to right,
+    rgba(251, 248, 243, 0.95),
+    rgba(251, 248, 243, 0.55) 55%,
+    rgba(251, 248, 243, 0)
+  );
+}
+.edgeFadeStart {
+  inset-inline-start: 0;
+}
+.edgeFadeEnd {
+  inset-inline-end: 0;
+}
+/* Mirror the gradient in place: placement stays on the logical edge, only
+   the visually-solid side flips to hug the physical OUTER edge. */
+.edgeFadeFlipped {
+  transform: scaleX(-1);
+}
+.edgeFadeHidden {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .edgeFade {
+    transition: none;
+  }
 }
 @media (max-width: 600px) {
   .tabs {
     width: 100%;
   }
+  /* Narrow widths keep every tab at its NATURAL width and let the row scroll
+     horizontally instead of equally squashing the buttons over their labels
+     (the segmented pill bars override this rule with flex: 1 0 auto anyway;
+     this keeps the plain variant consistent with the same principle). */
   .tabs button {
-    flex: 1;
+    flex: 0 0 auto;
   }
 }

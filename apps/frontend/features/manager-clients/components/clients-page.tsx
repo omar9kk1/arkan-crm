@@ -9,9 +9,10 @@ import {
 import { createClient, getClient, updateClient } from '../../../lib/api/clients-api';
 import { useClients } from '../../../lib/use-clients';
 import type { ClientApiDto } from '../../../lib/api/client-types';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { requestOpenProperty } from '../../notifications/open-property';
 import {
+  CLIENT_REVIEW_QUERY_PARAM,
   MANAGER_CLIENT_BROKER_QUERY_PARAM,
   MANAGER_CLIENT_CLIENT_QUERY_PARAM,
   MANAGER_CLIENT_OWNER_QUERY_PARAM,
@@ -21,6 +22,8 @@ import { matchesPerson } from '../../../lib/search';
 import { Button } from '../../../components/ui/button';
 import { Toast } from '../../../components/ui/toast';
 import { AddClientModal } from './add-client-modal';
+import { ClientReviewsTab } from '../../client-reviews/components/client-reviews-tab';
+import { useClientReviewCount } from '../../client-reviews/use-client-review-count';
 import { ManagerPageShell } from '../../../components/layout/manager/manager-page-shell';
 import { StatCard } from '../../../components/ui/stat-card';
 import { SearchBar } from '../../../components/ui/search-bar';
@@ -75,6 +78,7 @@ function clientFromDto(dto: ClientApiDto): ClientSample {
     name: dto.name,
     phone: dto.phone,
     type: '—',
+    requestData: dto.requestData,
     employee: dto.responsibleEmployeeName || '—',
     lastFollowUp: latestLogged?.createdAt.slice(0, 10) || 'لم تُسجل بعد',
     status,
@@ -125,6 +129,7 @@ export default function ManagerClientsPage() {
   const searchParams = useSearchParams();
   const registry = useRegistryContacts();
   const router = useRouter();
+  const pathname = usePathname();
   const contacts = registry.contacts;
   const contactsLoading = registry.loading;
   const contactsError = registry.error;
@@ -136,11 +141,14 @@ export default function ManagerClientsPage() {
     error: clientsError,
     refresh: refreshClients,
   } = useClients();
+  // The real «تحت المراجعة» badge number: the same authorized feed the tab
+  // renders (company-wide for the manager), kept in step by the tab itself.
+  const reviewCount = useClientReviewCount();
 
   const items = useMemo(() => clientRows.map(clientFromDto), [clientRows]);
 
   const [query, setQuery] = useState('');
-  const [tab, setTab] = useState<'clients' | 'owners' | 'brokers'>('clients');
+  const [tab, setTab] = useState<'clients' | 'owners' | 'brokers' | 'reviews'>('clients');
   const [file, setFile] = useState<OpenFile | null>(null);
   const [addingType, setAddingType] = useState<'client' | 'owner' | 'broker' | null>(null);
   const [notice, setNotice] = useState<string>('');
@@ -178,6 +186,8 @@ export default function ManagerClientsPage() {
   const clientIdParam = searchParams.get(MANAGER_CLIENT_CLIENT_QUERY_PARAM)?.trim() || '';
   const ownerIdParam = searchParams.get(MANAGER_CLIENT_OWNER_QUERY_PARAM)?.trim() || '';
   const brokerIdParam = searchParams.get(MANAGER_CLIENT_BROKER_QUERY_PARAM)?.trim() || '';
+  // The review deep link is handed to the tab component, then cleaned.
+  const reviewParam = searchParams.get(CLIENT_REVIEW_QUERY_PARAM)?.trim() || '';
   const handledKeyRef = useRef('');
   useEffect(() => {
     if (clientsLoading || contactsLoading) return;
@@ -233,8 +243,33 @@ export default function ManagerClientsPage() {
     brokerIdParam,
   ]);
 
-  const addingData = useMemo(() => {
-    if (!addingType || addingType !== 'client') return undefined;
+  // A review deep link (`?client-review=…`) lands on the reviews tab; the tab
+  // itself opens the exact drawer exactly once (same handled-key contract as
+  // the record deep links above). The param is TRANSIENT: once handled, it is
+  // stripped from the URL with REPLACE navigation (every other query param is
+  // preserved) — the still-open drawer keeps its selection (it lives in the
+  // tab state, not the URL), a plain refresh or revisit can never re-open it,
+  // and Back/Forward never restores a dismissed drawer; the NEXT bell click
+  // navigates a fresh param and works again.
+  const reviewKeyRef = useRef('');
+  useEffect(() => {
+    // An ABSENT param re-arms the deep link: after the transient param is
+    // stripped (replace), clicking the SAME notification later must open the
+    // same review again — including while already on this page (SPA nav).
+    if (!reviewParam) {
+      reviewKeyRef.current = '';
+      return;
+    }
+    if (reviewKeyRef.current === reviewParam) return;
+    reviewKeyRef.current = reviewParam;
+    setTab('reviews');
+    const params = new URLSearchParams(searchParams);
+    params.delete(CLIENT_REVIEW_QUERY_PARAM);
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }, [reviewParam, searchParams, pathname, router]);
+
+  const addingData = useMemo(() => {    if (!addingType || addingType !== 'client') return undefined;
     return items;
   }, [addingType, items]);
 
@@ -248,13 +283,16 @@ export default function ManagerClientsPage() {
   return (
     <ManagerPageShell
       title="إدارة العملاء"
-      description="إدارة ملفات العملاء والملاك والوسطاء، ومعرفة الموظفين المسؤولين وسجل المتابعات."
+      /* Route-specific (owner request): no eyebrow «لوحة المدير» and no
+         description paragraph on the Clients page — the other Manager pages
+         keep both via the shell's defaults. */
+      overline=""
       actions={
         <Button
           variant="primary"
           onClick={() => { setAddingType('client'); setAdding(true); }}
         >
-          إضافة عميل جديد
+          إضافة عميل
         </Button>
       }
     >
@@ -277,11 +315,12 @@ export default function ManagerClientsPage() {
             id="manager-clients-tabs"
             label="قوائم العملاء والملاك والوسطاء"
             value={tab}
-            onChange={(value) => setTab(value as 'clients' | 'owners' | 'brokers')}
+            onChange={(value) => setTab(value as 'clients' | 'owners' | 'brokers' | 'reviews')}
             items={[
               { id: 'clients', label: 'العملاء', count: stats?.totalClients },
               { id: 'owners', label: 'الملاك', count: stats?.owners },
               { id: 'brokers', label: 'الوسطاء', count: stats?.brokers },
+              { id: 'reviews', label: 'تحت المراجعة', count: reviewCount.count ?? undefined },
             ]}
           />
           <SearchBar
@@ -293,9 +332,24 @@ export default function ManagerClientsPage() {
         </div>
 
         <SectionHeader
-          title={tab === 'clients' ? 'ملفات العملاء' : tab === 'owners' ? 'ملفات الملاك' : 'ملفات الوسطاء'}
+          title={tab === 'clients' ? 'ملفات العملاء' : tab === 'owners' ? 'ملفات الملاك' : tab === 'brokers' ? 'ملفات الوسطاء' : 'طلبات المراجعة'}
           description=""
         />
+
+        {tab === 'reviews' && (
+          <ClientReviewsTab
+            role="MANAGER"
+            focusReviewId={reviewParam}
+            onCountChange={reviewCount.reportCount}
+            // The SAME authorized properties deep link the client drawer uses.
+            onOpenProperty={(propertyId) => {
+              requestOpenProperty(propertyId);
+              router.push(
+                `/manager/properties?${PROPERTY_QUERY_PARAM}=${encodeURIComponent(propertyId)}`,
+              );
+            }}
+          />
+        )}
 
         {tab === 'clients' && (clientsLoading || clientsError) && (
           <p className={styles.secondary} role="status" aria-live="polite">
@@ -370,6 +424,30 @@ export default function ManagerClientsPage() {
           <ClientDetailsDrawer
             client={clientContext[file.id] || items.find((c) => c.id === file.id)!}
             onClose={() => setFile(null)}
+            // The SAME authorized patch path with NO approval step: the edit
+            // takes effect immediately, then the page's lists/stats re-read
+            // and the OPEN drawer row is replaced in place (also when it was
+            // fetched through a deep link, whose cached copy would otherwise
+            // shadow the fresh list).
+            onEditSave={async (payload) => {
+              let updated: ClientApiDto;
+              try {
+                updated = await updateClient(file.id, payload);
+              } catch (cause) {
+                const message =
+                  cause instanceof Error
+                    ? cause.message
+                    : 'تعذر حفظ تعديلات العميل. حاول مرة أخرى.';
+                setNotice(message);
+                return false;
+              }
+              setClientContext((context) => ({
+                ...context,
+                [file.id]: clientFromDto(updated),
+              }));
+              await refreshClients();
+              return true;
+            }}
             // Same deep-link contract as the owner drawer, for the wizard's
             // saved property interests.
             onOpenProperty={(propertyId) => {

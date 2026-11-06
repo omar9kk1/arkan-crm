@@ -1,5 +1,8 @@
 import type { PropertyStatusApi } from '../../lib/api/property-types';
-import type { EmployeeDto, EmployeeRoleApi } from '../../lib/api/employee-types';
+import type {
+  EmployeeDto,
+  EmployeeRoleApi,
+} from '../../lib/api/employee-types';
 import { STATUS_LABEL } from '../../lib/property-adapter';
 
 /**
@@ -73,11 +76,11 @@ export function mapEmployee(dto: EmployeeDto): EmployeeRecord {
       statusLabel: STATUS_LABEL[property.status],
     })),
     // No backend surface yet → explicitly unavailable.
-    clientsCount: null,
-    assignedCount: null,
+    clientsCount: dto.clientsCount,
+    assignedCount: dto.assignedCount,
     dealsCount: null,
     commission: null,
-    lateCount: null,
+    lateCount: dto.lateCount,
   };
 }
 
@@ -85,7 +88,10 @@ export function mapEmployee(dto: EmployeeDto): EmployeeRecord {
 export function propertyStatusSummary(counts: Record<string, number>): string {
   return Object.entries(counts)
     .filter(([, count]) => count > 0)
-    .map(([status, count]) => `${STATUS_LABEL[status as PropertyStatusApi]} ${count}`)
+    .map(
+      ([status, count]) =>
+        `${STATUS_LABEL[status as PropertyStatusApi]} ${count}`,
+    )
     .join(' · ');
 }
 

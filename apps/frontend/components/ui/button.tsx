@@ -6,7 +6,7 @@ export function Button({
   compactOnMobile = false,
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: 'primary' | 'ghost';
+  variant?: 'primary' | 'ghost' | 'danger';
   compactOnMobile?: boolean;
 }) {
   return (

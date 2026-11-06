@@ -1,6 +1,7 @@
 'use client';
-import { useEffect, useId, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useCallback, useRef, type ReactNode } from 'react';
 import { Button } from '../../../components/ui/button';
+import { Icon } from '../../../components/ui/icon';
 import styles from './properties.module.css';
 
 /**
@@ -15,17 +16,41 @@ export function PropertyOverlay({
   drawer = false,
   onClose,
   onCloseButton,
+  onBack,
   children,
   className = '',
   headerDetails,
+  footer,
+  guardClose,
+  slideFromLeft = false,
 }: {
   title: string;
   drawer?: boolean;
   onClose: () => void;
   onCloseButton?: () => void;
+  onBack?: () => void;
   children: ReactNode;
   className?: string;
   headerDetails?: ReactNode;
+  /**
+   * Optional pinned footer rendered BELOW the scrollable body (sibling of
+   * it, never inside it): the content scrolls while the actions stay put
+   * without ever overlapping what is being read. Omitted → unchanged shell.
+   */
+  footer?: ReactNode;
+  /**
+   * Optional dismissal guard (button, Escape and backdrop): returning false
+   * KEEPS the drawer open. Used by drawers with unsaved input; callers
+   * without it are completely unaffected.
+   */
+  guardClose?: () => boolean;
+  /**
+   * Optional EXIT animation for edge-anchored drawers: the overlay slides
+   * BACK toward its anchored edge (physical pixels — RTL cannot reverse the
+   * transform) before the native close. Off by default: every existing
+   * overlay keeps its instant close.
+   */
+  slideFromLeft?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const id = useId();
@@ -34,6 +59,64 @@ export function PropertyOverlay({
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
+  const guardCloseRef = useRef(guardClose);
+  useEffect(() => {
+    guardCloseRef.current = guardClose;
+  }, [guardClose]);
+  const slideFromLeftRef = useRef(slideFromLeft);
+  useEffect(() => {
+    slideFromLeftRef.current = slideFromLeft;
+  }, [slideFromLeft]);
+  // Latest close helper without re-running the mount effect (the `cancel`
+  // listener registered at mount always calls the CURRENT one).
+  const closeAnimatedRef = useRef<() => void>(() => undefined);
+
+  // Optional slide-out (button/backdrop/Escape all funnel through here), then
+  // the reliable close. Reduced-motion and unsupported environments close
+  // instantly; a refused animation never leaves the dialog stuck open.
+  const closeAnimated = useCallback(() => {
+    const dialog = ref.current;
+    const reducedMotion =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (
+      !dialog ||
+      !slideFromLeftRef.current ||
+      reducedMotion ||
+      typeof dialog.animate !== 'function'
+    ) {
+      dialog?.close();
+      // Do not depend on the native close event reaching the parent.
+      onClose();
+      return;
+    }
+    let animation: Animation;
+    try {
+      // `translateX` is PHYSICAL — a LEFT-anchored drawer always exits
+      // toward the left edge (negative X), independent of the direction.
+      animation = dialog.animate(
+        [{ transform: 'translateX(0)' }, { transform: 'translateX(-100%)' }],
+        { duration: 180, easing: 'cubic-bezier(0.55, 0, 0.85, 0.35)' },
+      );
+    } catch {
+      dialog.close();
+      onClose();
+      return;
+    }
+    animation.finished
+      .catch(() => undefined)
+      .finally(() => {
+        dialog.close();
+        onClose();
+      });
+  }, [onClose]);
+  closeAnimatedRef.current = closeAnimated;
+
+  const attemptClose = useCallback(() => {
+    if (guardCloseRef.current && !guardCloseRef.current()) return;
+    closeAnimated();
+  }, [closeAnimated]);
 
   useEffect(() => {
     const previousFocus = document.activeElement as HTMLElement | null;
@@ -50,9 +133,21 @@ export function PropertyOverlay({
     const handleToggle = () => {
       if (dialog && !dialog.open) onCloseRef.current?.();
     };
+    // Escape goes through `cancel`: a refused guard (`false`) cancels the
+    // dismissal, exactly like the button and backdrop paths. Animated
+    // drawers intercept here so Escape ALSO slides back to the edge before
+    // the real close; classic drawers keep the native instant close.
+    const handleCancel = (event: Event) => {
+      if (guardCloseRef.current && !guardCloseRef.current()) return;
+      if (!slideFromLeftRef.current) return;
+      event.preventDefault();
+      closeAnimatedRef.current?.();
+    };
     dialog?.addEventListener('toggle', handleToggle);
+    dialog?.addEventListener('cancel', handleCancel);
     return () => {
       dialog?.removeEventListener('toggle', handleToggle);
+      dialog?.removeEventListener('cancel', handleCancel);
       document.body.style.overflow = previousOverflow;
       document.documentElement.style.overflow = previousRootOverflow;
       previousFocus?.focus();
@@ -74,26 +169,48 @@ export function PropertyOverlay({
             event.clientY < r.top ||
             event.clientY > r.bottom
           ) {
-            ref.current?.close();
-            // Do not depend on the native close event reaching the parent.
-            onClose();
+            attemptClose();
           }
         }
       }}
     >
       <header className={styles.overlayHeader}>
         {headerDetails ? (
-          <div>
-            <h2 id={id}>{title}</h2>
-            {headerDetails}
+          <div className={styles.overlayTitleGroup}>
+            {onBack ? (
+              <Button
+                onClick={onBack}
+                aria-label="رجوع"
+                title="رجوع"
+                className={styles.overlayBackButton}
+              >
+                <Icon name="arrowRight" width={16} height={16} />
+              </Button>
+            ) : null}
+            <div>
+              <h2 id={id}>{title}</h2>
+              {headerDetails}
+            </div>
           </div>
-        ) : <h2 id={id}>{title}</h2>}
+        ) : (
+          <div className={styles.overlayTitleGroup}>
+            {onBack ? (
+              <Button
+                onClick={onBack}
+                aria-label="رجوع"
+                title="رجوع"
+                className={styles.overlayBackButton}
+              >
+                <Icon name="arrowRight" width={16} height={16} />
+              </Button>
+            ) : null}
+            <h2 id={id}>{title}</h2>
+          </div>
+        )}
         <Button
           onClick={() => {
             onCloseButton?.();
-            ref.current?.close();
-            // Do not depend on the native close event reaching the parent.
-            onClose();
+            attemptClose();
           }}
           aria-label="إغلاق"
         >
@@ -101,6 +218,7 @@ export function PropertyOverlay({
         </Button>
       </header>
       <div className={styles.overlayBody}>{children}</div>
+      {footer ? <div className={styles.overlayFooter}>{footer}</div> : null}
     </dialog>
   );
 }

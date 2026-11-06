@@ -4,7 +4,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import type { AuthUser } from '@arkan/shared';
-import { getProperty, listProperties } from './api/properties-api';
+import {
+  getProperty,
+  getPropertyHistory,
+  listProperties,
+} from './api/properties-api';
 import type { PropertyViewDto } from './api/property-types';
 import {
   consumeOpenProperty,
@@ -54,6 +58,12 @@ export interface UsePropertyListOptions<
   onOpenError?: (message: string) => void;
   /** Viewer from `useAuth()`; re-reads the list whenever the session changes. */
   viewer: AuthUser | null;
+  /**
+   * Optional silent auto-sync interval (ms). While mounted and visible the hook
+   * re-reads the list through its existing request guard, so a Manager action on
+   * another browser/device appears without a page reload and without flicker.
+   */
+  autoSyncMs?: number;
 }
 
 export interface PropertyListResult<T extends { id?: string | undefined }> {
@@ -87,6 +97,7 @@ export function usePropertyList<T extends { id?: string | undefined }>({
   mapProperty,
   onOpenError,
   viewer,
+  autoSyncMs = 0,
 }: UsePropertyListOptions<T>): PropertyListResult<T> {
   const [items, setItems] = useState<T[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -135,6 +146,38 @@ export function usePropertyList<T extends { id?: string | undefined }>({
     refetch();
   }, [refreshSignal, refetch]);
 
+  // Cross-browser/device sync: a Manager action (delete/approve/reject/restore)
+  // happens in another session, so local invalidation/notifications are not
+  // enough. A short visible-only poll re-reads the list silently; focus and
+  // visibility changes also re-check immediately. Cleanup guarantees no timer
+  // survives an unmount.
+  useEffect(() => {
+    if (!autoSyncMs || autoSyncMs <= 0) return;
+    let disposed = false;
+    const sync = () => {
+      if (disposed) return;
+      if (
+        typeof document !== 'undefined' &&
+        document.visibilityState !== 'visible'
+      )
+        return;
+      silentRef.current = true;
+      refetch();
+    };
+    const timer = window.setInterval(sync, autoSyncMs);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') sync();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', onVisibility);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', onVisibility);
+    };
+  }, [autoSyncMs, refetch]);
+
   // Resolves a deep-linked property through `GET /properties/:id` (the backend
   // re-authorizes on read, so a stale/denied id answers 404 and is reported
   // instead of opening an empty drawer). Two channels feed this:
@@ -153,7 +196,18 @@ export function usePropertyList<T extends { id?: string | undefined }>({
     let cancelled = false;
     (async () => {
       try {
-        const dto = await getProperty(pendingId);
+        let dto: PropertyViewDto;
+        try {
+          dto = await getProperty(pendingId);
+        } catch (cause) {
+          // Rejected rows are readable by their creator through the standard
+          // endpoint; a SOFT-DELETED row is hidden there. Fall back to the
+          // creator-only history endpoint so the decision notification still
+          // opens the original details. Other employees get a non-disclosing
+          // 404 from BOTH endpoints.
+          if (viewer.role !== 'EMPLOYEE') throw cause;
+          dto = await getPropertyHistory(pendingId);
+        }
         if (cancelled) return;
         resolvedTarget.current = pendingId;
         const row = mapPropertyRef.current(dto, viewer);
@@ -269,6 +323,7 @@ export function usePropertyList<T extends { id?: string | undefined }>({
     if (urlTargetId) {
       const params = new URLSearchParams(searchParams?.toString() ?? '');
       params.delete(PROPERTY_QUERY_PARAM);
+      params.delete('decision');
       const query = params.toString();
       router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
     }

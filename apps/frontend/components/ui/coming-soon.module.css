@@ -1,73 +1,49 @@
-.hero {
-  width: 100%;
-  max-width: 900px;
-  margin-inline: auto;
-  padding: var(--space-8);
+.wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   text-align: center;
+  gap: 0;
+  min-height: 50vh;
+  padding: var(--space-6) var(--space-4);
 }
-.hero h2 {
-  margin-block: var(--space-4);
-  font-size: clamp(1.3rem, 3vw, 1.9rem);
-}
-.hero p {
-  max-width: 680px;
-  margin: 0 auto;
-  color: var(--muted);
-  line-height: 1.9;
-}
-.badge,
-.status {
+.icon {
   display: inline-flex;
-  padding: var(--space-2) var(--space-3);
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-card);
+  background: var(--manager-button-surface);
+  border: 1px solid var(--glass-border);
+  color: var(--muted);
+  margin-bottom: var(--space-3);
+}
+.title {
+  font-size: var(--text-heading);
+  margin: 0 0 var(--space-2);
+  color: var(--ink);
+}
+.message {
+  font-size: var(--text-body);
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0 0 var(--space-2);
+}
+.desc {
+  font-size: var(--text-small);
+  color: var(--muted);
+  margin: 0 0 var(--space-3);
+  max-width: 480px;
+  line-height: 1.7;
+}
+.badge {
+  display: inline-flex;
+  padding: var(--space-1) var(--space-3);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-pill);
   background: var(--manager-button-surface);
   font-size: var(--text-caption);
-}
-.grid {
-  display: grid;
-  margin-block-start: var(--space-6);
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-6);
-  min-width: 0;
-}
-.preview {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  min-width: 0;
-}
-.preview h3 {
-  margin: 0;
-  font-size: var(--text-heading);
-}
-.preview p {
   color: var(--muted);
-  font-size: var(--text-small);
-  line-height: 1.8;
-  flex: 1;
-}
-.status {
-  color: var(--muted);
-}
-.hero .note {
-  margin-top: var(--space-5);
-  padding: var(--space-3);
-  background: var(--dashboard-inset);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-control);
-  font-size: var(--text-small);
-}
-@media (max-width: 1100px) {
-  .grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-@media (max-width: 600px) {
-  .grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .hero {
-    padding: var(--space-5);
-  }
 }

@@ -1,23 +1,63 @@
 import { useState } from 'react';
 import { GlassCombobox } from '../../../../components/ui/glass-combobox';
 import type { EmployeeClient } from '../../client-model';
-import {
-  initialBundle,
-  selectClient,
-  type ClientRequestBundle,
-} from './client-request-bundle';
+import { initialBundle, selectClient, type ClientRequestBundle } from './client-request-bundle';
 import styles from './unified-request.module.css';
 export function ClientIdentityStep({
   bundle,
   onChange,
   clients,
+  editing,
 }: {
   bundle: ClientRequestBundle;
   onChange: (b: ClientRequestBundle) => void;
   clients: readonly EmployeeClient[];
+  /**
+   * EDIT mode: the client is LOCKED. The create-mode choice («عميل جديد /
+   * اختيار عميل موجود») and the client combobox NEVER render here — the
+   * identity is already persisted and the fields below are simply editable,
+   * prefilled with the real stored values. No switching away from this
+   * client is possible from the edit flow.
+   */
+  editing?: boolean;
 }) {
   const selected = clients.find((c) => c.id === bundle.clientId);
   const [expanded, setExpanded] = useState(false);
+  if (editing) {
+    return (
+      <section className={styles.panel}>
+        <p className={styles.preview}>
+          تعديل عميل موجود — الإنشاء مُقفل، والبيانات التالية محفوظة فعلًا.
+        </p>
+        <div className={styles.grid}>
+          <label className={styles.field}>
+            اسم العميل
+            <input
+              required
+              value={bundle.name}
+              onChange={(e) => onChange({ ...bundle, name: e.target.value })}
+            />
+          </label>
+          <label className={styles.field}>
+            رقم الهاتف
+            <input
+              required
+              type="tel"
+              value={bundle.phone}
+              onChange={(e) => onChange({ ...bundle, phone: e.target.value })}
+            />
+          </label>
+        </div>
+        <label className={styles.field}>
+          ملاحظات عامة
+          <textarea
+            value={bundle.notes}
+            onChange={(e) => onChange({ ...bundle, notes: e.target.value })}
+          />
+        </label>
+      </section>
+    );
+  }
   return (
     <section className={styles.panel}>
       <div className={styles.types}>

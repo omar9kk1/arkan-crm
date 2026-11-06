@@ -3,8 +3,8 @@ import { Button } from '../../../components/ui/button';
 import type { NotificationDto } from '../../../lib/api/notification-types';
 import {
   displayDate,
+  notificationDisplay,
   notificationTypeLabel,
-  resolvePropertyCode,
 } from '../../notifications/view';
 import styles from './notifications.module.css';
 
@@ -15,14 +15,29 @@ export function NotificationCard({
   item: NotificationDto;
   onOpen: () => void;
 }) {
+  const view = notificationDisplay(item);
   return (
     <Card
       className={`${styles.card} ${!item.read ? styles.unread : ''}`}
       onClick={onOpen}
     >
       <div>
-        <h3>{item.title}</h3>
-        <p>{resolvePropertyCode(item.message, item.propertyReference)}</p>
+        <h3>{view.title}</h3>
+        <p>{view.message}</p>
+        {view.details.length > 0 && (
+          <div className={styles.duplicateDetails}>
+            {view.details.map((detail) => (
+              <div key={detail.label} className={styles.duplicateRow}>
+                <span className={styles.duplicateLabel}>{detail.label}</span>
+                {detail.code ? (
+                  <bdi className={styles.duplicateCode}>{detail.value}</bdi>
+                ) : (
+                  <span>{detail.value}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
         <div className={styles.badges}>
           <span className={styles.badge}>
             {notificationTypeLabel(item.type)}

@@ -1,25 +1,32 @@
-import { dashboardPreview } from '../dashboard-preview';
+import type { ManagerDashboardDto } from '../../../lib/api/dashboard-types';
 import { DashboardPanel } from './dashboard-panel';
 import { SummaryMetrics } from './summary-metrics';
 import styles from './dashboard.module.css';
 
-export function PropertiesSummary() {
-  const total = dashboardPreview.properties.reduce(
-    (sum, item) => sum + item.value,
-    0,
-  );
+export function PropertiesSummary({
+  properties,
+}: {
+  properties: ManagerDashboardDto['properties'];
+}) {
+  const items = [
+    { label: 'متاح', value: properties.available },
+    { label: 'تم البيع', value: properties.sold },
+    { label: 'تم التأجير', value: properties.rented },
+    { label: 'بانتظار الموافقة', value: properties.pending },
+  ];
+  const total = items.reduce((sum, item) => sum + item.value, 0);
   return (
     <DashboardPanel
       title="قسم العقارات"
-      description="توزيع حالة العقارات داخل النظام حسب الفترة المختارة."
+      description="توزيع حالة العقارات الحالية داخل النظام."
     >
-      <SummaryMetrics items={dashboardPreview.properties} />
+      <SummaryMetrics items={items} />
       <div className={styles.statusBars}>
-        {dashboardPreview.properties.map((item) => (
+        {items.map((item) => (
           <label key={item.label}>
             <span>{item.label}</span>
             <progress
-              max={total}
+              max={Math.max(total, 1)}
               value={item.value}
               aria-label={`${item.label}: ${item.value} من ${total}`}
             />

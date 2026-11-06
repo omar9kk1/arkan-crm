@@ -6,8 +6,8 @@ import type { NotificationDto } from '../../../lib/api/notification-types';
 import { notificationRoute } from '../../notifications/notification-target';
 import {
   displayDate,
+  notificationDisplay,
   notificationTypeLabel,
-  resolvePropertyCode,
 } from '../../notifications/view';
 import styles from './notifications.module.css';
 
@@ -30,8 +30,9 @@ export function NotificationDetailsDrawer({
   onRead: () => void;
   onOpenRecord: (path: string) => void;
 }) {
+  const view = notificationDisplay(item);
   return (
-    <PropertyOverlay title={item.title} drawer onClose={onClose}>
+    <PropertyOverlay title={view.title} drawer onClose={onClose}>
       <div className={styles.badges}>
         <span className={styles.badge}>
           {notificationTypeLabel(item.type)}
@@ -40,7 +41,23 @@ export function NotificationDetailsDrawer({
           {item.read ? 'مقروء' : 'غير مقروء'}
         </span>
       </div>
-      <p>{resolvePropertyCode(item.message, item.propertyReference)}</p>
+      <p className={styles.messageBody}>{view.message}</p>
+      {view.details.length > 0 && (
+        <dl className={styles.facts}>
+          {view.details.map((detail) => (
+            <div key={detail.label}>
+              <dt>{detail.label}</dt>
+              <dd>
+                {detail.code ? (
+                  <bdi className={styles.duplicateCode}>{detail.value}</bdi>
+                ) : (
+                  detail.value
+                )}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
       <dl className={styles.facts}>
         {(
           [

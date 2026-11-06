@@ -33,7 +33,7 @@ export function EmployeeMobileBottomNav({
           onClose={() => setOpen(false)}
         >
           <nav aria-label="أقسام الموظف الإضافية">
-            {[4, 5].map((index) => (
+            {[4, 5, 6, 7].map((index) => (
               <EmployeeNavItem
                 key={index}
                 index={index}

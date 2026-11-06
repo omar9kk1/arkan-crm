@@ -1,4 +1,26 @@
+.comparisonRoot {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  overflow: visible;
+}
+.comparisonRoot::backdrop {
+  background: var(--overlay-scrim);
+  backdrop-filter: blur(7px);
+}
 .drawer.drawer {
+  display: flex;
+  flex-direction: column;
   width: 560px;
   max-width: calc(100vw - 32px);
   padding: 0;
@@ -7,6 +29,15 @@
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   direction: rtl;
+}
+.drawerRight.drawer {
+  left: auto;
+  right: var(--space-4);
+}
+@media (min-width: 768px) {
+  .comparing.drawer {
+    width: min(560px, calc(50vw - 24px));
+  }
 }
 .drawer > header {
   margin: 0;

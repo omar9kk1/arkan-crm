@@ -12,6 +12,25 @@
 .filters.filters > div {
   flex-wrap: wrap;
 }
+/* Manager notifications ONLY: vertical breathing room below the pills so the
+   shared painted scrollbar (refined once in properties-tabs.module.css to a
+   3px warm-neutral translucent thumb on a transparent track, placed inside
+   the capsule) keeps the approved distances here too: pills → thumb top
+   8px (buttons bottom at 14px, thumb top at 6px) and thumb → inner bottom
+   edge 3px. Buttons keep their height, the bar grows downward only. */
+.filters > div {
+  padding-block-end: 14px;
+}
+/* The painted thumb is hidden by the shared tabs CSS
+   (properties-tabs.module.css) on touch devices AND in narrow windows
+   (≤900px, any pointer) — so the 14px breathing room reverts to the pill's
+   default 8px bottom padding on those layouts: no dead strip, and no
+   detached scrollbar line. Touch/trackpad scrolling itself is untouched. */
+@media (hover: none) and (pointer: coarse), (max-width: 900px) {
+  .filters > div {
+    padding-block-end: var(--space-2);
+  }
+}
 .list {
   display: grid;
   gap: var(--space-4);
@@ -114,4 +133,50 @@
   .card {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+
+.duplicateDetails {
+  display: grid;
+  gap: 2px;
+  margin-top: 4px;
+}
+.duplicateRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  font-size: var(--text-caption);
+  line-height: 1.6;
+}
+.duplicateLabel {
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+.duplicateValue {
+  color: var(--ink);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.duplicateCode {
+  color: var(--ink);
+  font-weight: 600;
+  direction: ltr;
+  unicode-bidi: isolate;
+  font-variant-numeric: tabular-nums;
+}
+
+
+.messageBody {
+  white-space: pre-line;
+}
+.decisionUnavailable {
+  margin: 0 0 var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  background: rgba(154, 91, 19, 0.1);
+  color: #8a5312;
+  font-size: var(--text-caption);
+  line-height: 1.6;
 }

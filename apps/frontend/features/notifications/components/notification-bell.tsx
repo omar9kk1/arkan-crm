@@ -6,16 +6,20 @@ import { Button } from '../../../components/ui/button';
 import { Icon } from '../../../components/ui/icon';
 import { Toast } from '../../../components/ui/toast';
 import { useAuth } from '../../auth/components/auth-provider';
-import {
-  NOTIFICATION_PAGE_SIZE,
-  useNotifications,
-} from '../store';
+import { NOTIFICATION_PAGE_SIZE, useNotifications } from '../store';
 import type { NotificationDto } from '../../../lib/api/notification-types';
 import { notificationRoute } from '../notification-target';
 import { notifyClientsDataChanged } from '../clients-refresh';
 import {
+  DUPLICATE_NOTIFICATION_MESSAGE,
+  DUPLICATE_NOTIFICATION_TITLE,
+  duplicateNotificationDetails,
+  isDecisionNotification,
+  isPotentialDuplicateNotification,
   isRecordNotification,
+  notificationAffectsPropertyLists,
   resolvePropertyCode,
+  stripInternalIds,
 } from '../view';
 import { notifyPropertyDataChanged } from '../property-refresh';
 import styles from './notification-bell.module.css';
@@ -82,7 +86,9 @@ function parseChangeItem(rawItem: string): NotificationChangeLine {
   };
 }
 
-export function parseNotificationBody(message: string): NotificationBodyPreview {
+export function parseNotificationBody(
+  message: string,
+): NotificationBodyPreview {
   if (!message.startsWith(PROPERTY_BODY_PREFIX)) {
     return { isProperty: false, changes: null };
   }
@@ -121,6 +127,18 @@ function formatTime(iso: string): string {
  * are always in step and the app keeps a single authenticated 15s poll. There is
  * no browser-notification permission, no WebSocket and no external service.
  */
+
+function notificationIcon(
+  type: string,
+): 'bell' | 'checkCircle' | 'megaphone' | 'clock' | 'settings' {
+  if (type.startsWith('PROPERTY_APPROVED') || type === 'CLIENT_REVIEW_APPROVED')
+    return 'checkCircle';
+  if (type === 'SYSTEM') return 'megaphone';
+  if (type.startsWith('FOLLOWUP')) return 'clock';
+  if (type.startsWith('PROPERTY')) return 'settings';
+  return 'bell';
+}
+
 export function NotificationBell({ className = '' }: { className?: string }) {
   const { user } = useAuth();
   const router = useRouter();
@@ -161,10 +179,10 @@ export function NotificationBell({ className = '' }: { className?: string }) {
       (item) => previous === null || item.createdAt > previous,
     );
     lastSeen.current = newest;
-    // A `SYSTEM` row never links to a property, so it is the only kind that
-    // cannot change a list; everything else means the server data behind the
-    // property pages moved and they should re-read themselves.
-    if (fresh.some((item) => item.type !== 'SYSTEM')) {
+    // Any notification linked to a property (including the SYSTEM soft-delete
+    // decision) means the server data behind the property pages moved; those
+    // pages re-read themselves through their own hook.
+    if (fresh.some(notificationAffectsPropertyLists)) {
       notifyPropertyDataChanged();
     }
     // Record-activity rows (clients/contacts/follow-ups/interests) also move
@@ -238,6 +256,14 @@ export function NotificationBell({ className = '' }: { className?: string }) {
 
   const openNotification = (item: NotificationDto) => {
     setOpen(false);
+    // A decision row whose property was permanently deleted keeps its history
+    // in the inbox (the FK is detached) and explains why it cannot open.
+    if (isDecisionNotification(item) && !item.propertyId) {
+      if (!item.read) void markRead(item.id);
+      setToast('تفاصيل العقار لم تعد متاحة بعد الحذف النهائي.');
+      setToastKey((key) => key + 1);
+      return;
+    }
     // Optimistically flip the row to read (the store persists it and re-syncs on
     // failure); the shared feed updates the bell badge and any open page at once.
     if (!item.read) void markRead(item.id);
@@ -314,11 +340,23 @@ export function NotificationBell({ className = '' }: { className?: string }) {
                 // The CURRENT property code (the pill) comes from the API,
                 // never from the stored historic text; the message itself is
                 // ALSO shown with current codes by resolvePropertyCode.
-                const surface = parseNotificationBody(
-                  resolvePropertyCode(item.message, item.propertyReference),
-                );
-                const showPill = surface.isProperty && item.propertyReference;
-                const showChanges = showPill && surface.changes;
+                const isDuplicate =
+                  isPotentialDuplicateNotification(item);
+                const displayTitle = isDuplicate
+                  ? DUPLICATE_NOTIFICATION_TITLE
+                  : item.title;
+                const duplicateDetails = isDuplicate
+                  ? duplicateNotificationDetails(item)
+                  : [];
+                const surface = isDuplicate
+                  ? { isProperty: false, changes: null }
+                  : parseNotificationBody(
+                      resolvePropertyCode(item.message, item.propertyReference),
+                    );
+                const showPill =
+                  !isDuplicate && surface.isProperty && item.propertyReference;
+                const showChanges =
+                  !isDuplicate && showPill && surface.changes;
                 return (
                   <li key={item.id}>
                     <button
@@ -328,52 +366,92 @@ export function NotificationBell({ className = '' }: { className?: string }) {
                       }`}
                       onClick={() => openNotification(item)}
                     >
-                      <span className={styles.itemTop}>
-                        <span className={styles.itemTitle}>
-                          {!item.read && (
-                            <span className={styles.dot} aria-hidden="true" />
-                          )}
-                          {item.title}
-                        </span>
-                        <time
-                          className={styles.itemTime}
-                          dateTime={item.createdAt}
-                        >
-                          {formatTime(item.createdAt)}
-                        </time>
+                      <span className={styles.itemIcon} aria-hidden="true">
+                        <Icon
+                          name={notificationIcon(item.type)}
+                          width={15}
+                          height={15}
+                        />
                       </span>
-                      {showPill && (
-                        <span className={styles.itemCode}>
-                          <bdi>{item.propertyReference}</bdi>
+                      <div className={styles.itemContent}>
+                        <span className={styles.itemTop}>
+                          <span className={styles.itemTitle}>
+                            {!item.read && (
+                              <span className={styles.dot} aria-hidden="true" />
+                            )}
+                            {displayTitle}
+                          </span>
+                          <time
+                            className={styles.itemTime}
+                            dateTime={item.createdAt}
+                          >
+                            {formatTime(item.createdAt)}
+                          </time>
                         </span>
-                      )}
-                      {showChanges ? (
-                        <span className={styles.itemChanges}>
-                          {surface.changes?.map((line, index) => (
-                            <span key={index} className={styles.itemChange}>
-                              {line.before !== null && line.after !== null ? (
-                                <>
-                                  {line.label}: من{' '}
-                                  <bdi>{line.before}</bdi>
-                                  {' إلى '}
-                                  <bdi>{line.after}</bdi>
-                                </>
-                              ) : line.note ? (
-                                `${line.label}: ${line.note}`
-                              ) : (
-                                line.text
-                              )}
+                        {isDuplicate ? (
+                          <>
+                            <span className={styles.itemMessage}>
+                              {DUPLICATE_NOTIFICATION_MESSAGE}
                             </span>
-                          ))}
-                        </span>
-                      ) : !showPill ? (
-                        <span className={styles.itemMessage}>
-                          {resolvePropertyCode(
-                            item.message,
-                            item.propertyReference,
-                          )}
-                        </span>
-                      ) : null}
+                            {duplicateDetails.length > 0 && (
+                              <span className={styles.duplicateDetails}>
+                                {duplicateDetails.map((detail) => (
+                                  <span
+                                    key={detail.label}
+                                    className={styles.duplicateRow}
+                                  >
+                                    <span className={styles.duplicateLabel}>
+                                      {detail.label}
+                                    </span>
+                                    {detail.code ? (
+                                      <bdi className={styles.duplicateCode}>
+                                        {detail.value}
+                                      </bdi>
+                                    ) : (
+                                      <span className={styles.duplicateValue}>
+                                        {detail.value}
+                                      </span>
+                                    )}
+                                  </span>
+                                ))}
+                              </span>
+                            )}
+                          </>
+                        ) : showPill ? (
+                          <span className={styles.itemCode}>
+                            <bdi>{item.propertyReference}</bdi>
+                          </span>
+                        ) : null}
+                        {!isDuplicate && showChanges && (
+                          <span className={styles.itemChanges}>
+                            {surface.changes?.map((line, index) => (
+                              <span key={index} className={styles.itemChange}>
+                                {line.before !== null && line.after !== null ? (
+                                  <>
+                                    {line.label}: <bdi>{line.before}</bdi>
+                                    {' ← '}
+                                    <bdi>{line.after}</bdi>
+                                  </>
+                                ) : line.note ? (
+                                  `${line.label}: ${line.note}`
+                                ) : (
+                                  line.text
+                                )}
+                              </span>
+                            ))}
+                          </span>
+                        )}
+                        {!isDuplicate && !showPill && !showChanges && (
+                          <span className={styles.itemMessage}>
+                            {stripInternalIds(
+                              resolvePropertyCode(
+                                item.message,
+                                item.propertyReference,
+                              ),
+                            )}
+                          </span>
+                        )}
+                      </div>
                     </button>
                   </li>
                 );
@@ -382,7 +460,11 @@ export function NotificationBell({ className = '' }: { className?: string }) {
           )}
         </div>
       </div>
-      <Toast message={toast} eventKey={toastKey} onDismiss={() => setToast('')} />
+      <Toast
+        message={toast}
+        eventKey={toastKey}
+        onDismiss={() => setToast('')}
+      />
     </>
   );
 }

@@ -20,6 +20,40 @@
   flex: 1 1 280px;
   min-width: 0;
 }
+/* The client status filter (ex-secondary segmented bar) + the search input
+   share ONE RTL row — the same corrected grid pattern as the follow-ups
+   inline toolbar: the «الحالة» dropdown is bounded on the RIGHT
+   (180–210px column) and the search flex-grows to fill EVERY remaining
+   pixel of content width on the LEFT. The field label sits above the
+   control like the follow-ups filterField; both controls share one height
+   and bottom alignment (align-items: end). RTL grid auto-placement starts
+   from the right, so the bounded column comes first. min-width: 0 keeps
+   the grid from overflowing; below 600px it stacks cleanly into one
+   column — the only widths where two controls cannot fit comfortably. */
+.statusRow {
+  display: grid;
+  grid-template-columns: 160px 180px minmax(0, 1fr);
+  align-items: end;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  min-width: 0;
+}
+
+.statusField {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--text-small);
+}
+
+@media (max-width: 600px) {
+  .statusRow {
+    grid-template-columns: 1fr 1fr;
+  }
+  .statusRow > *:last-child {
+    grid-column: 1 / -1;
+  }
+}
 .list {
   display: grid;
   gap: var(--space-4);

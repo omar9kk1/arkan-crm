@@ -1,148 +1,1414 @@
-.modal.modal {
-  width: 1180px;
-  max-width: calc(100vw - var(--space-8));
-  background: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.9),
-    rgba(239, 231, 219, 0.88)
-  );
-  backdrop-filter: blur(30px);
-}
-.formGrid {
+/* Employee follow-ups page layout. Colors, surfaces and radii reuse the Astra
+   CSS variables; the module only defines this page's structure. */
+
+.stats {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-4);
+  margin-block: var(--space-5);
 }
-.formGrid > label {
+
+/* Category tabs — a dedicated FULL-WIDTH row of their own. ONE shared fix for
+   BOTH accounts: the tablist NEVER wraps and NEVER gets forced
+   overflow-x: visible (the previous desktop override) — it stays the shared
+   `.scroller`: flex-wrap nowrap, overflow-x auto, native scrollbar hidden
+   cross-browser (scrollbar-width / -ms-overflow-style / ::-webkit-scrollbar),
+   smooth scroll-behavior + overscroll containment, and the component's
+   painted 3px Astra thumb (refined once in properties-tabs.module.css)
+   appears ONLY when the tabs actually overflow. RTL order, natural tab
+   widths (flex: 1 0 auto + white-space: nowrap) and keyboard reachability
+   are all inherited from the shared component; the page itself never gains
+   horizontal overflow. The extra bottom padding gives the thumb clean
+   breathing room below the pills (pills → thumb 8px, thumb → edge ~3px). */
+.tabsRow {
+  display: flex;
+  margin-bottom: var(--space-4);
   min-width: 0;
-  margin: 0;
 }
-.fullField {
-  grid-column: 1 / -1;
+
+.tabsRow > div {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-block-end: 14px;
 }
-.typeChoices {
-  border: 0;
-  padding: 0;
-  margin: 0 0 var(--space-6);
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+
+/* The painted thumb is hidden by the shared tabs CSS
+   (properties-tabs.module.css) on touch devices AND in narrow windows
+   (≤900px, any pointer) — so the extra 14px breathing room reverts to the
+   pill's default 8px bottom padding on those layouts: no dead strip, and
+   no detached scrollbar line. Touch/trackpad scrolling itself (one row,
+   RTL, auto-reveal of the selected tab) is untouched. */
+@media (hover: none) and (pointer: coarse), (max-width: 900px) {
+  .tabsRow > div {
+    padding-block-end: var(--space-2);
+  }
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  min-width: 0;
 }
-.typeChoices legend {
-  font-weight: 600;
+
+/* The search field owns this row alone after the tabs moved out; the cap
+   keeps it balanced instead of stretching across the whole content column. */
+.toolbar > label {
+  flex: 1 1 280px;
+  min-width: 0;
+  max-width: 540px;
+}
+
+.filterRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
   margin-bottom: var(--space-4);
 }
-.typeChoices label {
+
+.filterField {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 200px;
+  font-size: var(--text-small);
+}
+
+/* The MANAGER inline toolbar («متابعاتي»): ONE row — the bounded status
+   field on the RIGHT, the search filling every remaining pixel to the left
+   boundary of the content column. RTL grid auto-placement starts from the
+   right, so the status label comes first in the markup. (The employee page
+   keeps the stacked rows above and never uses this class.) */
+.inlineToolbar {
+  display: grid;
+  grid-template-columns: minmax(170px, 200px) minmax(0, 1fr);
+  align-items: end;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  min-width: 0;
+}
+
+/* Inside the bounded column the field loses its own min-width (200px) so the
+   column width stays the authority; both controls share the same height
+   (44px) and bottom alignment. */
+.inlineToolbar > .filterField {
+  min-width: 0;
+}
+
+/* Mobile: stack cleanly, never overflow. */
+@media (max-width: 720px) {
+  .inlineToolbar {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Single-column list — EXACTLY ONE person card per row at EVERY viewport
+   (owner requirement): every card uses the full available content width with
+   one consistent gap, a content-driven height (no fixed or minimum heights)
+   and no horizontal overflow on mobile. */
+.list {
+  margin-block: var(--space-4);
+}
+
+.listGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+}
+
+/* Compact person card ---------------------------------------------------- */
+/* ONE person per card: a clean identity header and ONE compact clickable
+   row per subject (each row is its own real button). No stretched overlay
+   trigger anymore — the rows are the affordances, tel: links dial directly,
+   and nothing ever saves or resets a schedule on open. Height grows
+   naturally with the subject rows (no fixed height). (Double class to
+   out-rank the shared Card's large default padding.) */
+.personCard.personCard {
   position: relative;
-  cursor: pointer;
-  text-align: center;
-  padding: var(--space-4) var(--space-2);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-control);
-  background: var(--manager-button-surface);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
+  transition: transform var(--motion-fast);
 }
-.typeChoices label[data-selected='true'] {
-  background: var(--accent-soft);
-  border-color: var(--border);
+
+.personCard:hover {
+  transform: translateY(-2px);
 }
-.typeChoices input {
-  position: absolute;
-  opacity: 0;
+
+/* The visible content layer — normal pointer flow, no overlay tricks. */
+.cardBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
 }
-.typeChoices label:focus-within {
+
+/* Two-sided RTL header: the person's identity on the RIGHT; the phone stays a
+   real tel: link that LOOKS like plain text (dials on its own, never the
+   drawer), and a quiet subject-count line completes the header. */
+.cardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+/* The RIGHT side stacks name → phone → subject count tightly; every child
+   shrink-wraps to its content so RTL keeps them flush right and long names
+   wrap instead of pushing the rows below. */
+.cardIdentity {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.cardName {
+  display: block;
+  font-size: var(--text-heading);
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+/* The number is a real tel: link that LOOKS like plain text: it dials on its
+   own (never the drawer), stays LTR inside the RTL line, and is never tiny. */
+.cardPhone {
+  font-size: var(--text-small);
+  font-weight: 600;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  unicode-bidi: isolate;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.cardPhone:hover {
+  text-decoration: underline;
+}
+
+.cardPhone:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
-.notesInput.notesInput {
-  min-height: 150px;
-}
-.formActions {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-.formLayout {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(220px, 1fr);
-  gap: var(--space-5);
-  align-items: start;
-}
-.formLayout > * {
-  min-width: 0;
-}
-.stack,
-.timeline {
-  display: grid;
-  gap: var(--space-4);
-}
-.timeline {
-  margin-block: var(--space-5);
-}
-.row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-4);
-  align-items: center;
-  border-inline-start: 3px solid var(--accent-soft);
-}
-.row h3 {
-  margin: 0;
-  font-size: var(--text-heading);
-}
-.row p {
+
+/* The quiet SUBJECT-COUNT line of the header («3 مواضيع متابعة»). */
+.subjectsCount {
   color: var(--muted);
-  font-size: var(--text-small);
-  overflow-wrap: anywhere;
+  font-size: var(--text-caption);
 }
-.actions {
+
+/* One compact row PER subject: the person's subjects stay grouped inside this
+   ONE card (never split), each keeping its own label and read-only due line,
+   separated by a hairline. */
+/* Full-width subject block beneath a subtle divider under the header. */
+.subjectRows {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  padding-top: var(--space-3);
+  list-style: none;
+  min-width: 0;
+  border-top: 1px solid var(--glass-border);
+}
+
+/* ONE horizontal CLICKABLE row per subject: the subject identity on the
+   RIGHT (server label; property/request codes inside it render LTR isolated)
+   and its own quiet due line beneath; LEFT: its OWN status badge, its OWN
+   saved-entries count, then the small navigation chevron. Rows are separated
+   by subtle thin dividers — no nested cards, no inline expansion. */
+.subjectRow {
+  display: block;
+  min-width: 0;
+  padding-block: 0;
+}
+
+.subjectRow:first-child {
+  padding-block-start: 0;
+}
+
+.subjectRow:last-child {
+  padding-block-end: 0;
+}
+
+.subjectRow + .subjectRow {
+  border-top: 1px solid var(--glass-border);
+}
+
+.subjectActionRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-2) var(--space-2);
+  border: 0;
+  background: none;
+  border-radius: var(--radius-control);
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: background var(--motion-fast);
+}
+
+.subjectActionRow:hover {
+  background: var(--manager-button-surface);
+}
+
+.subjectActionRow:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+/* The subject's own identity (property code / request summary are already
+   inside the server label) with its OWN due line beneath. */
+.subjectInfo {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.subjectLabel {
+  font-size: var(--text-body);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  unicode-bidi: isolate;
+}
+
+/* The secondary read-only line («المتابعة القادمة: 29 أكتوبر», the responsible
+   employee on the supervision rows) — muted, wrapping, never a status. */
+.subjectMeta {
+  color: var(--muted);
+  font-size: var(--text-caption);
+  overflow-wrap: anywhere;
+  unicode-bidi: isolate;
+}
+
+/* LEFT cluster: the subject's OWN bucket badge + its OWN entries count. */
+.subjectBadges {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.subjectChevron {
+  flex: 0 0 auto;
+  align-self: center;
+  color: var(--muted);
+  font-size: var(--text-caption);
+  font-weight: 700;
+}
+
+/* Shared chips ------------------------------------------------------------ */
+
+.categories {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
-  align-items: center;
 }
-.badge,
-.late {
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--glass-border);
+
+.category {
+  padding: var(--space-1) var(--space-3);
   border-radius: var(--radius-pill);
   background: var(--manager-button-surface);
+  border: 1px solid var(--glass-border);
   font-size: var(--text-caption);
 }
-.late {
+
+.badge {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--manager-button-surface);
+  border: 1px solid var(--glass-border);
+  font-size: var(--text-caption);
+  white-space: nowrap;
+}
+
+.badge[data-bucket='OVERDUE'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.badge[data-bucket='TODAY'] {
   background: var(--accent-soft);
 }
-.filters {
+
+/* Person drawer (anchored to the PHYSICAL LEFT edge) ---------------------- */
+/* `left`/`right` are physical properties — never logical `start`/`end` — so
+   RTL can never mirror the anchor (the same physical-left convention as every
+   other Arkan drawer). Double class out-ranks the shared `.drawer`
+   positioning. Width 520–560px capped to the real viewport space; full-width
+   panel on narrow screens. */
+
+.personDrawer.personDrawer {
+  top: var(--space-4);
+  bottom: var(--space-4);
+  left: var(--space-4);
+  right: auto;
+  margin: 0;
+  width: min(548px, calc(100vw - 2 * var(--space-4)));
+  height: calc(100dvh - 2 * var(--space-4));
+  /* Consistent ~20px content padding at desktop drawer width (the visual
+     contract asks 20–24px); the ≤600px media keeps a tighter 12px. */
+  padding: var(--space-5);
+  /* ENTRY: slide from LEFT to RIGHT. `translateX(-100%)` is a physical
+     transform (RTL-proof): the panel starts one full width to the LEFT of
+     its left-anchored position and settles rightwards into place. */
+  animation: followupDrawerEnter 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* EXIT is the mirrored physical motion, run by the overlay's optional
+   `slideFromLeft` WAAPI close before the native close fires. */
+@keyframes followupDrawerEnter {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .personDrawer.personDrawer {
+    animation: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .personDrawer.personDrawer {
+    top: var(--space-2);
+    bottom: var(--space-2);
+    left: var(--space-2);
+    right: var(--space-2);
+    width: auto;
+    padding: var(--space-3);
+  }
+}
+
+/* Compact header: identity row (phone + subtitle) and badges sit tight
+   under the person's name; the close button stays at the top corner. */
+.personDrawer > header {
+  align-items: flex-start;
+  margin-bottom: var(--space-3);
+}
+
+/* The header's identity column stretches to the free space beside the close
+   button, so the tabs below it can span (almost) the FULL drawer width. */
+.personDrawer > header > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.personDrawer > header h2 {
+  font-size: 1.3rem;
+  line-height: 1.35;
+}
+
+.drawerPhone {
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  unicode-bidi: isolate;
+  direction: ltr;
+}
+
+.drawerSubtitle {
+  color: var(--muted);
+  font-size: var(--text-caption);
+}
+
+/* The drawer header's approved THREE-SECTION structure (RTL identity first):
+   §1 identity row (phone + registration badge, wrapping — never colliding),
+   §2 the current-subject block («المتابعة الحالية» label over ONE identity),
+   §3 the full-width standalone associations trigger below everything. */
+.drawerIdentityRow {
   display: flex;
   flex-wrap: wrap;
-  align-items: end;
-  gap: var(--space-3);
-}
-.filters > label {
-  flex: 1 1 160px;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
   min-width: 0;
+}
+
+.registeredBadge {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border);
+  background: var(--manager-button-surface);
+  color: var(--ink);
+  font-size: var(--text-caption);
+  white-space: nowrap;
+}
+
+.currentSubjectBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 0 var(--space-2);
+  min-width: 0;
+}
+
+.currentSubjectLabel {
+  color: var(--muted);
+  font-size: var(--text-caption);
+}
+
+.currentSubjectValue {
+  color: var(--ink);
+  font-size: var(--text-body);
+  font-weight: 600;
+  line-height: 1.5;
+  unicode-bidi: isolate;
+  overflow-wrap: anywhere;
+  text-align: start;
+}
+
+/* §3: the associations control owns its OWN full-width row below everything
+   — never squeezed beside the identity or the current-subject block. No
+   bottom margin: the header block already spaces the tabs that follow. */
+.associations {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  min-width: 0;
+}
+
+.associationTriggerRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+  background: var(--manager-button-surface);
+  color: var(--ink);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition:
+    background var(--motion-fast),
+    border-color var(--motion-fast);
+}
+
+.associationTriggerRow:hover {
+  background: var(--accent-soft);
+  border-color: var(--border);
+}
+
+.associationTriggerRow:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.associationTriggerLabel {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--text-small);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.associationCountPill {
+  flex: 0 0 auto;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.associationChevron {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: var(--text-caption);
+  transition: transform var(--motion-fast);
+  transform: rotate(-90deg); /* collapsed: points toward the start side */
+}
+
+.associationChevronOpen {
+  transform: rotate(0deg);
+}
+
+/* Expanded: the panel opens straight below the trigger; a tall list scrolls
+   inside its own bounded box instead of eating the whole drawer. */
+.associationsPanel {
+  width: 100%;
+  display: grid;
+  gap: var(--space-1);
+  align-content: start;
+  padding: var(--space-2);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+  background: var(--manager-button-surface);
+  max-height: min(42dvh, 380px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* ROOT-CAUSE RESET — the properties overlay (properties.module.css) styles
+   EVERY button inside its header as the round 34×34px close button
+   (`.overlayHeader button { width:34px; height:34px; padding:0;
+   border-radius:50%; font-size:20px; … }`). The follow-up drawers render
+   their interactions INSIDE that header, so every association button was
+   being squeezed into a 34px circle — the Arabic text stacked vertically
+   and the layout looked broken. The scoped rules below (descendants of the
+   drawer's own `.personDrawer` dialog, specificity 0,2,0+ — higher than the
+   shared 0,1,1 close-button rule and order-independent) restore each
+   control's real row geometry, surface and typography. */
+.personDrawer .associationTriggerRow {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--glass-border);
+  background: var(--manager-button-surface);
+  color: var(--ink);
+  font-size: var(--text-small);
+  font-weight: var(--font-normal, 500);
+  line-height: 1.5;
+  text-align: start;
+}
+
+.personDrawer .associationTriggerRow:hover {
+  background: var(--accent-soft);
+  border-color: var(--border);
+}
+
+.personDrawer .associationTriggerRow:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.personDrawer .associationCategoryRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-size: var(--text-small);
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: start;
+  cursor: pointer;
+}
+
+.personDrawer .associationCategoryRow > :nth-child(1) {
+  justify-self: start;
+  text-align: start;
+}
+
+.personDrawer .associationCategoryRow > :nth-child(2) {
+  justify-self: center;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+}
+
+.personDrawer .associationCategoryRow > :nth-child(3) {
+  justify-self: end;
+}
+
+.personDrawer .associationCategoryRow:hover {
+  background: color-mix(in srgb, var(--muted) 8%, transparent);
+}
+
+.personDrawer .associationCategoryOpen {
+  background: color-mix(in srgb, var(--muted) 9%, transparent);
+}
+
+.personDrawer button.associationItemRow {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  min-width: 0;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-control);
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-size: var(--text-caption);
+  font-weight: var(--font-normal, 500);
+  line-height: 1.5;
+  text-align: start;
+}
+
+.personDrawer button.associationItemRow:hover {
+  background: color-mix(in srgb, var(--muted) 8%, transparent);
+}
+
+.personDrawer button.associationItemRow:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.associationCategory {
+  display: grid;
+  min-width: 0;
+}
+
+.associationCategoryRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  background: none;
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  font-size: var(--text-small);
+  font-weight: 600;
+  text-align: start;
+  cursor: pointer;
+  transition: background var(--motion-fast);
+  min-width: 0;
+}
+
+.associationCategoryRow > :nth-child(1) {
+  text-align: start;
+}
+
+.associationCategoryRow > :nth-child(2) {
+  justify-self: center;
+}
+
+.associationCategoryRow > :nth-child(3) {
+  justify-self: end;
+}
+
+.associationCategoryRow:hover {
+  background: color-mix(in srgb, var(--muted) 8%, transparent);
+}
+
+.associationCategoryRow:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.associationCategoryOpen {
+  background: color-mix(in srgb, var(--muted) 9%, transparent);
+}
+
+.associationCategoryCount {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border);
+  background: var(--manager-button-surface);
+  font-size: var(--text-caption);
+  font-weight: 600;
+}
+
+.associationChevron {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: var(--text-caption);
+  transition: transform var(--motion-fast);
+}
+
+/* Collapsed categories point the chevron toward the start side (RTL). */
+.associationChevronOpen {
+  transform: rotate(90deg);
+}
+
+.associationItems {
+  display: grid;
+  margin: 0;
+  padding: 0 var(--space-1);
+  list-style: none;
+}
+
+/* ONE quiet row per record — hairline dividers INSTEAD of nested bright
+   boxes; the active subject row carries a soft highlight + check icon. */
+.associationItems > li + li {
+  border-top: 1px solid var(--glass-border);
+}
+
+.associationItemRow,
+.associationItemRowPlain,
+.associationItemActive {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-2);
+  border: 0;
+  background: none;
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  font: inherit;
+  text-align: start;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+button.associationItemRow {
+  cursor: pointer;
+  transition: background var(--motion-fast);
+}
+
+button.associationItemRow:hover {
+  background: color-mix(in srgb, var(--muted) 7%, transparent);
+}
+
+button.associationItemRow:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+/* The CURRENT subject inside associations: subtle highlight + check, and it
+   is NOT a link (switching to itself is meaningless). */
+.associationItemActive {
+  background: color-mix(in srgb, var(--focus) 12%, transparent);
+  cursor: default;
+}
+
+.associationItemCheck {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: var(--text-caption);
+  font-weight: 700;
+}
+
+.associationItemText {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.associationItemLabel {
+  font-size: var(--text-small);
+  font-weight: 500;
+  line-height: 1.5;
+  unicode-bidi: isolate;
+  overflow-wrap: anywhere;
+}
+
+.associationItemSecondary {
+  color: var(--muted);
+  font-size: var(--text-caption);
+  unicode-bidi: isolate;
+  overflow-wrap: anywhere;
+}
+
+.associationItemCurrent {
+  color: var(--muted);
+  font-size: var(--text-caption);
+  font-weight: 600;
+}
+
+.associationItemChevron {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: var(--text-caption);
+}
+
+.associationItemRowPlain {
+  color: var(--muted);
+}
+
+.associationItemNone {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: var(--text-caption);
+}
+
+/* Full-width two-tab bar at the top of the scroll body, inside the SAME
+   padded content box as the subject cards below it — so the container's LEFT
+   and RIGHT edges line up with the cards EXACTLY (desktop and mobile). Each
+   tab takes 50% of the width. */
+.drawerTabs {
+  width: 100%;
   margin: 0;
 }
-.filters > label:last-child {
-  flex: 2 1 260px;
+
+.drawerTabs > div {
+  width: 100%;
 }
+
+.drawerTabs [role='tablist'] {
+  width: 100%;
+  flex-wrap: nowrap;
+}
+
+/* Double class to out-rank the shared `.segmented` rule of the same
+   specificity, whatever the stylesheet order. */
+.drawerTabs.drawerTabs [role='tablist'] > button {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* ACTIVE tab: NO gold — the shared Astra segmented rule already gives the
+   requested neutral treatment (subtle translucent white/glass fill, soft
+   `--shadow-control`, neutral border, stronger text weight); inactive tabs
+   stay understated muted. */
+
+/* Subject sections (record + history): NO inset card — heading, facts and
+   timeline float directly on the drawer surface (the modern borderless
+   grammar); separation comes from spacing, not boxes. */
+.drawerSubjectList {
+  display: grid;
+  gap: var(--space-4);
+  padding-block: var(--space-2);
+}
+
+.drawerSubject {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* Several subjects in one drawer (supervision): a calm hairline between
+   them instead of stacked boxes. */
+.drawerSubject + .drawerSubject {
+  padding-block-start: var(--space-4);
+  border-block-start: 1px solid var(--border);
+}
+
+.drawerSubjectHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.drawerSubjectTitle {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.drawerSubjectTitle h4 {
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: 700;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.subjectType {
+  color: var(--muted);
+  font-size: var(--text-caption);
+}
+
+/* Tidy two-column facts grid (one column on narrow screens). Each tile is a
+   MINI of the timeline card: solid calm surface, NO visible outline (glass
+   hairline only), whisper shadow, generous inner air — quiet and modern.
+   The balanced 2×2 grammar (آخر متابعة | المتابعة القادمة // العقار |
+   المنطقة); the count lives in `.factsMeta`, never an odd fifth tile. */
+.drawerFacts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  min-width: 0;
+}
+
+/* Narrow phones: truthful single column so nothing squeezes. */
+@media (max-width: 480px) {
+  .drawerFacts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.drawerFact {
+  display: block;
+  min-width: 0;
+  padding: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--glass-border);
+  border-radius: calc(var(--radius-control) + var(--space-1));
+  box-shadow: var(--shadow-control);
+  overflow-wrap: anywhere;
+}
+
+.factLabel {
+  display: block;
+  font-size: var(--text-caption);
+  line-height: 1.5;
+  color: var(--muted);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.factValue {
+  display: block;
+  margin: 0;
+  font-size: var(--text-small);
+  font-weight: 600;
+  line-height: 1.5;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  unicode-bidi: isolate;
+}
+
+/* ONE unified, softly tinted details panel under «تفاصيل المتابعة»: compact
+   horizontal label/value rows with subtle separators. It REPLACES the old
+   four independent white fact cards (and the orphan fifth counter tile) —
+   no independent card/background for each fact, no grid gaps. */
+.detailsPanel {
+  display: grid;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  min-width: 0;
+  background: var(--manager-button-surface);
+  border: 1px solid var(--glass-border);
+  border-radius: calc(var(--radius-control) + var(--space-1));
+}
+
+.detailsRow {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  align-items: baseline;
+  gap: var(--space-3);
+  min-width: 0;
+  padding-block: var(--space-2);
+}
+
+/* The subtle separator between the panel's own rows — not a nested card. */
+.detailsRow + .detailsRow {
+  border-block-start: 1px solid var(--glass-border);
+}
+
+/* A discreet real navigation affordance inside the panel (property/client
+   deep link). Its label NEVER repeats the property code already shown in
+   the drawer's current-subject identity. */
+.detailsLink {
+  display: inline-block;
+  border: 0;
+  background: none;
+  padding: 0;
+  margin-top: var(--space-1);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: start;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.detailsLink:hover {
+  color: var(--muted);
+}
+
+.detailsLink:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* The small «تفاصيل المتابعة» heading of the facts block, with the subject's
+   OWN status chip sitting neatly beside it (never floating between
+   unrelated sections). */
+.factsHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.factsTitle {
+  color: var(--muted);
+  font-size: var(--text-caption);
+  font-weight: 600;
+}
+
+/* Compact INLINE metadata line beneath the facts grid (the saved-entries
+   count and the supervision-specific facts) — never an orphan odd tile. */
+.factsMeta {
+  display: block;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-caption);
+  line-height: 1.6;
+  unicode-bidi: isolate;
+  overflow-wrap: anywhere;
+}
+
+.factsMeta [dir='ltr'] {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Two short readable lines per instant (date, then time) — enough room to
+   breathe, Arabic-Indic digits kept whole via bidi isolation. */
+.factDate,
+.factTime {
+  display: block;
+  unicode-bidi: isolate;
+}
+
+.factTime {
+  color: var(--ink);
+  font-size: var(--text-small);
+}
+
+/* The PROPERTY fact is a real, full-tile button (not link-styled text):
+   subtle hover, a clear keyboard focus ring, and RTL with the code kept LTR. */
+.factLink {
+  font: inherit;
+  text-align: start;
+  color: inherit;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-fast),
+    box-shadow var(--motion-fast),
+    transform var(--motion-fast);
+}
+
+.factLink:hover {
+  border-color: var(--border);
+  box-shadow: var(--shadow-control);
+  transform: translateY(-1px);
+}
+
+.factLink:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* The linked value stays NEUTRAL ink (no gold): a quiet underline is the
+   only affordance that this tile navigates. */
+.factLink .factValue {
+  color: var(--ink);
+  unicode-bidi: isolate;
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+  text-underline-offset: 3px;
+}
+
+@media (max-width: 460px) {
+  .drawerFacts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Per-subject disclosure chip («إضافة متابعة» / «إخفاء الملاحظات»): compact,
+   NEUTRAL ghost surface — never gold-filled — sitting right beneath the
+   always-visible facts. Double-class-scoped so it outranks the shared Button
+   padding/type sizing regardless of stylesheet order. */
+.drawerSubject .noteToggle {
+  width: fit-content;
+  max-width: 100%;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-small);
+}
+
+.drawerSubject .noteToggle:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* The notes editor (label → textarea → hint) — COLLAPSED by default: the
+   `[hidden]` rule must outrank the grid display of the open state. Internal
+   spacing matches the subject card's `--space-3` grid gap exactly, so the
+   expanded editor looks unchanged. */
+.noteEditor {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.noteEditor[hidden] {
+  display: none;
+}
+
+.noteLabel {
+  font-size: var(--text-small);
+  font-weight: 700;
+}
+
+.noteArea {
+  width: 100%;
+  min-width: 0;
+  min-height: 140px;
+  padding: var(--space-3);
+  font: inherit;
+  color: var(--ink);
+  background: var(--manager-button-surface);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+  resize: vertical;
+}
+
+.noteArea:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.noteHint {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-caption);
+}
+
+/* Sticky footer: one full-width primary button over a one-line hint. */
+.drawerFooter {
+  display: grid;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.drawerSave {
+  flex: 1 1 100%;
+  min-height: 46px;
+  font-weight: 700;
+}
+
+.saveHint {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-caption);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.state {
+  color: var(--muted);
+  font-size: var(--text-small);
+}
+
+.errorText {
+  color: var(--danger);
+  font-size: var(--text-small);
+  overflow-wrap: anywhere;
+}
+
+/* History timeline: a connected, NUMBERED vertical timeline per subject.
+   Newest entry at the top, oldest at the bottom (the server's order), and
+   number «1» belongs to the OLDEST (bottom) entry — so the newest carries
+   the largest number. A vertical line connects the numbered nodes. */
+.historyHeading {
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: 700;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.timelineList {
+  --timeline-node: 1.75rem;
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.timelineItem {
+  position: relative;
+  padding-inline-start: calc(var(--timeline-node) + var(--space-3));
+  min-width: 0;
+}
+
+/* The vertical connector: a hairline (1px) from this node's bottom edge
+   down to the NEXT node's top edge (across the list gap). The oldest item
+   («1», last child) ends the line — nothing protrudes below it. */
+.timelineItem:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: calc(var(--timeline-node) / 2 - 0.5px);
+  inset-block-start: calc(var(--space-2) + var(--timeline-node));
+  inset-block-end: calc(-1 * var(--space-4) - var(--space-2));
+  width: 1px;
+  background: var(--border);
+}
+
+/* The numbered node: a soft TONAL disc (muted-tinted fill + hairline ring,
+   no border, no gold) centered on the connector, aligned with the card's
+   first text line. */
+.timelineNode {
+  position: absolute;
+  inset-inline-start: 0;
+  inset-block-start: var(--space-2);
+  width: var(--timeline-node);
+  height: var(--timeline-node);
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--muted) 9%, var(--surface));
+  box-shadow: 0 0 0 1px var(--border);
+  color: var(--ink);
+  font-size: var(--text-caption);
+  font-weight: 700;
+  line-height: 1;
+  z-index: 1;
+}
+
+/* The entry card: BORDERLESS glass — a solid surface with a larger radius
+   and a whisper shadow, separated by light instead of outlines. The note
+   stays the primary, most readable element. No gold anywhere. */
+.timelineCard {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--glass-border);
+  border-radius: calc(var(--radius-control) + var(--space-1));
+  box-shadow: var(--shadow-control);
+  min-width: 0;
+}
+
+.timelineNote {
+  margin: 0;
+  font-weight: 600;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* Notification deep-link focus: a SUBTLE fading ring + soft tint on the
+   exact entry that was just recorded (auto-clears; nothing else changes). */
+.timelineEntryFocus > .timelineCard {
+  border-color: var(--focus);
+  animation: timelineEntryFocus 3.2s ease-out 1 both;
+}
+
+@keyframes timelineEntryFocus {
+  0% {
+    background: color-mix(in srgb, var(--focus) 14%, var(--surface));
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--focus) 26%, transparent);
+  }
+  60% {
+    background: color-mix(in srgb, var(--focus) 10%, var(--surface));
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--focus) 18%, transparent);
+  }
+  100% {
+    background: var(--surface);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 12%, transparent);
+  }
+}
+
+/* The meta block: ONE wrapping row of calm attribute CHIPS — soft pill
+   wells, each holding a muted label beside its value, in a fixed order
+   (الكاتب ← تاريخ الإنشاء ← الموعد القادم ← النوع). No boxes, no dividers:
+   the chips wrap quietly and long dates simply take the width they need. */
+.timelineMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.timelineMetaItem {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  min-width: 0;
+  max-width: 100%;
+  padding: var(--space-1) var(--space-3);
+  /* GLASSY transparent chip: the project's standard translucent surface +
+     the near-white glass hairline — no solid fill. */
+  background: var(--manager-button-surface);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+}
+
+.timelineMetaLabel {
+  color: var(--muted);
+  font-size: var(--text-caption);
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.timelineMetaValue {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--text-caption);
+  font-weight: 500;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* Inside the history panel the bucket badge stays NEUTRAL as well (the gold
+   status tint is reserved for the feed cards). */
+.historyPanel .badge[data-bucket] {
+  background: var(--manager-button-surface);
+  border-color: var(--border);
+  font-weight: 400;
+}
+
 @media (max-width: 800px) {
-  .formLayout,
-  .row {
-    grid-template-columns: minmax(0, 1fr);
+  .stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
-@media (max-width: 600px) {
-  .formGrid {
+
+@media (max-width: 460px) {
+  .stats,
+  .filterField {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .formActions > button {
-    flex: 1;
-  }
-  .filters > label {
     flex-basis: 100%;
   }
-  .modal.modal {
-    width: calc(100vw - var(--space-4));
-    max-width: calc(100vw - var(--space-4));
-  }
+}
+
+/* Associations tab (no accordion) */
+.associationsTab {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  margin-top: var(--space-3);
+}
+
+.associationCategoryHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--text-small);
+  font-weight: 700;
+  color: var(--ink);
+  padding-block: var(--space-1);
+}
+
+.associationEmpty {
+  font-size: var(--text-caption);
+  color: var(--muted);
+  margin: 0;
+  padding: var(--space-1) 0;
 }

@@ -33,6 +33,12 @@ export interface EmployeeDto {
   propertiesByStatus: Record<PropertyStatusApi, number>;
   /** Newest properties, bounded, for the employee file drawer. */
   properties: EmployeePropertyDto[];
+  /** Distinct clients owned or assigned to this employee. */
+  clientsCount: number;
+  /** Distinct properties actually assigned to this employee. */
+  assignedCount: number;
+  /** Distinct overdue follow-up subjects for this employee. */
+  lateCount: number;
 }
 
 export interface EmployeeListDto {

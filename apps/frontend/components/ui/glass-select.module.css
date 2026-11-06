@@ -42,11 +42,14 @@
   white-space: nowrap;
 }
 .trigger:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
+  outline: none;
+  border-color: var(--focus);
+  box-shadow: 0 0 0 2px rgba(122, 102, 74, 0.18);
 }
 .trigger[aria-invalid='true'] {
-  outline: 2px solid var(--danger);
+  outline: none;
+  border-color: var(--danger);
+  box-shadow: 0 0 0 2px rgba(192, 57, 43, 0.15);
 }
 .trigger:disabled {
   opacity: 0.55;
@@ -75,16 +78,26 @@
 .option {
   display: flex;
   align-items: center;
-  min-height: 44px;
+  min-height: 40px;
   padding: var(--space-2) var(--space-3);
+  margin-bottom: 6px;
   border-radius: var(--radius-control);
   overflow-wrap: anywhere;
   cursor: pointer;
+  transition: background var(--motion-fast);
 }
-.option[aria-selected='true'],
-.option[data-active='true'],
+.option:last-child {
+  margin-bottom: 0;
+}
+.option[aria-selected='true'] {
+  background: rgba(255, 255, 255, 0.75);
+  font-weight: 600;
+}
+.option[data-active='true'] {
+  background: rgba(255, 255, 255, 0.55);
+}
 .option:not([aria-disabled='true']):hover {
-  background: rgba(190, 164, 111, 0.18);
+  background: rgba(255, 255, 255, 0.65);
 }
 .option[aria-disabled='true'] {
   opacity: 0.45;

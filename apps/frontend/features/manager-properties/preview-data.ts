@@ -23,6 +23,12 @@ export interface PreviewProperty {
   /** Backend id; present when the row came from the API. */
   id?: string;
   code: string;
+  /** Location identity fields (for duplicate comparison). */
+  governorate?: string | null;
+  district?: string | null;
+  block?: string | null;
+  plotNumber?: string | null;
+  address?: string | null;
   title: string;
   region: string;
   price: string;
@@ -58,6 +64,12 @@ export interface PreviewProperty {
   reviewStatus?: import('../../lib/api/property-types').ApprovalStatusApi | null;
   /** Optimistic-concurrency token required by approve / reject. */
   version?: number;
+  /** Manager-only: possible duplicate candidate property IDs. */
+  duplicateCandidateIds?: string[] | null;
+  /** Trash metadata (present only on soft-deleted rows). */
+  deletedAt?: string | null;
+  deletedByName?: string | null;
+  deletionReason?: string | null;
 }
 
 export interface ApprovalProperty extends PreviewProperty {

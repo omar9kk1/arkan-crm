@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { Card } from '../../../components/ui/card';
 import { Button } from '../../../components/ui/button';
+import { AnimatedCount } from '../../../components/ui/animated-count';
 import {
   employeeAttendanceTags,
   nfcHref,
@@ -276,7 +277,9 @@ export function EmployeeDetailsDrawer({
           ) : (
             <p>لم يسجّل هذا الموظف أي عقار حتى الآن.</p>
           )}
-          <h3>العقارات المخصصة له ({assignments.length})</h3>
+          <h3>
+            العقارات المخصصة له (<AnimatedCount value={assignments.length} />)
+          </h3>
           <p className={styles.notice}>
             التخصيص أولوية وتركيز فقط، وباقي الموظفين يمكنهم العمل على نفس
             العقار.

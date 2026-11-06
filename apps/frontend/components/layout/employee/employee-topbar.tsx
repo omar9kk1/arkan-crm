@@ -14,7 +14,7 @@ export function EmployeeTopbar() {
       <div className={styles.account}>
         <span>موظف مبيعات</span>
         <NotificationBell className={styles.notificationButton} />
-        <LogoutButton />
+        <LogoutButton iconOnly className={styles.notificationButton} />
       </div>
     </header>
   );

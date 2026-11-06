@@ -3,7 +3,8 @@ import { useDraftState } from '../../../lib/drafts/use-form-draft';
 
 import { Toast } from '../../../components/ui/toast';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { EmployeePageShell } from '../../../components/layout/employee/employee-page-shell';
 import { Button } from '../../../components/ui/button';
 import { SearchBar } from '../../../components/ui/search-bar';
@@ -29,6 +30,9 @@ const PAGE_SIZE = 50;
 
 export function EmployeePropertiesPage() {
   const { user } = useAuth();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [tab, setTab] = useState('all');
   const [query, setQuery] = useState('');
   const [form, setForm] = useDraftState<{ property?: Property } | null>(
@@ -36,6 +40,25 @@ export function EmployeePropertiesPage() {
     null,
   );
   const [notice, setNotice] = useState('');
+
+  const createIntent = searchParams.get('new')?.trim() ?? '';
+  const decisionView = searchParams.get('decision') === '1';
+  const createKeyRef = useRef('');
+  useEffect(() => {
+    if (!createIntent) {
+      createKeyRef.current = '';
+      return;
+    }
+    if (createKeyRef.current === createIntent) return;
+    createKeyRef.current = createIntent;
+    setForm({});
+    const params = new URLSearchParams(searchParams);
+    params.delete('new');
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, {
+      scroll: false,
+    });
+  }, [createIntent, searchParams, pathname, router, setForm]);
 
   // The rows, the cursor, the loading/error flags, the notification refresh
   // signal and the notification deep-link all come from the shared list core
@@ -59,6 +82,9 @@ export function EmployeePropertiesPage() {
     mapProperty: mapPropertyFromApi,
     viewer: user,
     onOpenError: setNotice,
+    // Manager actions happen in another session; keep this list and its
+    // counters in sync without a full page reload.
+    autoSyncMs: 20_000,
   });
 
   // A deep-link target must be VISIBLE: activate the broadest employee tab that
@@ -86,6 +112,15 @@ export function EmployeePropertiesPage() {
     [items, revealed],
   );
   useRevealScroll(targetId);
+
+  // Keep an open drawer on the latest row the list just returned, so a silent
+  // auto-sync (or a notification-driven re-read) never leaves stale values or
+  // an outdated version behind the edit action.
+  const selectedLive = selected
+    ? ((selected.id
+        ? rows.find((property) => property.id === selected.id)
+        : undefined) ?? selected)
+    : null;
 
   const visible = filterProperties(rows, tab, query);
   const regions = [...new Set(visible.map((p) => p.region))].filter(Boolean);
@@ -196,12 +231,32 @@ export function EmployeePropertiesPage() {
         </>
       )}
 
-      {selected && (
+      {selectedLive && (
         <EmployeePropertyDetailsDrawer
-          property={selected}
+          property={selectedLive}
+          readOnly={decisionView}
           onClose={closeSelected}
+          onBack={() => {
+            let origin: { subjectId?: string; tab?: string } | null = null;
+            try {
+              origin = JSON.parse(
+                sessionStorage.getItem('propertyDetailsOrigin') || 'null',
+              );
+            } catch {
+              origin = null;
+            }
+            sessionStorage.removeItem('propertyDetailsOrigin');
+            if (origin?.subjectId) {
+              const tab = origin.tab || 'history';
+              router.push(
+                `/employee/followups?follow-up=${encodeURIComponent(origin.subjectId)}&follow-up-tab=${encodeURIComponent(tab)}`,
+              );
+            } else {
+              router.back();
+            }
+          }}
           onEdit={() => {
-            setForm({ property: selected });
+            setForm({ property: selectedLive });
             closeSelected();
           }}
         />

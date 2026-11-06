@@ -44,6 +44,8 @@ export interface ClientSample {
    */
   propertyInterests?: readonly ClientInterestRow[];
   notes?: string;
+  /** Persisted structured wizard request (`Client.requestData`), may be null. */
+  requestData?: string | null;
   requestBundle?: import('../employee-clients/components/request-wizard/client-request-bundle').ClientRequestBundle;
 }
 export interface ClientInterestRow {

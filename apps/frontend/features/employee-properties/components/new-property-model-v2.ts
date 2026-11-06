@@ -106,6 +106,7 @@ export interface NewPropertyFormV2 {
   // Single unified area field (replaces landArea/unitArea for UI)
   // Backward compatibility: landArea/unitArea are preserved for existing data
   area: string;
+  locationUrl?: string;
   // Legacy fields for backward compatibility with existing properties/drafts
   landArea?: string;
   unitArea?: string;
@@ -148,6 +149,7 @@ export const initialNewPropertyFormV2: NewPropertyFormV2 = {
   block: '',
   plotNumber: '',
   area: '',
+  locationUrl: '',
   floorCount: 0,
   floors: [],
   hasBasement: false,
@@ -243,15 +245,20 @@ export function toPropertyFromNewV2(
   previous?: Property,
   owner?: { ownerUserId?: string; responsibleName?: string },
 ): Property {
-  const id = previous?.id || `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const id =
+    previous?.id ||
+    `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const isBroker = form.contactType === 'BROKER';
   const contactName = isBroker ? form.brokerName.trim() : form.ownerName.trim();
   const contactPhone = isBroker
     ? form.brokerPhone.trim()
     : form.contactPhone.trim();
 
-  const floorLabels = form.floors.map((f) => f.customLabel || f.label).join('، ');
-  const roomDesc = floorLabels || (form.floorCount > 0 ? `${form.floorCount} دور` : '');
+  const floorLabels = form.floors
+    .map((f) => f.customLabel || f.label)
+    .join('، ');
+  const roomDesc =
+    floorLabels || (form.floorCount > 0 ? `${form.floorCount} دور` : '');
 
   const isExchange = form.operation === 'بدل';
   const requestedInfo = isExchange
@@ -270,13 +277,19 @@ export function toPropertyFromNewV2(
   const floorDetails = form.floors.map((f) => {
     let details = f.details || '';
     const extras: string[] = [];
-    if (f.hasBasement && f.basementDetails) extras.push(`سرداب: ${f.basementDetails}`);
-    if (f.hasHalfFloor && f.halfFloorDetails) extras.push(`نصف دور: ${f.halfFloorDetails}`);
-    if (f.hasQuarterFloor && f.quarterFloorDetails) extras.push(`ربع دور: ${f.quarterFloorDetails}`);
-    if (extras.length > 0) details += (details ? ' | ' : '') + extras.join(' | ');
+    if (f.hasBasement && f.basementDetails)
+      extras.push(`سرداب: ${f.basementDetails}`);
+    if (f.hasHalfFloor && f.halfFloorDetails)
+      extras.push(`نصف دور: ${f.halfFloorDetails}`);
+    if (f.hasQuarterFloor && f.quarterFloorDetails)
+      extras.push(`ربع دور: ${f.quarterFloorDetails}`);
+    if (extras.length > 0)
+      details += (details ? ' | ' : '') + extras.join(' | ');
     return { label: f.customLabel || f.label, details };
   });
-  const floorDesc = floorDetails.map(f => `${f.label}${f.details ? ': ' + f.details : ''}`).join(' | ');
+  const floorDesc = floorDetails
+    .map((f) => `${f.label}${f.details ? ': ' + f.details : ''}`)
+    .join(' | ');
 
   // Area compatibility: prefer new unified area, fallback to legacy fields
   const areaValue = propertyAreaV2(form);
@@ -343,16 +356,25 @@ export function toPropertyFromNewV2(
     }),
     id,
     code: previous?.code || `K-${id.slice(-8)}`,
-    title: `${form.operation} · ${form.district || form.governorate || ''}`.trim() || form.operation,
+    title:
+      `${form.operation} · ${form.district || form.governorate || ''}`.trim() ||
+      form.operation,
     owner: contactName || 'غير محدد',
     phone: contactPhone,
     operation: form.operation,
     region: form.district || form.governorate || '',
-    address: [form.block && `قطعة ${form.block}`, form.plotNumber && `حوض ${form.plotNumber}`, form.district].filter(Boolean).join('، '),
+    address: [
+      form.block && `قطعة ${form.block}`,
+      form.plotNumber && `حوض ${form.plotNumber}`,
+      form.district,
+    ]
+      .filter(Boolean)
+      .join('، '),
     area: areaValue,
     rooms: floorDesc || roomDesc,
     price: form.price,
-    description: JSON.stringify(publicDescriptionFields, null, 2) + requestedInfo,
+    description:
+      JSON.stringify(publicDescriptionFields, null, 2) + requestedInfo,
     status: manager ? 'معتمد' : 'بانتظار الموافقة',
     mine: true,
     contactType: form.contactType,

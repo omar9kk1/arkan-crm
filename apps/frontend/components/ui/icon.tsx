@@ -9,6 +9,7 @@ const paths = {
     'M2 7l3-2 4 2M15 7l4-2 3 2v7l-3 1M2 7v7l3 1M5 15l5 5a2 2 0 0 0 3-1M13 19a2 2 0 0 0 3-2M16 17a2 2 0 0 0 3-3l-5-5-3 2a2 2 0 0 1-3-3l3-3h3l5 3M10 15l3 4M13 13l3 4',
   wallet: 'M3 6h18v14H3zM3 6l14-3v3M15 11h6v5h-6z',
   chart: 'M4 3v18h17M8 17v-5M13 17V8M18 17V4',
+  barChart3: 'M3 3v18h18M18 17V9M13 17V5M8 17v-3',
   megaphone: 'M3 9v6h5l11 5V4L8 9H3M8 15l2 6M22 9v6',
   clock: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0M12 7v5l3 2',
   bell: 'M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4',
@@ -16,7 +17,11 @@ const paths = {
   search: 'M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0',
   more: 'M4 6h16M4 12h16M4 18h16',
   close: 'm6 6 12 12M6 18 18 6',
+  arrowRight: 'M5 12h14M12 5l7 7-7 7',
+  logOut: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
   award: 'M16 8a4 4 0 1 1-8 0 4 4 0 0 1 8 0M8 12l-2 9 6-3 6 3-2-9',
+  checkCircle: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0M8.5 12l2.5 2.5 4.5-5',
+  trash: 'M3 6h18M8 6V4h8v2M6 6l1 15h10l1-15M10 11v6M14 11v6',
 } as const;
 export type IconName = keyof typeof paths;
 export function Icon({

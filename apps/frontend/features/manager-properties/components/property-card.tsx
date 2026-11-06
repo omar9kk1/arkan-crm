@@ -78,6 +78,10 @@ export function PropertyCard({
           <span className={styles.cardResponsible}>{responsible}</span>
         )}
       </span>
+      {Array.isArray(property.duplicateCandidateIds) &&
+        property.duplicateCandidateIds.length > 0 && (
+          <span className={styles.cardSimilar}>عقار مشابه</span>
+        )}
       <span className={styles.imageCardOverlay}>
         <span className={styles.cardDistrict}>{district}</span>
         <strong className={styles.cardPrice}>{property.price}</strong>

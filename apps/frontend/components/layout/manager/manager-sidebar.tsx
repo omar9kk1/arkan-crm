@@ -20,11 +20,7 @@ export function ManagerSidebar() {
         ))}
       </nav>
       <footer className={styles.sidebarFooter}>
-        <span className={styles.avatar}>م</span>
-        <div>
-          <strong>مساحة المدير</strong>
-          <p>أركان الخليج العقارية • إدارة أعمالك بوضوح</p>
-        </div>
+        <span>الفرص لا تنتظر... بل نصنعها معا</span>
       </footer>
     </aside>
   );

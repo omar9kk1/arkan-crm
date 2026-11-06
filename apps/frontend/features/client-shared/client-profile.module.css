@@ -1,0 +1,152 @@
+/*
+ * Shared «ملف العميل» profile-drawer styling (manager + employee): the SAME
+ * Astra vocabulary as the clients pages — glass surfaces, dashboard insets,
+ * soft borders, rounded controls and the existing spacing scale. Desktop is a
+ * comfortable 520px left drawer; on narrow screens it fills the viewport
+ * (honouring the overlay's own max-width, so no horizontal scroll).
+ */
+
+.profileDrawer.profileDrawer {
+  width: 520px;
+}
+@media (max-width: 600px) {
+  .profileDrawer.profileDrawer {
+    width: auto;
+  }
+}
+
+/* Identity grid: two balanced columns on desktop, one column on phones.
+   Every cell is an inset card with a muted label over a readable value. */
+.identity {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
+}
+.identity > div {
+  min-width: 0;
+  background: var(--dashboard-inset);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+  padding: var(--space-3);
+  overflow-wrap: anywhere;
+}
+.identity dt {
+  font-size: var(--text-caption);
+  color: var(--muted);
+}
+.identity dd {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-small);
+  font-weight: 700;
+  line-height: 1.6;
+}
+@media (max-width: 600px) {
+  .identity {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* The intentional action row (pinned drawer footer): full width, wraps
+   instead of overflowing, never floating between content sections. */
+.actionRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+/* Request presentation --------------------------------------------------- */
+.requestSection {
+  min-width: 0;
+}
+.pillsRow {
+  margin-bottom: var(--space-3);
+}
+/* One stored request = one separated card (never concatenated). */
+.requestCard {
+  min-width: 0;
+  margin-bottom: var(--space-3);
+  padding: var(--space-3);
+  background: var(--dashboard-inset);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+  overflow-wrap: anywhere;
+}
+.requestCardTitle {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-small);
+  font-weight: 700;
+  line-height: 1.6;
+}
+.requestFacts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+}
+.requestFacts > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.requestFacts dt {
+  font-size: var(--text-caption);
+  color: var(--muted);
+}
+.requestFacts dd {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-small);
+  font-weight: 700;
+  line-height: 1.6;
+}
+@media (max-width: 600px) {
+  .requestFacts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Free-text notes / message text: ORIGINAL line breaks preserved and any
+   length of Arabic text or embedded codes wrapped — never clipped. */
+.notesBlock {
+  min-width: 0;
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  background: var(--dashboard-inset);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+  overflow-wrap: anywhere;
+}
+.blockLabel {
+  display: block;
+  margin-bottom: var(--space-1);
+  font-size: var(--text-caption);
+  color: var(--muted);
+}
+.notesText {
+  margin: 0;
+  font-size: var(--text-small);
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.factLine {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-caption);
+  color: var(--muted);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.legacyText {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-small);
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.emptyState {
+  padding: var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--glass-surface);
+  font-size: var(--text-small);
+  color: var(--muted);
+}

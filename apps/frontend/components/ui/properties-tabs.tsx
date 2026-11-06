@@ -7,6 +7,7 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
+import { AnimatedCount } from './animated-count';
 import styles from './properties-tabs.module.css';
 
 /** Guarded capture: synthetic/inactive pointers (tests) must not throw. */
@@ -49,13 +50,16 @@ export function PropertiesTabs({
 }) {
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const listRef = useRef<HTMLDivElement | null>(null);
-  /** Live scroll state driving the painted INSIDE-the-bar scrollbar. */
+  /** Live scroll state driving the painted INSIDE-the-bar scrollbar and the
+   * edge fades. */
   const [scroll, setScroll] = useState({
     overflow: false,
     /** Visible width / total width (thumb size). */
     fraction: 1,
     /** 0 = at the inline-start edge; 1 = fully scrolled to the other edge. */
     progress: 0,
+    /** Computed direction of the scroller (drives the fade gradient flips). */
+    rtl: true,
   });
 
   const measure = useCallback(() => {
@@ -64,7 +68,9 @@ export function PropertiesTabs({
     const max = el.scrollWidth - el.clientWidth;
     if (max <= 0) {
       setScroll((prev) =>
-        prev.overflow ? { overflow: false, fraction: 1, progress: 0 } : prev,
+        prev.overflow
+          ? { overflow: false, fraction: 1, progress: 0, rtl: prev.rtl }
+          : prev,
       );
       return;
     }
@@ -75,6 +81,7 @@ export function PropertiesTabs({
       // inline-start edge (right in RTL) toward the other side â€” identical
       // mapping in LTR thanks to the logical `inset-inline-start`.
       progress: Math.abs(el.scrollLeft) / max,
+      rtl: getComputedStyle(el).direction === 'rtl',
     });
   }, []);
 
@@ -91,22 +98,45 @@ export function PropertiesTabs({
     };
   }, [measure, items, value]);
 
-  // RTL drawers with narrow width: an overflowing tab bar scrolls HORIZONTALLY
-  // inside its own container, but the browser never auto-reveals the selected
-  // tab, so the active tab (and its gold highlight) could sit clipped beyond
-  // the drawer's left edge. Revealing the selected button after every value
-  // change keeps the gold state aligned and every tab reachable; 'instant'
-  // bypasses the CSS smooth animation so the reveal is immediate regardless
-  // of any pending smooth scrolls. When all tabs fit, this is a no-op.
-  useEffect(() => {
+  // Reveal the tab matching `value`: runs on mount (initial/preserved
+  // selection from a URL query) and after every selection change, including
+  // keyboard/Edge/Home flows, so the active tab (and its gold highlight)
+  // never sits clipped beyond a bar's edge. 'nearest' + 'nearest' = the
+  // scroller moves ONLY when the tab is actually clipped horizontally and
+  // never resets a visible selection; 'instant' = no animation on initial
+  // render or change (and therefore honors prefers-reduced-motion by never
+  // animating at all). A viewport guard skips the call when the bar is
+  // fully off-screen vertically, so scrollIntoView can never scroll the
+  // PAGE vertically as an ancestor.
+  const revealSelected = useCallback(() => {
     const index = items.findIndex((item) => item.id === value);
     const selected = refs.current[index];
-    selected?.scrollIntoView({
+    if (!selected) return;
+    const rect = selected.getBoundingClientRect();
+    if (rect.bottom <= 0 || rect.top >= window.innerHeight) return;
+    selected.scrollIntoView({
       block: 'nearest',
       inline: 'nearest',
       behavior: 'instant',
     });
   }, [items, value]);
+
+  useEffect(() => {
+    revealSelected();
+  }, [revealSelected]);
+
+  // Viewport/wrapper resizes: re-keep the selected tab reachable and visible
+  // (e.g. a previously slider-laid-out bar narrowed so the active tab ends
+  // up half-clipped). The observer only fires on BOX change (not on the
+  // resulting horizontal scrolls), so there is no feedback loop, and it is
+  // disconnected on unmount.
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(revealSelected);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [revealSelected]);
 
   /** Apply a logical 0..1 scroll progress to the scroller (RTL-aware). */
   const setProgress = useCallback((progress: number) => {
@@ -198,11 +228,7 @@ export function PropertiesTabs({
           // Clicking an ALREADY-selected but partially hidden tab must reveal
           // it too (value unchanged => no effect): reveal instantly here.
           onChange(item.id);
-          refs.current[index]?.scrollIntoView({
-            block: 'nearest',
-            inline: 'nearest',
-            behavior: 'instant',
-          });
+          revealSelected();
         }}
         onKeyDown={(event) => {
           let next = index;
@@ -220,7 +246,7 @@ export function PropertiesTabs({
         }}
       >
         {item.label}
-        {item.count !== undefined && <span>{item.count}</span>}
+        {item.count !== undefined && <AnimatedCount value={item.count} />}
       </button>
     ));
 
@@ -252,29 +278,63 @@ export function PropertiesTabs({
         {buttons()}
       </div>
       {scroll.overflow && (
-        // A REAL, INTERACTIVE scrollbar anchored to the STATIC pill wrapper
-        // (not the scroller): the thumb can be dragged and the track jumped,
-        // exactly like a native scrollbar â€” but it paints INSIDE the pill's
-        // rounded corners, which native scrollbars never respect.
-        <span
-          className={styles.scrollTrack}
-          aria-hidden="true"
-          onPointerDown={onTrackPointerDown}
-          onPointerMove={onTrackPointerMove}
-          onPointerUp={endDrag}
-          onPointerCancel={endDrag}
-        >
+        <>
+          {/* Subtle Astra edge fades: they mark HIDDEN content at each edge
+              and disappear exactly when that edge is reached (progress 0 =
+              the inline-start edge has nothing beyond it, so only the other
+              fade shows, and vice versa at progress 1). Purely decorative,
+              never interactive: pointer-events none + aria-hidden, so taps,
+              swipes, trackpad scrolls, keyboard focus and the drag band of
+              the painted scrollbar below all keep working. `rtl` flips the
+              visually-solid side of the gradient (the logical `inset-*`
+              placement is already direction-aware); both edges sit inside
+              the pill and are clipped by its rounded corners. */}
           <span
-            className={styles.scrollThumb}
-            style={
-              {
-                inlineSize: `${thumbWidth}%`,
-                insetInlineStart: `${scroll.progress * (100 - thumbWidth)}%`,
-                position: 'absolute',
-              } as CSSProperties
-            }
+            aria-hidden="true"
+            className={[
+              styles.edgeFade,
+              styles.edgeFadeStart,
+              scroll.rtl ? styles.edgeFadeFlipped : '',
+              scroll.progress > 0.005 ? '' : styles.edgeFadeHidden,
+            ]
+              .filter(Boolean)
+              .join(' ')}
           />
-        </span>
+          <span
+            aria-hidden="true"
+            className={[
+              styles.edgeFade,
+              styles.edgeFadeEnd,
+              scroll.rtl ? '' : styles.edgeFadeFlipped,
+              scroll.progress < 0.995 ? '' : styles.edgeFadeHidden,
+            ]
+              .filter(Boolean)
+              .join(' ')}
+          />
+          {/* A REAL, INTERACTIVE scrollbar anchored to the STATIC pill wrapper
+              (not the scroller): the thumb can be dragged and the track jumped,
+              exactly like a native scrollbar â€” but it paints INSIDE the pill's
+              rounded corners, which native scrollbars never respect. */}
+          <span
+            className={styles.scrollTrack}
+            aria-hidden="true"
+            onPointerDown={onTrackPointerDown}
+            onPointerMove={onTrackPointerMove}
+            onPointerUp={endDrag}
+            onPointerCancel={endDrag}
+          >
+            <span
+              className={styles.scrollThumb}
+              style={
+                {
+                  inlineSize: `${thumbWidth}%`,
+                  insetInlineStart: `${scroll.progress * (100 - thumbWidth)}%`,
+                  position: 'absolute',
+                } as CSSProperties
+              }
+            />
+          </span>
+        </>
       )}
     </div>
   );

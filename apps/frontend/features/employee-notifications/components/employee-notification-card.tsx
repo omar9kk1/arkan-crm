@@ -1,8 +1,8 @@
 import type { NotificationDto } from '../../../lib/api/notification-types';
 import {
   displayDate,
+  notificationDisplay,
   notificationTypeLabel,
-  resolvePropertyCode,
 } from '../../notifications/view';
 import styles from './employee-notifications.module.css';
 
@@ -13,13 +13,14 @@ export function EmployeeNotificationCard({
   item: NotificationDto;
   onOpen: () => void;
 }) {
+  const view = notificationDisplay(item);
   return (
     <button
       type="button"
       className={styles.row}
       onClick={onOpen}
       aria-label={
-        'تفاصيل ' + item.title + '، ' + (item.read ? 'مقروء' : 'غير مقروء')
+        'تفاصيل ' + view.title + '، ' + (item.read ? 'مقروء' : 'غير مقروء')
       }
     >
       <span
@@ -28,9 +29,9 @@ export function EmployeeNotificationCard({
         aria-hidden="true"
       />
       <span className={styles.body}>
-        <span className={styles.title}>{item.title}</span>
+        <span className={styles.title}>{view.title}</span>
         <span className={styles.description}>
-          {resolvePropertyCode(item.message, item.propertyReference)}
+          {view.message}
         </span>
         <span className={styles.category}>
           {notificationTypeLabel(item.type)}

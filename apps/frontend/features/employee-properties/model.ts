@@ -41,6 +41,9 @@ export interface Property {
   reviewStatus?: import('../../lib/api/property-types').ApprovalStatusApi | null;
   /** Optimistic-concurrency token required by PATCH / approve / reject. */
   version?: number;
+  /** Soft-delete decision metadata (present on the creator's history view). */
+  deletedAt?: string | null;
+  deletionReason?: string | null;
   /** Storage key of the single stored image, or null when the row has none. */
   primaryImageUrl?: string | null;
   /**

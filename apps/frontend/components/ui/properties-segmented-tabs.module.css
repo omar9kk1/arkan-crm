@@ -20,6 +20,12 @@
   box-shadow: var(--shadow-card);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
+  /* Clip the decorative edge fades (and only them — the painted scrollbar's
+     track/thumb sit fully inside) to this pill's ROUNDED corners, so the
+     translucent gradient can never poke past the capsule's curve at any
+     width. Everything visible inside (tabs, counts, inward focus outlines)
+     already fits within the interior box. */
+  overflow: hidden;
 }
 .segmented > [role='tablist'] {
   gap: var(--space-1);

@@ -33,6 +33,9 @@
   font-size: var(--text-stat);
   line-height: 1.3;
   margin-block: var(--space-3);
+  /* Tabular figures: every digit keeps the same advance width, so a counting
+     number never shifts the layout mid-animation (visual: identical). */
+  font-variant-numeric: tabular-nums;
 }
 .card p {
   margin: 0;

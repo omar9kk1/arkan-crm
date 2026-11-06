@@ -5,6 +5,7 @@ import {
   requestError,
   normalizeLinkedProperty,
   requestSummary,
+  parseStoredRequestData,
   type ClientRequestDraft,
   type ClientType,
 } from './client-request-model';
@@ -75,6 +76,102 @@ export function toggleType(
     },
   };
 }
+/**
+ * The bundle EDIT mode saves through `PATCH /clients/:id` — the SAME client
+ * row, never a second one. The per-type notes and free message text stay in
+ * the structured document; the human `notes` column is only what the user
+ * sees/edits in step 1 (prefilled from the persisted notes, never the
+ * request summary — legacy notes are not rewritten behind their back).
+ */
+export interface EditClientRequestPayload {
+  name: string;
+  phone: string;
+  notes: string | null;
+  /** The packed wizard request document this save becomes. */
+  requestData: string;
+  /** Real linked selections, upserted on the client (server-validated). */
+  propertyInterests: PropertyInterestPayload[];
+  /** Persisted structured links the user explicitly dropped in the wizard. */
+  removePropertyInterestIds: string[];
+}
+/**
+ * The bundle EDIT mode starts from: identity prefilled with the REAL client
+ * columns, the structured request restored from the persisted document (or
+ * deliberately empty when none exists yet — nothing is invented), and the
+ * persisted session bundle ignored in favour of the trustworthy store.
+ */
+export function editBundleFromClient(
+  client: Pick<
+    EmployeeClient,
+    'id' | 'name' | 'phone' | 'notes' | 'requestData' | 'propertyInterests'
+  >,
+): ClientRequestBundle {
+  const base: ClientRequestBundle = {
+    mode: 'EXISTING_CLIENT',
+    clientId: client.id,
+    name: client.name,
+    phone: client.phone,
+    notes: client.notes,
+    types: [],
+    requests: {},
+  };
+  // Overlay the persisted document (identity stays from the columns — the
+  // stored draft copies of name/phone may be stale).
+  const stored = parseStoredRequestData(client.requestData);
+  if (!stored) return base;
+  return {
+    ...base,
+    types: [...stored.types],
+    requests: { ...stored.requests },
+  };
+}
+/** The interest property-ids the user made a linked choice about. */
+function storedLinkedIds(bundle: ClientRequestBundle): string[] {
+  return bundle.types
+    .map((type) => {
+      const draft = bundle.requests[type];
+      if (!draft?.interest.hasLinkedProperty) return '';
+      return normalizeLinkedProperty(draft.linkedProperty).propertyId;
+    })
+    .filter(Boolean);
+}
+/**
+ * The `PATCH` payload of a wizard EDIT save. Removal is an EXPLICIT user
+ * consequence: an id the persisted document linked and this save no longer
+ * links (the user unticked it or replaced it). Persisted interests that were
+ * never part of the structured state are NEVER silently removed — they stay
+ * exactly as they are.
+ */
+export function editClientSavePayload(
+  bundle: ClientRequestBundle,
+  editing: Pick<
+    EmployeeClient,
+    'id' | 'name' | 'phone' | 'notes' | 'requestData' | 'propertyInterests'
+  >,
+): EditClientRequestPayload {
+  const nowLinked = new Set(
+    storedLinkedIds(bundle),
+  );
+  const beforeLinked = new Set(
+    storedLinkedIds(editBundleFromClient(editing)),
+  );
+  const persisted = bundlePropertyInterests(bundle);
+  return {
+    name: bundle.name.trim(),
+    phone: bundle.phone.trim(),
+    notes: bundle.notes.trim() || null,
+    requestData: JSON.stringify({
+      version: 1,
+      types: bundle.types,
+      requests: bundle.requests,
+    }),
+    propertyInterests: persisted,
+    // Only structured links that existed BEFORE may become removals here.
+    removePropertyInterestIds: [...beforeLinked].filter(
+      (id) => !nowLinked.has(id),
+    ),
+  };
+}
 export function typeDraft(
   b: ClientRequestBundle,
   type: ClientType,
@@ -84,18 +181,24 @@ export function typeDraft(
     clientType: type,
     name: b.name,
     phone: b.phone,
-    notes: '',
+    // The per-type note belongs to the STORED draft: a restored edit draft
+    // keeps its persisted note (never reset), and a fresh draft starts ''.
+    notes: b.requests[type]?.notes ?? '',
   };
 }
 export function bundleError(
   b: ClientRequestBundle,
   step: number,
   clients: readonly EmployeeClient[],
+  /** Edit mode: dropping ALL types is an explicit outcome, not an error. */
+  editing = false,
 ): string {
-  if (b.mode === 'EXISTING_CLIENT' && !clients.some((c) => c.id === b.clientId))
+  // The edit flow is LOCKED to its client id (never a combobox choice), so
+  // the registry of openable clients is irrelevant and may be empty.
+  if (!editing && b.mode === 'EXISTING_CLIENT' && !clients.some((c) => c.id === b.clientId))
     return 'اختر عميلًا موجودًا.';
   if (!b.name.trim() || !b.phone.trim()) return 'أدخل اسم العميل ورقم الهاتف.';
-  if (step >= 1 && !b.types.length)
+  if (step >= 1 && !editing && !b.types.length)
     return 'اختر نوع طلب واحدًا على الأقل، ويمكنك اختيار أكثر من نوع.';
   if (step >= 2)
     for (const type of b.types) {

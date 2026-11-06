@@ -1,12 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Button } from '../../../components/ui/button';
 import {
   currentPushStatus,
   disablePush,
   enablePush,
-  fetchPushTest,
   type PushStatus,
 } from '../../notifications/push';
 import styles from './settings.module.css';
@@ -23,7 +21,6 @@ export function PushNotificationToggle() {
   const [status, setStatus] = useState<PushStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
-  const [testing, setTesting] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -33,7 +30,11 @@ export function PushNotificationToggle() {
       })
       .catch(() => {
         if (active)
-          setStatus({ supported: false, enabled: false, permission: 'unsupported' });
+          setStatus({
+            supported: false,
+            enabled: false,
+            permission: 'unsupported',
+          });
       });
     return () => {
       active = false;
@@ -67,30 +68,8 @@ export function PushNotificationToggle() {
 
   const supported = status?.supported ?? true;
 
-  /** Sends one test message to this device — the proof that push works. */
-  const sendTest = async () => {
-    setTesting(true);
-    setNotice('');
-    try {
-      const response = await fetchPushTest();
-      if (response.sent > 0) {
-        setNotice(`أُرسلت رسالة تجريبية إلى ${response.sent} جهاز.`);
-      } else {
-        setNotice(
-          'لا يوجد جهاز مشترك في هذا المتصفح — فعّل الإشعارات أولًا.',
-        );
-      }
-    } catch (cause) {
-      setNotice(
-        cause instanceof Error ? cause.message : 'تعذر إرسال الرسالة التجريبية.',
-      );
-    } finally {
-      setTesting(false);
-    }
-  };
-
   return (
-    <div>
+    <div className={styles.pushGroup}>
       <label className={styles.toggle}>
         <input
           type="checkbox"
@@ -101,29 +80,14 @@ export function PushNotificationToggle() {
         />
         <span>إشعارات خارج البرنامج</span>
       </label>
-      <p className={styles.note}>
-        يعمل على هذا الجهاز فقط؛ بقية أجهزتك غير متأثرة. إشعارات البرنامج
-        الداخلية تبقى مفعّلة دائمًا.
-      </p>
       {!supported && (
-        <p className={styles.note}>
-          هذا المتصفح لا يدعم الإشعارات الخارجية.
-        </p>
+        <p className={styles.note}>هذا المتصفح لا يدعم الإشعارات الخارجية.</p>
       )}
       {status?.permission === 'denied' && (
         <p className={styles.note}>
           الإذن مرفوض في إعدادات المتصفح — فعّله من إعدادات الموقع ثم أعد
           المحاولة.
         </p>
-      )}
-      {supported && (
-        <Button
-          onClick={() => void sendTest()}
-          disabled={testing || busy}
-          aria-busy={testing}
-        >
-          {testing ? 'جارٍ الإرسال…' : 'إرسال إشعار تجريبي'}
-        </Button>
       )}
       {notice && <p className={styles.note}>{notice}</p>}
     </div>

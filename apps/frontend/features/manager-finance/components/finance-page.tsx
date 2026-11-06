@@ -3,10 +3,11 @@ import { useDraftState } from '../../../lib/drafts/use-form-draft';
 
 import { Toast } from '../../../components/ui/toast';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ManagerPageShell } from '../../../components/layout/manager/manager-page-shell';
 import { Card } from '../../../components/ui/card';
 import { Button } from '../../../components/ui/button';
+import { AnimatedCount } from '../../../components/ui/animated-count';
 import { createPreviewMovements } from '../mock-sources';
 import {
   filterMovements,
@@ -70,8 +71,12 @@ export function FinancePage() {
               <h2>ملخص الحركة</h2>
               <p>حسب الفلاتر الحالية</p>
               <dl className={styles.facts}>
-                {[
-                  ['عدد الحركات', String(visible.length)],
+                {([
+                  // A real COUNT — the same shared count-up as everywhere else.
+                  [
+                    'عدد الحركات',
+                    <AnimatedCount key="movement-count" value={visible.length} />,
+                  ],
                   [
                     'إجمالي الداخل',
                     totalMoney(visible, (totals) => totals.income),
@@ -89,7 +94,7 @@ export function FinancePage() {
                     totalMoney(visible, (totals) => totals.manual),
                   ],
                   ['صافي الحركة', totalMoney(visible, (totals) => totals.net)],
-                ].map(([label, value]) => (
+                ] as Array<[string, ReactNode]>).map(([label, value]) => (
                   <div key={label}>
                     <dt>{label}</dt>
                     <dd>{value}</dd>

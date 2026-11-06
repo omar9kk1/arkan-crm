@@ -132,6 +132,9 @@ export function statusLabel(property: {
  * (private) response, which is exactly when CHANGES_REQUESTED can apply.
  */
 export function displayStatus(dto: PropertyViewDto): string {
+  if ((dto as { deletedAt?: string | null }).deletedAt) {
+    return 'محذوف بقرار المدير';
+  }
   return statusLabel({
     apiStatus: dto.status,
     reviewStatus: reviewStatusOf(dto),
@@ -556,17 +559,36 @@ export function toCreatePropertyPayload(
   return { ...sharedPayload(form, options), ...resolveContact(form) };
 }
 
-/** Body of `PATCH /properties/:id`; `version` is mandatory. */
+/**
+ * Body of `PATCH /properties/:id`; `version` is mandatory.
+ *
+ * Unlike creation, an EMPTY field on an edit is an explicit instruction to
+ * clear the stored value. The shared builder omits empty values (correct for a
+ * fresh row), so the clearable columns are sent as `null` here — otherwise a
+ * cleared plot/district/area would be silently kept by the server.
+ */
 export function toUpdatePropertyPayload(
   form: PropertyFormInput,
   version: number,
   options: PropertyFormOptions = {},
 ): UpdatePropertyPayload {
-  return {
+  const payload: UpdatePropertyPayload = {
     ...sharedPayload(form, options),
     ...resolveContact(form),
     version,
   };
+  // The wire type keeps the create-oriented `string | undefined` fields; the
+  // PATCH DTO explicitly accepts null and treats it as "clear this column".
+  const clearable = payload as unknown as Record<string, unknown>;
+  const governorate =
+    form.governorate.trim() || (options.derivedGovernorate ?? '').trim();
+  clearable.governorate = governorate || null;
+  clearable.district = form.district.trim() || null;
+  clearable.block = form.block.trim() || null;
+  clearable.plotNumber = form.plotNumber.trim() || null;
+  clearable.sizeSqm = toDecimalString(formArea(form)) || null;
+  clearable.askingPrice = toDecimalString(form.price) || null;
+  return payload;
 }
 
 /** Optional floors: additions to a building, never part of its storey count. */
@@ -665,9 +687,13 @@ function contactFields(
   const privateDto = isPrivatePropertyDto(dto)
     ? (dto as PrivatePropertyDto)
     : null;
-  const contact: ContactSummaryDto | null = hasPrivateContact(dto)
+  const official: ContactSummaryDto | null = hasPrivateContact(dto)
     ? (dto as PrivatePropertyDto).contact
     : null;
+  // A pending employee submission has no official Contact yet; its provisional
+  // owner IS the owner the reviewer must see.
+  const provisional = privateDto?.proposedOwner ?? null;
+  const contact = official ?? provisional;
   if (!contact)
     return {
       owner: '',
@@ -683,7 +709,8 @@ function contactFields(
     phone: contact.phone,
     contactType: contact.type,
     hasPrivateContact: true,
-    linkedContactId: privateDto?.contactId ?? contact.id,
+    linkedContactId:
+      privateDto?.contactId ?? (official ? official.id : null),
   };
 }
 
@@ -747,6 +774,9 @@ export function mapPropertyFromApi(
     primaryImageUrl: dto.primaryImageUrl,
     responsibleName: dto.responsibleName ?? '',
     responsibleRole: dto.responsibleRole ?? null,
+    deletedAt: (dto as { deletedAt?: string | null }).deletedAt ?? null,
+    deletionReason:
+      (dto as { deletionReason?: string | null }).deletionReason ?? null,
   };
 }
 
@@ -777,5 +807,15 @@ export function mapPreviewFromApi(
     reviewStatus: property.reviewStatus,
     version: dto.version,
     id: dto.id,
+    governorate: dto.governorate,
+    district: dto.district,
+    block: dto.block,
+    plotNumber: dto.plotNumber,
+    address: dto.address,
+    duplicateCandidateIds: (dto as { duplicateCandidateIds?: string[] | null })
+      .duplicateCandidateIds,
+    deletedAt: (dto as { deletedAt?: string | null }).deletedAt ?? null,
+    deletedByName: (dto as { deletedByName?: string | null }).deletedByName ?? null,
+    deletionReason: (dto as { deletionReason?: string | null }).deletionReason ?? null,
   };
 }

@@ -1,4 +1,6 @@
+import type { ReactNode } from 'react';
 import { PropertyOverlay } from '../../manager-properties/components/property-overlay';
+import { AnimatedCount } from '../../../components/ui/animated-count';
 import type { RegistryContact } from '../../../lib/contact-registry';
 import styles from './clients.module.css';
 
@@ -22,7 +24,7 @@ export function ContactDetailsDrawer({
       onClose={onClose}
     >
       <dl className={styles.facts}>
-        {[
+        {([
           ['الاسم', contact.name],
           ['الهاتف', contact.phone],
           ['النوع', typeLabel[contact.type]],
@@ -31,8 +33,15 @@ export function ContactDetailsDrawer({
             'الموظف المسؤول',
             contact.ownerName || 'غير مُسند',
           ],
-          ['عدد العقارات المرتبطة', String(contact.propertyCodes.length)],
-        ].map(([label, value]) => (
+          // A real COUNT — the same shared count-up as everywhere else.
+          [
+            'عدد العقارات المرتبطة',
+            <AnimatedCount
+              key="linked-properties"
+              value={contact.propertyCodes.length}
+            />,
+          ],
+        ] as Array<[string, ReactNode]>).map(([label, value]) => (
           <div key={label}>
             <dt>{label}</dt>
             <dd>

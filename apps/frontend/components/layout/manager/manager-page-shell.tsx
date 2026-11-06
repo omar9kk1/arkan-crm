@@ -1,13 +1,15 @@
-import type { ReactNode } from 'react';
+﻿import type { ReactNode } from 'react';
 import styles from './manager-shell.module.css';
 export function ManagerPageShell({
-  title,
+  title = '',
   description,
+  overline = 'لوحة المدير',
   actions,
   children,
 }: {
-  title: string;
-  description: string;
+  title?: string;
+  description?: string;
+  overline?: string;
   actions?: ReactNode;
   children: ReactNode;
 }) {
@@ -15,9 +17,9 @@ export function ManagerPageShell({
     <div className={styles.page}>
       <div className={styles.pageHeading}>
         <div>
-          <span className={styles.overline}>لوحة المدير</span>
-          <h1>{title}</h1>
-          <p>{description}</p>
+          {overline ? <span className={styles.overline}>{overline}</span> : null}
+          {title ? <h1>{title}</h1> : null}
+          {description ? <p>{description}</p> : null}
         </div>
         {actions}
       </div>

@@ -1,0 +1,114 @@
+/* The supervision-specific touches of the manager follow-ups page (المتابعات
+   — متابعات الموظفين). Everything else reuses the employee follow-ups classes
+   for the EXACT same visual grammar (cards, facts grid, timeline). */
+
+/* The «تذكير الموظف» action row per subject: ghost reminder button on the
+   right, its server-committed state («تم إرسال التذكير») on the left. */
+.reminderRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.reminderHint {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted, #6b7280);
+  margin: 0;
+  text-align: left;
+}
+
+/* The committed state chip — never actionable, purely informational. */
+.reminderSent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--success, #15803d);
+  background: color-mix(in srgb, var(--success, #15803d) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--success, #15803d) 30%, transparent);
+  white-space: nowrap;
+}
+
+/* The real overdue duration chip (server-derived) — danger-toned but calm. */
+.overdueChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--danger, #b91c1c);
+  background: color-mix(in srgb, var(--danger, #b91c1c) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger, #b91c1c) 28%, transparent);
+  white-space: nowrap;
+}
+
+/* The responsible-employee inline chip on the feed cards. */
+.employeeChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft, #374151);
+  white-space: nowrap;
+}
+
+/* The top section switcher of the manager page (متابعاتي / متابعات الموظفين). */
+.sectionSwitcher {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-4);
+  margin-block: 4px 18px;
+}
+.sectionSwitcher > * {
+  grid-column: 1;
+}
+.sectionSwitcher .segmented {
+  width: 100%;
+}
+.sectionSwitcher .segmented > [role='tablist'] > button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding-inline: var(--space-2);
+}
+
+/* Both sections stay mounted; only one is visible at a time. */
+.sectionHidden {
+  display: none;
+}
+
+/* The supervision toolbar mirrors «متابعاتي»'s inline row: ONE row with the
+   status field bounded on the RIGHT, the employee filter beside it, and the
+   search filling the rest to the LEFT boundary. RTL grid auto-placement
+   starts from the right, so the markup order is status → employee → search. */
+.supervisionToolbar {
+  display: grid;
+  grid-template-columns:
+    minmax(170px, 200px)
+    minmax(170px, 220px)
+    minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: end;
+  margin-bottom: var(--space-4);
+  min-width: 0;
+}
+
+/* The bounded columns stay the authority (the shared field min-width 200px
+   would fight them); heights already match (44px controls, bottom-aligned). */
+.supervisionToolbar > .filterField {
+  min-width: 0;
+}
+
+@media (max-width: 720px) {
+  .supervisionToolbar {
+    grid-template-columns: 1fr;
+  }
+}
