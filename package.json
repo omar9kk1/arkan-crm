@@ -10,9 +10,15 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "concurrently -k \"npm:dev:backend\" \"npm:dev:frontend\"",
-    "dev:backend": "npm run dev -w @arkan/backend",
+    "dev": "npm run backend:start && npm run dev:frontend",
+    "dev:backend": "npm run backend:start",
     "dev:frontend": "npm run dev -w @arkan/frontend",
+    "backend:start": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/backend-dev.ps1 start",
+    "backend:status": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/backend-dev.ps1 status",
+    "backend:logs": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/backend-dev.ps1 logs",
+    "backend:logs:follow": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/backend-dev.ps1 logs -Follow -Lines 120",
+    "backend:stop": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/backend-dev.ps1 stop",
+    "backend:restart": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/backend-dev.ps1 restart",
     "build": "npm run build -w @arkan/shared && npm run build -w @arkan/backend && npm run build -w @arkan/frontend",
     "typecheck": "npm run build -w @arkan/shared && npm run typecheck --workspaces --if-present",
     "lint": "eslint apps packages",

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "nest start --watch",
+    "dev": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File ../../scripts/backend-dev.ps1 start",
     "build": "nest build",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
