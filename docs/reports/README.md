@@ -51,4 +51,6 @@
 
 | 2026-10-19 | [clients-backend-verification](./2026-10-19-clients-backend-verification.md) | اختبارات تكامل مركّزة لوحدة `/clients` الخلفية وتشغيل حزمة regression كاملة على قاعدة الاختبار المعزولة المؤكَّدة | اختبارات العملاء `Completed` (`23/23` جديدًا؛ **`200 passed` / `16 suites`، 0 متخطَّى**) — `typecheck`/`lint` `exit 0` — **عيب استجابة `POST /clients` (متابعة الجدولة) مؤكد ومعطّل بانتظار الموافقة** — قاعدة التطوير/المتصفح `Not Tested` — **ملف اختبار واحد جديد فقط، لا ترحيل، لا commits** |
 
+| 2026-10-22 | [client-approval-workflow-corrected-plan](./2026-10-22-client-approval-workflow-corrected-plan.md) | خطة سير عمل موافقات إنشاء/تعديل العملاء (كيان `ClientReviewRequest`) بعد تصحيح المالك: إلغاء قيد `requestedById` لمراجعات الإنشاء واستبداله بـ idempotency، وفهرس جزئي لمراجعة تعديل نشطة واحدة لكل عميل (PENDING + CHANGES_REQUESTED) مع التحقّق من خط الأساس عند الموافقة | خطة مقترحة `Completed` — أي تنفيذ/ترحيل/واجهة `Not Implemented` (**بانتظار موافقة المالك النهائية**) |
+
 > ملاحظة: التقارير تلتزم بقواعد المشروع الموثّقة في `AGENTS.md` و`PROJECT_CONTEXT.md` و`TODO.md`، ولا تُصرّح بأي جاهزية إنتاجية.
