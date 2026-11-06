@@ -1,5 +1,6 @@
 node_modules/
 .npm-cache/
+.dev/
 dist/
 .next/
 coverage/
@@ -8,3 +9,10 @@ coverage/
 !.env.example
 !.env.local.example
 *.tsbuildinfo
+
+# Local database/storage backups — never publish.
+backups/
+
+# Temporary local diagnostics and dev-only fixtures.
+apps/frontend/public/__drawer-header-probe.html
+apps/frontend/app/dev/
