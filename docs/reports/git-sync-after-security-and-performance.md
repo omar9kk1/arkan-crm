@@ -5,7 +5,7 @@
 **الفرع:** `main`  
 **الـRemote:** `origin` — `https://github.com/omar9kk1/arkan-crm.git`  
 **Upstream:** `origin/main`  
-**Commit:** `__COMMIT_HASH__`  
+**Commit الأساسي:** `86868b8725eab7275e7777ebb9dff0ca8007e2e3`  
 **Push:** `origin/main` — نجح بعد التحقق من تطابق HEAD المحلي والبعيد.
 
 ---
@@ -58,11 +58,12 @@
 
 ## 5. التحقق النهائي
 
-- **Commit:** `__COMMIT_HASH__`
+- **Commit الأساسي:** `86868b8725eab7275e7777ebb9dff0ca8007e2e3`
 - **Branch:** `main`
 - **Remote:** `origin`
 - **Push:** نجح إلى `origin/main` دون force.
 - **HEAD المحلي = `origin/main`** بعد الدفع.
+- هذا التقرير محدّث في commit توثيقي تالٍ بعد تثبيت hash الـcommit الأساسي.
 
 ### الملفات المستبعدة عمدًا
 - `apps/frontend/next-env.d.ts` — ملف مولّد، بقي معدّلًا محليًا وغير staged.
