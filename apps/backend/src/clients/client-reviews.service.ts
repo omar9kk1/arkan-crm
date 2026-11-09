@@ -11,6 +11,19 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { propertyVisibilityWhere } from '../properties/property-visibility';
 import { clientOwnershipWhere, ensureEmployeeProfile } from './client-policy';
+import { isManagement } from '../common/access/access-policy';
+
+/** OWNER all reviews; MANAGER their team's submissions; EMPLOYEE own. */
+function reviewScopeWhere(
+  viewer: AuthUser,
+): Prisma.ClientReviewRequestWhereInput {
+  if (viewer.role === Role.OWNER) return {};
+  if (viewer.role === Role.MANAGER)
+    return {
+      requestedBy: { employee: { managerUserId: viewer.id } },
+    };
+  return { requestedById: viewer.id };
+}
 import { clientRequestChangeSummary } from './client-request-data';
 import type { UpdateClientDto } from './dto/update-client.dto';
 import {
@@ -310,8 +323,7 @@ export class ClientReviewsService {
   /** `GET /client-reviews` — scoped cards, newest first. */
   async list(viewer: AuthUser): Promise<ClientReviewListDto> {
     const rows = await this.prisma.clientReviewRequest.findMany({
-      where:
-        viewer.role === Role.MANAGER ? {} : { requestedById: viewer.id },
+      where: reviewScopeWhere(viewer),
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: REVIEW_LIST_LIMIT,
       include: { requestedBy: { select: { id: true, name: true } } },
@@ -354,13 +366,10 @@ export class ClientReviewsService {
    */
   async countPending(viewer: AuthUser): Promise<ClientReviewCountDto> {
     const pending = await this.prisma.clientReviewRequest.count({
-      where:
-        viewer.role === Role.MANAGER
-          ? { status: ApprovalStatus.PENDING }
-          : {
-              status: ApprovalStatus.PENDING,
-              requestedById: viewer.id,
-            },
+      where: {
+        status: ApprovalStatus.PENDING,
+        ...reviewScopeWhere(viewer),
+      },
     });
     return { pending };
   }
@@ -441,8 +450,13 @@ export class ClientReviewsService {
     action: ReviewDecision,
     reviewNotes: string | null,
   ): Promise<ClientReviewSummaryDto> {
-    if (viewer.role !== Role.MANAGER)
-      throw new ForbiddenException('اتخاذ قرارات المراجعة متاح للمدير فقط.');
+    if (!isManagement(viewer))
+      throw new ForbiddenException(
+        'This decision is reserved for the OWNER or a Manager',
+      );
+    // Team scope: a Manager can only decide a review submitted by one of their
+    // currently assigned employees. OWNER can decide every review.
+    await this.findOwnedOr404(viewer, id);
     const decided = await this.prisma.$transaction(
       async (tx) => {
         const claimed = await tx.clientReviewRequest.updateMany({
@@ -694,10 +708,7 @@ export class ClientReviewsService {
     id: string,
   ): Promise<ReviewRow> {
     const row = await this.prisma.clientReviewRequest.findFirst({
-      where:
-        viewer.role === Role.MANAGER
-          ? { id }
-          : { id, requestedById: viewer.id },
+      where: { id, ...reviewScopeWhere(viewer) },
       include: { requestedBy: { select: { id: true, name: true } } },
     });
     if (!row) throw new NotFoundException('طلب المراجعة غير موجود.');

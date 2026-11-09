@@ -40,6 +40,7 @@ export function notificationRoute(
   >,
   role: string | undefined,
 ): { path: string } | null {
+  const management = role === 'MANAGER' || role === 'OWNER';
   // A follow-up subject deep-links to the caller's OWN follow-ups page
   // (employee → his personal board; manager → the monitoring section),
   // which opens the EXACT subject's history — checked FIRST because those
@@ -48,7 +49,7 @@ export function notificationRoute(
   // manager for the rows addressed to him), so the link can never carry
   // someone else's data.
   if (item.followUpSubjectId) {
-    const base = role === 'MANAGER' ? '/manager' : '/employee';
+    const base = management ? '/manager' : '/employee';
     const entryId = followUpEntryOf(item.eventKey);
     const entry = entryId
       ? `&${FOLLOW_UP_ENTRY_QUERY_PARAM}=${encodeURIComponent(entryId)}`
@@ -61,7 +62,7 @@ export function notificationRoute(
   }
   // A property row deep-links through the existing authorized properties page.
   if (item.propertyId) {
-    const base = role === 'MANAGER' ? '/manager' : '/employee';
+    const base = management ? '/manager' : '/employee';
     const decision =
       item.eventKey?.startsWith('PROPERTY_REJECTED:') ||
       item.eventKey?.startsWith('PROPERTY_TRASHED:');
@@ -73,7 +74,7 @@ export function notificationRoute(
   }
   // A review row never leaks record ids: it opens the staged-reviews tab.
   if (item.clientReviewId) {
-    const base = role === 'MANAGER' ? '/manager' : '/employee';
+    const base = management ? '/manager' : '/employee';
     return {
       path: `${base}/clients?${CLIENT_REVIEW_QUERY_PARAM}=${encodeURIComponent(
         item.clientReviewId,
@@ -82,7 +83,7 @@ export function notificationRoute(
   }
   // Record activity is a manager-only feed: the manager is authorized for every
   // company client/contact, so the row's reference is an authorized target.
-  if (role !== 'MANAGER') return null;
+  if (!management) return null;
   if (item.clientId) {
     return {
       path: `/manager/clients?${MANAGER_CLIENT_CLIENT_QUERY_PARAM}=${encodeURIComponent(item.clientId)}`,

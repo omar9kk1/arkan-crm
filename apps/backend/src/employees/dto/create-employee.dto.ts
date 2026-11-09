@@ -3,10 +3,11 @@ import {
   IsBoolean,
   IsDateString,
   IsEmail,
-  IsEnum,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
   Min,
   MinLength,
@@ -14,12 +15,8 @@ import {
 import { Role } from '@arkan/shared';
 
 /**
- * Body of `POST /employees`.
- *
- * Only fields that are genuinely persisted are accepted: `User` (email, name,
- * role, isActive, password) plus the 1:1 `EmployeeProfile` (phone, hiredAt,
- * baseSalary). There is deliberately no `notes` field — neither model has a
- * column for it, so accepting one would silently discard data.
+ * Body of `POST /employees` (OWNER only). Managers may be created without an
+ * EmployeeProfile; employees get one and may be assigned immediately.
  */
 export class CreateEmployeeDto {
   @IsString()
@@ -36,7 +33,7 @@ export class CreateEmployeeDto {
   @MaxLength(128)
   password!: string;
 
-  @IsEnum(Role)
+  @IsIn([Role.MANAGER, Role.EMPLOYEE])
   role!: Role;
 
   @IsOptional()
@@ -57,4 +54,9 @@ export class CreateEmployeeDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  /** EMPLOYEE only: initial Manager assignment (must be an active MANAGER). */
+  @IsOptional()
+  @IsUUID()
+  managerUserId?: string;
 }

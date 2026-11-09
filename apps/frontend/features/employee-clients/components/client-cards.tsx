@@ -49,10 +49,14 @@ export function EmployeeClientCard({
         <p>الميزانية: {client.budget} د.ك</p>
       </div>
       <div>
-        <p>آخر متابعة: {client.history[0]?.date || 'لم تسجل بعد'}</p>
+        <p>آخر متابعة: {client.lastFollowUp || 'لم تسجل بعد'}</p>
         <p>المتابعة القادمة: {client.next || 'لم تحدد'}</p>
         <span className={styles.badge}>
-          {isLate(client, localDate()) ? 'متأخر' : client.properties.length ? 'نشط' : 'بدون عقار مناسب'}
+          {isLate(client, localDate())
+            ? 'متأخر'
+            : (client.propertyCount ?? client.properties.length)
+              ? 'نشط'
+              : 'بدون عقار مناسب'}
         </span>
       </div>
     </Card>

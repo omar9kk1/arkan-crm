@@ -6,9 +6,43 @@ import type {
   FollowUpListDto,
   FollowUpReminderResultDto,
   FollowUpSupervisionListDto,
+  FollowUpTabApi,
 } from './followup-types';
 
 const BASE = '/follow-ups';
+
+export type FollowUpTabQueryApi = FollowUpTabApi | 'all';
+export type FollowUpStatusQueryApi =
+  | 'all'
+  | 'OVERDUE'
+  | 'TODAY'
+  | 'UPCOMING'
+  | 'NEVER';
+
+export interface FollowUpListQuery {
+  search?: string;
+  tab?: FollowUpTabQueryApi;
+  status?: FollowUpStatusQueryApi;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface FollowUpSupervisionQuery extends FollowUpListQuery {
+  employeeUserId?: string;
+}
+
+function queryString(query: FollowUpListQuery): string {
+  const params = new URLSearchParams();
+  if (query.search) params.set('search', query.search);
+  if (query.tab && query.tab !== 'all') params.set('tab', query.tab);
+  if (query.status && query.status !== 'all') {
+    params.set('status', query.status);
+  }
+  if (query.cursor) params.set('cursor', query.cursor);
+  if (query.limit) params.set('limit', String(query.limit));
+  const value = params.toString();
+  return value ? `?${value}` : '';
+}
 
 /**
  * The employee follow-ups read/save paths.
@@ -19,8 +53,10 @@ const BASE = '/follow-ups';
  */
 
 /** `GET /follow-ups` — the caller's OWN synchronized subjects, oldest due first. */
-export function listFollowUps(): Promise<FollowUpListDto> {
-  return authorizedRequest<FollowUpListDto>(BASE);
+export function listFollowUps(
+  query: FollowUpListQuery = {},
+): Promise<FollowUpListDto> {
+  return authorizedRequest<FollowUpListDto>(BASE + queryString(query));
 }
 
 /** `GET /follow-ups/:id/history` — ONE subject's permanent history, newest first. */
@@ -57,8 +93,18 @@ export function saveFollowUpBatch(
  * with its responsible employee and the latest manual reminder instant. Never
  * reachable from an employee account.
  */
-export function listSupervisionFollowUps(): Promise<FollowUpSupervisionListDto> {
-  return authorizedRequest<FollowUpSupervisionListDto>(`${BASE}/manager/overview`);
+export function listSupervisionFollowUps(
+  query: FollowUpSupervisionQuery = {},
+): Promise<FollowUpSupervisionListDto> {
+  const base = queryString(query);
+  const params = new URLSearchParams(base.startsWith('?') ? base.slice(1) : base);
+  if (query.employeeUserId) {
+    params.set('employeeUserId', query.employeeUserId);
+  }
+  const value = params.toString();
+  return authorizedRequest<FollowUpSupervisionListDto>(
+    `${BASE}/manager/overview${value ? `?${value}` : ''}`,
+  );
 }
 
 /**

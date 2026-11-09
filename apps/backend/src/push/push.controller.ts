@@ -9,8 +9,14 @@ import {
   Req,
 } from '@nestjs/common';
 import { Role, type AuthUser } from '@arkan/shared';
+import { Throttle } from '@nestjs/throttler';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { PushService } from './push.service';
+import {
+  RATE_LIMIT_DEFAULTS,
+  rateLimit,
+  rateLimitWindowMs,
+} from '../config/rate-limit';
 import {
   SubscribePushDto,
   UnsubscribePushDto,
@@ -25,7 +31,7 @@ import {
  * session's lineage or another account's subscription.
  */
 @Controller('push')
-@Roles(Role.MANAGER)
+@Roles(Role.OWNER, Role.MANAGER)
 export class PushController {
   constructor(private readonly push: PushService) {}
 
@@ -42,6 +48,12 @@ export class PushController {
   }
 
   /** Binds this browser's subscription to the authenticated manager. */
+  @Throttle({
+    default: {
+      limit: rateLimit('PUSH_REGISTER', RATE_LIMIT_DEFAULTS.pushRegister),
+      ttl: rateLimitWindowMs,
+    },
+  })
   @Put('subscriptions')
   subscribe(
     @Req() request: { user: AuthUser },
@@ -51,6 +63,12 @@ export class PushController {
   }
 
   /** Removes this browser's subscription (the "OFF" switch of the device). */
+  @Throttle({
+    default: {
+      limit: rateLimit('PUSH_REGISTER', RATE_LIMIT_DEFAULTS.pushRegister),
+      ttl: rateLimitWindowMs,
+    },
+  })
   @Delete('subscriptions')
   unsubscribe(
     @Req() request: { user: AuthUser },
@@ -65,6 +83,12 @@ export class PushController {
    * notification row.
    */
   @Post('test')
+  @Throttle({
+    default: {
+      limit: rateLimit('PUSH_TEST', RATE_LIMIT_DEFAULTS.pushTest),
+      ttl: rateLimitWindowMs,
+    },
+  })
   @HttpCode(200)
   test(@Req() request: { user: AuthUser }) {
     return this.push.sendTestToSelf(request.user);

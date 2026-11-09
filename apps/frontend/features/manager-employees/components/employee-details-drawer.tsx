@@ -7,13 +7,27 @@ import {
   employeeAttendanceTags,
   nfcHref,
 } from '../../employee-attendance/nfc-store';
-import { useState, type FormEvent, type ReactNode } from 'react';
+import {
+  useEffect,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from 'react';
 import { PropertyOverlay } from '../../manager-properties/components/property-overlay';
+import { GlassSelect } from '../../../components/ui/glass-select';
+import {
+  assignEmployeeManager,
+  listEmployeeProperties,
+  listManagers,
+} from '../../../lib/api/employees-api';
+import type { ManagerDto } from '../../../lib/api/employee-types';
 import { assignmentProperties, type Assignment } from '../assignment-trial';
 import {
+  mapEmployeeProperty,
   money,
   propertyStatusSummary,
   UNAVAILABLE,
+  type EmployeePropertyRef,
   type EmployeeRecord,
 } from '../model';
 import { EmployeeStats } from './employee-stats';
@@ -26,6 +40,8 @@ export function EmployeeDetailsDrawer({
   onRename,
   onToggleActivation,
   onClose,
+  canManage = true,
+  onManagerChanged,
 }: {
   employee: EmployeeRecord;
   assignments: Assignment[];
@@ -34,6 +50,10 @@ export function EmployeeDetailsDrawer({
   /** Activates/deactivates the account; the page updates after API success. */
   onToggleActivation: (isActive: boolean) => Promise<void>;
   onClose: () => void;
+  /** OWNER account management; MANAGER team view is read-only. */
+  canManage?: boolean;
+  /** Refreshes the employee list after an individual assignment/transfer. */
+  onManagerChanged?: () => void;
 }) {
   const tag = employeeAttendanceTags.find((t) =>
     t.email === employee.email.toLowerCase(),
@@ -46,6 +66,110 @@ export function EmployeeDetailsDrawer({
   const [confirmingActivation, setConfirmingActivation] = useState(false);
   const [activationBusy, setActivationBusy] = useState(false);
   const [activationError, setActivationError] = useState('');
+  const [managers, setManagers] = useState<ManagerDto[]>([]);
+  const [managerBusy, setManagerBusy] = useState(false);
+  const [managerError, setManagerError] = useState('');
+  const [propertyRows, setPropertyRows] = useState<EmployeePropertyRef[]>(
+    employee.properties,
+  );
+  const [propertyCursor, setPropertyCursor] = useState<string | null>(null);
+  const [propertyTotal, setPropertyTotal] = useState(employee.propertyCount);
+  const [propertiesLoading, setPropertiesLoading] = useState(false);
+  const [propertiesError, setPropertiesError] = useState('');
+
+  useEffect(() => {
+    if (!canManage || employee.role !== 'EMPLOYEE') return;
+    let active = true;
+    listManagers()
+      .then((page) => {
+        if (active) setManagers(page.items);
+      })
+      .catch((cause) => {
+        if (active)
+          setManagerError(
+            cause instanceof Error
+              ? cause.message
+              : 'تعذر تحميل المديرين.',
+          );
+      });
+    return () => {
+      active = false;
+    };
+  }, [canManage, employee.role]);
+
+  useEffect(() => {
+    let active = true;
+    setPropertiesLoading(true);
+    setPropertiesError('');
+    listEmployeeProperties(employee.id, { limit: 50 })
+      .then((page) => {
+        if (!active) return;
+        setPropertyRows(page.items.map(mapEmployeeProperty));
+        setPropertyCursor(page.nextCursor);
+        setPropertyTotal(page.total);
+      })
+      .catch((cause) => {
+        if (!active) return;
+        setPropertiesError(
+          cause instanceof Error
+            ? cause.message
+            : 'تعذّر تحميل عقارات الموظف.',
+        );
+      })
+      .finally(() => {
+        if (active) setPropertiesLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [employee.id]);
+
+  const loadMoreProperties = async () => {
+    if (!propertyCursor || propertiesLoading) return;
+    setPropertiesLoading(true);
+    setPropertiesError('');
+    try {
+      const page = await listEmployeeProperties(employee.id, {
+        cursor: propertyCursor,
+        limit: 50,
+      });
+      setPropertyRows((previous) => {
+        const seen = new Set(previous.map((property) => property.id));
+        return [
+          ...previous,
+          ...page.items
+            .map(mapEmployeeProperty)
+            .filter((property) => !seen.has(property.id)),
+        ];
+      });
+      setPropertyCursor(page.nextCursor);
+      setPropertyTotal(page.total);
+    } catch (cause) {
+      setPropertiesError(
+        cause instanceof Error
+          ? cause.message
+          : 'تعذّر تحميل المزيد من العقارات.',
+      );
+    } finally {
+      setPropertiesLoading(false);
+    }
+  };
+
+  const changeManager = async (managerUserId: string) => {
+    setManagerBusy(true);
+    setManagerError('');
+    try {
+      await assignEmployeeManager(employee.id, managerUserId || null);
+      onManagerChanged?.();
+    } catch (cause) {
+      setManagerError(
+        cause instanceof Error ? cause.message : 'تعذر تعيين الموظف.',
+      );
+    } finally {
+      setManagerBusy(false);
+    }
+  };
+
   const panel = (id: string, content: ReactNode) => (
     <section
       key={id}
@@ -94,6 +218,7 @@ export function EmployeeDetailsDrawer({
       drawer
       onClose={onClose}
     >
+      <div className={styles.employeeDrawer}>
       <p>
         {employee.roleLabel} · {employee.active ? 'نشط' : 'غير نشط'}
       </p>
@@ -120,7 +245,9 @@ export function EmployeeDetailsDrawer({
               </div>
             ))}
           </dl>
-          <Card>
+          {canManage && (
+            <>
+          <Card className={styles.drawerCard}>
             <h3>الاسم الظاهر</h3>
             {editing ? (
               <form onSubmit={submitName}>
@@ -173,7 +300,7 @@ export function EmployeeDetailsDrawer({
               </>
             )}
           </Card>
-          <Card>
+          <Card className={styles.drawerCard}>
             <h3>حساب الدخول</h3>
             <p>الحالة: {employee.active ? 'نشط' : 'معطّل'}</p>
             {confirmingActivation ? (
@@ -226,7 +353,38 @@ export function EmployeeDetailsDrawer({
               </>
             )}
           </Card>
-          <Card>
+          {employee.role === 'EMPLOYEE' && (
+            <Card className={styles.drawerCard}>
+              <h3>المدير المسؤول</h3>
+              <p>
+                الحالة الحالية:{' '}
+                <bdi>{employee.managerName ?? 'مالك النظام'}</bdi>
+              </p>
+              <label className={styles.field}>
+                تعيين المدير
+                <GlassSelect
+                  value={employee.managerUserId ?? ''}
+                  disabled={managerBusy}
+                  onChange={(event) =>
+                    void changeManager(event.target.value)
+                  }
+                >
+                  <option value="">مالك النظام — تبعية مباشرة</option>
+                  {managers
+                    .filter((manager) => manager.isActive)
+                    .map((manager) => (
+                      <option key={manager.id} value={manager.id}>
+                        {manager.name}
+                      </option>
+                    ))}
+                </GlassSelect>
+              </label>
+              {managerError && <p role="alert">{managerError}</p>}
+            </Card>
+          )}
+            </>
+          )}
+          <Card className={styles.drawerCard}>
             <h3>كارت الحضور NFC</h3>
             <p>حالة الكارت: {tag ? 'مربوط' : 'غير مربوط'}</p>
             {tag && (
@@ -257,14 +415,17 @@ export function EmployeeDetailsDrawer({
       {panel(
         'properties',
         <>
-          <h3>العقارات التي أدخلها ({employee.propertyCount})</h3>
-          {employee.properties.length ? (
+          <h3>العقارات التي أدخلها ({propertyTotal})</h3>
+          {propertiesError ? (
+            <p className={styles.notice}>{propertiesError}</p>
+          ) : null}
+          {propertyRows.length ? (
             <>
               <p className={styles.muted}>
                 {propertyStatusSummary(employee.propertiesByStatus)}
               </p>
               <ul className={styles.list}>
-                {employee.properties.map((property) => (
+                {propertyRows.map((property) => (
                   <li key={property.id}>
                     <strong>
                       {property.reference} · {property.title}
@@ -273,6 +434,19 @@ export function EmployeeDetailsDrawer({
                   </li>
                 ))}
               </ul>
+              {propertyCursor && (
+                <p className={styles.notice}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => void loadMoreProperties()}
+                    disabled={propertiesLoading}
+                    aria-busy={propertiesLoading}
+                  >
+                    {propertiesLoading ? 'جارٍ التحميل…' : 'تحميل المزيد'}
+                  </Button>
+                </p>
+              )}
             </>
           ) : (
             <p>لم يسجّل هذا الموظف أي عقار حتى الآن.</p>
@@ -326,6 +500,7 @@ export function EmployeeDetailsDrawer({
           </p>
         </>,
       )}
+      </div>
     </PropertyOverlay>
   );
 }

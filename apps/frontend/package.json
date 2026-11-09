@@ -4,13 +4,16 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3001",
-    "build": "next build",
+    "build": "next build && node scripts/csp-hashes.mjs",
     "start": "next start -p 3001",
+    "csp:verify": "node scripts/csp-verify.mjs",
+    "csp:preview": "node scripts/csp-preview.mjs",
+    "csp:test": "node --test scripts/csp-pipeline.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@arkan/shared": "0.1.0",
-    "next": "^16.0.0",
+    "next": "^16.4.5",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

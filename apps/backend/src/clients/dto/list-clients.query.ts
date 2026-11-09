@@ -1,13 +1,36 @@
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import {
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
+
+export const CLIENT_LIST_FILTERS = ['today', 'late', 'unmatched'] as const;
+export type ClientListFilter = (typeof CLIENT_LIST_FILTERS)[number];
+
+export const CLIENT_LIST_CLASSIFICATIONS = [
+  'owner',
+  'buyer',
+  'renter',
+  'exchanger',
+  'interested',
+] as const;
+export type ClientListClassification =
+  (typeof CLIENT_LIST_CLASSIFICATIONS)[number];
 
 /**
  * Query of `GET /clients`.
  *
- * `search` matches name or phone as a case-insensitive substring; the default
- * limit returns the whole authorised list so the existing client-side search,
- * tabs and counters keep working on real data without a new paging control.
- * The bound is explicit so the endpoint can never turn into an unbounded scan.
+ * The list is cursor-paginated and returns a lightweight projection; full
+ * follow-ups/deals/interests live on `GET /clients/:id`. `search` and the
+ * optional filters are applied inside the same authorised DB query, so they
+ * cover the whole dataset rather than only the loaded page. There is no total
+ * record cap: `limit` only bounds one page.
  */
 export class ListClientsQueryDto {
   @IsOptional()
@@ -15,10 +38,23 @@ export class ListClientsQueryDto {
   @MaxLength(120)
   search?: string;
 
+  /** Stable cursor: the last client id from the previous page. */
+  @IsOptional()
+  @IsUUID()
+  cursor?: string;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(1000)
+  @Max(100)
   limit?: number;
+
+  @IsOptional()
+  @IsIn(CLIENT_LIST_FILTERS)
+  filter?: ClientListFilter;
+
+  @IsOptional()
+  @IsIn(CLIENT_LIST_CLASSIFICATIONS)
+  classification?: ClientListClassification;
 }

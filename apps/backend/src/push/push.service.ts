@@ -11,6 +11,12 @@ import webpush from 'web-push';
 import { PrismaService } from '../prisma/prisma.service';
 import { isRecordEvent, pushTargetUrl } from './push-target';
 import { pushPreviewBody } from './push-preview';
+import {
+  assertAllowedPushEndpoint,
+  parseAllowedPushEndpoint,
+  PUSH_REQUEST_TIMEOUT_MS,
+  SAFE_PUSH_AGENT,
+} from './push-endpoint';
 import type {
   SubscribePushDto,
   UnsubscribePushDto,
@@ -123,14 +129,17 @@ export class PushService {
       throw new ConflictException(
         'أعد تسجيل الدخول لتفعيل الإشعارات الخارجية على هذا الجهاز.',
       );
+    // Registration is the first security boundary: only a real browser push
+    // service may be stored as an outbound destination.
+    const endpoint = assertAllowedPushEndpoint(dto.endpoint).toString();
     await this.prisma.pushSubscription.deleteMany({
-      where: { endpoint: dto.endpoint },
+      where: { endpoint },
     });
     await this.prisma.pushSubscription.create({
       data: {
         userId: viewer.id,
         lineageId: viewer.sessionLineageId,
-        endpoint: dto.endpoint,
+        endpoint,
         p256dh: dto.keys.p256dh,
         auth: dto.keys.auth,
         userAgent: dto.userAgent?.slice(0, 400) || null,
@@ -189,7 +198,11 @@ export class PushService {
       return { delivered: 0, retryable: 0 };
     // Record-activity events are a manager feed: a demoted account must not
     // keep receiving them.
-    if (isRecordEvent(row.type) && recipient.role !== Role.MANAGER) {
+    if (
+      isRecordEvent(row.type) &&
+      recipient.role !== Role.MANAGER &&
+      recipient.role !== Role.OWNER
+    ) {
       return { delivered: 0, retryable: 0 };
     }
 
@@ -222,11 +235,23 @@ export class PushService {
         });
         continue;
       }
+      // Revalidate on EVERY delivery: a stored row may predate the current
+      // allowlist. Invalid rows are skipped, never deleted (the owner may
+      // still need the record, and a future policy change may re-enable it).
+      let endpoint: string;
+      try {
+        endpoint = parseAllowedPushEndpoint(subscription.endpoint).toString();
+      } catch {
+        this.logger.warn(
+          `Skipped push subscription ${subscription.id}: endpoint is not an approved push service`,
+        );
+        continue;
+      }
       if (!url) continue;
       try {
         await webpush.sendNotification(
           {
-            endpoint: subscription.endpoint,
+            endpoint,
             keys: {
               p256dh: subscription.p256dh,
               auth: subscription.auth,
@@ -240,7 +265,12 @@ export class PushService {
             url,
             notificationId: row.id,
           }),
-          { TTL: 3600, urgency: 'normal' },
+          {
+            TTL: 3600,
+            urgency: 'normal',
+            agent: SAFE_PUSH_AGENT,
+            timeout: PUSH_REQUEST_TIMEOUT_MS,
+          },
         );
         delivered += 1;
       } catch (cause) {
@@ -261,8 +291,11 @@ export class PushService {
           continue;
         }
         retryable += 1;
+        // Never log the endpoint, encryption keys or a raw web-push message:
+        // those can contain the subscription URL. A status/code is enough to
+        // diagnose the failure.
         this.logger.warn(
-          `Push delivery failed for ${subscription.id}: ${(cause as Error).message}`,
+          `Push delivery failed for ${subscription.id} (${this.pushFailureLabel(cause)})`,
         );
       }
     }
@@ -295,10 +328,19 @@ export class PushService {
         });
         continue;
       }
+      let endpoint: string;
+      try {
+        endpoint = parseAllowedPushEndpoint(subscription.endpoint).toString();
+      } catch {
+        this.logger.warn(
+          `Skipped push subscription ${subscription.id}: endpoint is not an approved push service`,
+        );
+        continue;
+      }
       try {
         await webpush.sendNotification(
           {
-            endpoint: subscription.endpoint,
+            endpoint,
             keys: { p256dh: subscription.p256dh, auth: subscription.auth },
           },
           JSON.stringify({
@@ -307,7 +349,12 @@ export class PushService {
             url: '/manager',
             notificationId: `test-${subscription.id}`,
           }),
-          { TTL: 3600, urgency: 'normal' },
+          {
+            TTL: 3600,
+            urgency: 'normal',
+            agent: SAFE_PUSH_AGENT,
+            timeout: PUSH_REQUEST_TIMEOUT_MS,
+          },
         );
         sent += 1;
       } catch (cause) {
@@ -322,6 +369,18 @@ export class PushService {
       }
     }
     return { sent, devices: subscriptions.length };
+  }
+
+  /**
+   * A log-safe failure label. Deliberately excludes the raw error message,
+   * endpoint, headers and encryption keys.
+   */
+  private pushFailureLabel(cause: unknown): string {
+    const status = (cause as { statusCode?: unknown }).statusCode;
+    if (typeof status === 'number') return `HTTP ${status}`;
+    const code = (cause as { code?: unknown }).code;
+    if (typeof code === 'string' && /^[A-Z0-9_]+$/.test(code)) return code;
+    return cause instanceof Error ? cause.name : 'unknown error';
   }
 
   /** Whether the session lineage of a subscription still has a live session. */

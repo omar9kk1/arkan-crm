@@ -34,6 +34,7 @@ export function AddClientModal({
               notes: editing.notes || '',
               history: [],
               next: editing.nextFollowUp,
+              lastFollowUp: editing.lastFollowUp,
               employee: editing.employee,
               properties: editing.properties.map((p) => ({
                 name: p.title,
@@ -64,6 +65,7 @@ export function AddClientModal({
         notes: client.notes || '',
         history: [],
         next: client.nextFollowUp,
+        lastFollowUp: client.lastFollowUp,
         employee: client.employee,
         properties: client.properties.map((p) => ({
           name: p.title,

@@ -21,6 +21,7 @@ export function PropertyDetailsDrawer({
   onBack,
   onAction,
   onApproveDistinct,
+  canDelete = false,
   busy = false,
   compareProperty = null,
   onCloseCompare,
@@ -31,6 +32,8 @@ export function PropertyDetailsDrawer({
   onBack?: () => void;
   /** When provided, the drawer surfaces the manager's review decisions. */
   onAction?: (action: string, property: PreviewProperty) => void;
+  /** Deleting to Trash is reserved for OWNER. */
+  canDelete?: boolean;
   /** Approve a potential-duplicate property as a genuinely distinct house. */
   onApproveDistinct?: (property: PreviewProperty) => void;
   /** True while a decision for this row is in flight — blocks a double click. */
@@ -257,7 +260,7 @@ export function PropertyDetailsDrawer({
                 )}
               </div>
             )}
-            {onAction && (
+            {onAction && canDelete && (
               <div className={styles.actions}>
                 <Button
                   type="button"

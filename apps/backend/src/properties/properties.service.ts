@@ -50,6 +50,11 @@ import {
 } from './property-reference';
 import { propertyVisibilityWhere } from './property-visibility';
 import {
+  assertPropertyReviewPermission,
+  isOwner,
+  reviewNotificationRecipientIds,
+} from '../common/access/access-policy';
+import {
   propertyDetailInclude,
   serializeProperty,
 } from './property-serializer';
@@ -605,21 +610,26 @@ export class PropertiesService {
             : null;
 
         // --- Create property ---
-        const isEmployee = viewer.role === Role.EMPLOYEE;
+        // OWNER is the highest authority and may create an AVAILABLE row.
+        // MANAGER and EMPLOYEE submissions BOTH enter the PENDING review flow;
+        // a Manager can never bypass review through direct creation.
+        const requiresReview = !isOwner(viewer);
         // P codes are independent from the official A sequence. Both are
         // allocated INSIDE this transaction, so a rolled-back 409 consumes
         // neither, and concurrent submissions/approvals never duplicate.
-        const reference = isEmployee
+        const reference = requiresReview
           ? await nextSubmissionCode(tx)
           : await allocateOfficialCode(tx);
         // Employee submissions stage the owner as provisional data on the
         // property. An official Contact is created only at Manager approval.
         const provisionalOwner =
-          isEmployee && payload.newContact
+          requiresReview && payload.newContact
             ? this.toProposedOwner(payload.newContact)
             : null;
+        // A review submission's NEW contact is provisional until approval. An
+        // EXISTING contactId is already official and may be linked as-is.
         const contact =
-          payload.newContact && isEmployee
+          requiresReview && payload.newContact
             ? null
             : await this.resolveContactInTx(tx, viewer, payload);
         const district = trimOrNull(payload.district);
@@ -627,7 +637,7 @@ export class PropertiesService {
         const property = await tx.property.create({
           data: {
             reference,
-            approvedReference: isEmployee ? null : reference,
+            approvedReference: requiresReview ? null : reference,
             title:
               trimOrNull(payload.title) ??
               generatePropertyTitle(payload.listingType, district, governorate),
@@ -642,7 +652,7 @@ export class PropertiesService {
             askingPrice: toDecimal(payload.askingPrice, 'askingPrice'),
             negotiable: payload.negotiable ?? null,
             currency: CURRENCY,
-            status: isEmployee
+            status: requiresReview
               ? PropertyStatus.PENDING
               : PropertyStatus.AVAILABLE,
             listingType: payload.listingType,
@@ -677,7 +687,7 @@ export class PropertiesService {
           where: { id: property.id },
           data: { primaryImageId: asset.id },
         });
-        if (isEmployee)
+        if (requiresReview)
           await tx.propertyApprovalRequest.create({
             data: {
               propertyId: property.id,
@@ -708,7 +718,7 @@ export class PropertiesService {
           approvalRequestId: null,
           version: property.version,
         };
-        if (isEmployee) {
+        if (requiresReview) {
           if (potentialMatchId && potentialMatchRef) {
             await this.notifyPotentialDuplicate(
               tx,
@@ -912,23 +922,24 @@ export class PropertiesService {
 
   private async notifyPotentialDuplicate(
     tx: Prisma.TransactionClient,
-    _viewer: AuthUser,
+    viewer: AuthUser,
     propertyId: string,
     _propertyReference: string,
     matchId: string,
     _matchRef: string,
   ): Promise<void> {
-    const managers = await tx.user.findMany({
-      where: { role: Role.MANAGER, isActive: true },
-      select: { id: true },
+    // OWNERs + the submitter's current Manager only. Never another team.
+    const recipients = await reviewNotificationRecipientIds(tx, {
+      id: viewer.id,
+      role: viewer.role,
     });
     // Human-readable only: the codes, the submitter's display name and the
     // review status are resolved from their records at READ time (see the
     // notifications service). The stored message never carries a UUID or any
     // technical payload.
     await tx.notification.createMany({
-      data: managers.map((m) => ({
-        userId: m.id,
+      data: recipients.map((userId: string) => ({
+        userId,
         type: NotificationType.SYSTEM,
         title: 'عقار مشابه يحتاج إلى مراجعة',
         body: 'تم اكتشاف تشابه محتمل بين عقارين في النظام. يُرجى مراجعة البيانات قبل اتخاذ القرار.',
@@ -945,6 +956,12 @@ export class PropertiesService {
     dto: ApprovePropertyDto,
   ): Promise<PropertyViewDto> {
     const existing = await this.requireExisting(id);
+    await assertPropertyReviewPermission(
+      this.prisma,
+      viewer,
+      existing,
+      'APPROVE',
+    );
     // Potential-duplicate review gate.
     const latestApproval = await this.prisma.propertyApprovalRequest.findFirst({
       where: { propertyId: id },
@@ -1119,6 +1136,12 @@ export class PropertiesService {
     if (!reason)
       throw new BadRequestException('A rejection reason is required');
     const existing = await this.requireExisting(id);
+    await assertPropertyReviewPermission(
+      this.prisma,
+      viewer,
+      existing,
+      'REJECT',
+    );
     await this.prisma.$transaction(async (tx) => {
       const transitioned = await tx.property.updateMany({
         where: {
@@ -1234,6 +1257,12 @@ export class PropertiesService {
     if (!reason)
       throw new BadRequestException('Instructions for changes are required');
     const existing = await this.requireExisting(id);
+    await assertPropertyReviewPermission(
+      this.prisma,
+      viewer,
+      existing,
+      'CHANGES',
+    );
     await this.prisma.$transaction(async (tx) => {
       const transitioned = await tx.property.updateMany({
         where: {
@@ -1940,12 +1969,40 @@ export class PropertiesService {
   // ---------------------------------------------------------------------------
 
   // ---------------------------------------------------------------------------
-  // Trash (Manager-only)
+  // Trash (OWNER-only)
   // ---------------------------------------------------------------------------
 
-  private assertManager(viewer: AuthUser): void {
-    if (viewer.role !== Role.MANAGER)
-      throw new ForbiddenException('Only managers can manage the property trash');
+  private assertTrashAccess(viewer: AuthUser): void {
+    if (!isOwner(viewer))
+      throw new ForbiddenException(
+        'Only the OWNER can manage the property trash',
+      );
+  }
+
+  /** OWNER sees every trashed row. */
+  private trashedScopeWhere(viewer: AuthUser): Prisma.PropertyWhereInput {
+    if (isOwner(viewer)) return {};
+    return {
+      OR: [
+        { createdByUserId: viewer.id },
+        { createdByUser: { employee: { managerUserId: viewer.id } } },
+      ],
+    };
+  }
+
+  private async assertTrashedScope(
+    viewer: AuthUser,
+    createdByUserId: string | null,
+  ): Promise<void> {
+    if (isOwner(viewer)) return;
+    if (!createdByUserId)
+      throw new NotFoundException('Property not found');
+    if (createdByUserId === viewer.id) return;
+    const member = await this.prisma.employeeProfile.findFirst({
+      where: { userId: createdByUserId, managerUserId: viewer.id },
+      select: { id: true },
+    });
+    if (!member) throw new NotFoundException('Property not found');
   }
 
   private async getTrashedDetail(
@@ -1962,9 +2019,12 @@ export class PropertiesService {
 
   /** Manager-only list of soft-deleted properties (Trash). */
   async listTrash(viewer: AuthUser): Promise<PropertyPageDto> {
-    this.assertManager(viewer);
+    this.assertTrashAccess(viewer);
     const rows = await this.prisma.property.findMany({
-      where: { deletedAt: { not: null } },
+      where: {
+        deletedAt: { not: null },
+        ...this.trashedScopeWhere(viewer),
+      },
       include: propertyDetailInclude,
       orderBy: [{ deletedAt: 'desc' }, { id: 'desc' }],
     });
@@ -1984,9 +2044,10 @@ export class PropertiesService {
     id: string,
     reason?: string,
   ): Promise<PropertyViewDto> {
-    this.assertManager(viewer);
+    this.assertTrashAccess(viewer);
     const existing = await this.prisma.property.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Property not found');
+    await this.assertTrashedScope(viewer, existing.createdByUserId);
     if (existing.deletedAt)
       throw new ConflictException('العقار موجود في سلة المحذوفات بالفعل.');
     await this.prisma.$transaction(async (tx) => {
@@ -2041,9 +2102,10 @@ export class PropertiesService {
    * silently creating a duplicate active house.
    */
   async restore(viewer: AuthUser, id: string): Promise<PropertyViewDto> {
-    this.assertManager(viewer);
+    this.assertTrashAccess(viewer);
     const existing = await this.prisma.property.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Property not found');
+    await this.assertTrashedScope(viewer, existing.createdByUserId);
     if (!existing.deletedAt)
       throw new BadRequestException('هذا العقار ليس في سلة المحذوفات.');
     const conflict = await this.findActiveIdentityConflict(existing);
@@ -2131,7 +2193,7 @@ export class PropertiesService {
     id: string,
     confirmationCode: string,
   ): Promise<{ id: string; reference: string }> {
-    this.assertManager(viewer);
+    this.assertTrashAccess(viewer);
     const property = await this.prisma.property.findUnique({
       where: { id },
       include: {
@@ -2142,6 +2204,7 @@ export class PropertiesService {
       },
     });
     if (!property) throw new NotFoundException('Property not found');
+    await this.assertTrashedScope(viewer, property.createdByUserId);
     if (!property.deletedAt)
       throw new BadRequestException(
         'الحذف النهائي مسموح فقط للعقارات الموجودة في سلة المحذوفات.',

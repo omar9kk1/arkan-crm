@@ -73,9 +73,7 @@ describeWithDatabase('Manager dashboard real data', () => {
       name: 'Dashboard Employee',
       role: Role.EMPLOYEE,
     });
-    const profile = await ctx.prisma.employeeProfile.create({
-      data: { userId: employee.id },
-    });
+    const profile = await ctx.prisma.employeeProfile.upsert({ where: { userId: employee.id }, create: { userId: employee.id }, update: {} });
     managerId = manager.id;
     employeeId = employee.id;
     employeeProfileId = profile.id;

@@ -115,8 +115,8 @@ describeWithDatabase('Wizard edit mode staged as a client review', () => {
     });
     employeeAId = employeeA.id;
     employeeBId = employeeB.id;
-    await ctx.prisma.employeeProfile.create({ data: { userId: employeeA.id } });
-    await ctx.prisma.employeeProfile.create({ data: { userId: employeeB.id } });
+    await ctx.prisma.employeeProfile.upsert({ where: { userId: employeeA.id }, create: { userId: employeeA.id }, update: {} });
+    await ctx.prisma.employeeProfile.upsert({ where: { userId: employeeB.id }, create: { userId: employeeB.id }, update: {} });
     managerToken = await login(ctx.app, manager.email);
     employeeAToken = await login(ctx.app, employeeA.email);
     employeeBToken = await login(ctx.app, employeeB.email);
@@ -332,6 +332,7 @@ describeWithDatabase('Wizard edit mode staged as a client review', () => {
         currency: 'KWD',
         listingType: 'SALE',
         status: 'AVAILABLE',
+        createdByUserId: employeeAId,
       },
     });
     const propB = await ctx.prisma.property.create({
@@ -342,6 +343,7 @@ describeWithDatabase('Wizard edit mode staged as a client review', () => {
         currency: 'KWD',
         listingType: 'RENT',
         status: 'AVAILABLE',
+        createdByUserId: employeeAId,
       },
     });
     const client = await managerClient(employeeAId, {
@@ -389,6 +391,7 @@ describeWithDatabase('Wizard edit mode staged as a client review', () => {
         currency: 'KWD',
         listingType: 'SALE',
         status: 'AVAILABLE',
+        createdByUserId: employeeAId,
       },
     });
     const foreignClient = await managerClient(employeeBId, {

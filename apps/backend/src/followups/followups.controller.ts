@@ -5,12 +5,17 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   Req,
 } from '@nestjs/common';
 import { Role, type AuthUser } from '@arkan/shared';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { FollowUpsService } from './followups.service';
 import { SaveFollowUpBatchDto } from './dto/save-follow-up-batch.dto';
+import {
+  ListFollowUpsQueryDto,
+  ListSupervisionFollowUpsQueryDto,
+} from './dto/list-follow-ups.query';
 
 /**
  * Follow-ups endpoints: the personal experience (any role, each account sees
@@ -27,15 +32,21 @@ export class FollowupsController {
 
   /** The caller's active subjects (synchronized from canonical data first). */
   @Get()
-  list(@Req() request: { user: AuthUser }) {
-    return this.followUps.list(request.user);
+  list(
+    @Req() request: { user: AuthUser },
+    @Query() query: ListFollowUpsQueryDto,
+  ) {
+    return this.followUps.list(request.user, query);
   }
 
   /** Manager overview of every company EMPLOYEE follow-up subject (§3/§4). */
   @Get('manager/overview')
-  @Roles(Role.MANAGER)
-  supervisionOverview() {
-    return this.followUps.listSupervision();
+  @Roles(Role.OWNER, Role.MANAGER)
+  supervisionOverview(
+    @Req() request: { user: AuthUser },
+    @Query() query: ListSupervisionFollowUpsQueryDto,
+  ) {
+    return this.followUps.listSupervision(request.user, query);
   }
 
   /** ONE subject's permanent history, newest first (§6). */
@@ -73,7 +84,7 @@ export class FollowupsController {
    * server-side, and NEVER modifies due date, cycle, ownership or history.
    */
   @Post(':id/reminder')
-  @Roles(Role.MANAGER)
+  @Roles(Role.OWNER, Role.MANAGER)
   sendReminder(
     @Req() request: { user: AuthUser },
     @Param('id', ParseUUIDPipe) id: string,

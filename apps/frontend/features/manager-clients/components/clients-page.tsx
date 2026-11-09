@@ -1,14 +1,17 @@
 'use client';
 import { useDraftState } from '../../../lib/drafts/use-form-draft';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   useRegistryContacts,
   type RegistryContact,
 } from '../../../lib/contact-registry';
 import { createClient, getClient, updateClient } from '../../../lib/api/clients-api';
 import { useClients } from '../../../lib/use-clients';
-import type { ClientApiDto } from '../../../lib/api/client-types';
+import type {
+  ClientApiDto,
+  ClientListItemApiDto,
+} from '../../../lib/api/client-types';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { requestOpenProperty } from '../../notifications/open-property';
 import {
@@ -119,6 +122,35 @@ function clientFromDto(dto: ClientApiDto): ClientSample {
   };
 }
 
+/**
+ * Lightweight list row -> card model. The full record (timeline, deals and
+ * interests) is fetched only when the details drawer opens.
+ */
+function clientFromListItem(dto: ClientListItemApiDto): ClientSample {
+  const today = localDate();
+  let status: ClientSample['status'] = 'مفتوح';
+  if (dto.nextFollowUp) {
+    if (dto.nextFollowUp < today) status = 'متابعة متأخرة';
+    else status = 'متابع';
+  }
+  return {
+    id: dto.id,
+    name: dto.name,
+    phone: dto.phone,
+    type: '—',
+    requestData: dto.requestData,
+    employee: dto.responsibleEmployeeName || '—',
+    lastFollowUp: dto.lastFollowUpAt?.slice(0, 10) || 'لا يوجد متابعة',
+    status,
+    request: '—',
+    nextFollowUp: dto.nextFollowUp ?? 'لا يوجد متابعة',
+    timeline: [],
+    properties: [],
+    propertyInterests: [],
+    notes: dto.notes || undefined,
+  };
+}
+
 function ownerFromContact(
   contact: RegistryContact,
 ): OwnerSample {
@@ -134,21 +166,27 @@ export default function ManagerClientsPage() {
   const contactsLoading = registry.loading;
   const contactsError = registry.error;
   const refreshContacts = registry.refresh;
+  const [query, setQuery] = useState('');
+  const [tab, setTab] = useState<'clients' | 'owners' | 'brokers' | 'reviews'>('clients');
   const {
     clients: clientRows,
     stats,
     loading: clientsLoading,
+    loadingMore: clientsLoadingMore,
     error: clientsError,
+    nextCursor,
     refresh: refreshClients,
-  } = useClients();
+    loadMore: loadMoreClients,
+  } = useClients({ search: tab === 'clients' ? query : '' });
   // The real «تحت المراجعة» badge number: the same authorized feed the tab
   // renders (company-wide for the manager), kept in step by the tab itself.
   const reviewCount = useClientReviewCount();
 
-  const items = useMemo(() => clientRows.map(clientFromDto), [clientRows]);
+  const items = useMemo(
+    () => clientRows.map(clientFromListItem),
+    [clientRows],
+  );
 
-  const [query, setQuery] = useState('');
-  const [tab, setTab] = useState<'clients' | 'owners' | 'brokers' | 'reviews'>('clients');
   const [file, setFile] = useState<OpenFile | null>(null);
   const [addingType, setAddingType] = useState<'client' | 'owner' | 'broker' | null>(null);
   const [notice, setNotice] = useState<string>('');
@@ -158,7 +196,7 @@ export default function ManagerClientsPage() {
     setQuery(value);
   };
 
-  const visibleClients = items.filter((person) => matchesPerson(person, query));
+  const visibleClients = items;
   const visibleOwners = contacts
     .filter((c) => c.type === 'OWNER' && c.scope === 'EMPLOYEE')
     .map(ownerFromContact)
@@ -172,6 +210,25 @@ export default function ManagerClientsPage() {
   const [clientContext, setClientContext] = useDraftState<Record<string, ClientSample>>(
     'manager-clients:context',
     {},
+  );
+
+  // List rows are lightweight; the full timeline/deals/interests are loaded
+  // only when the drawer opens.
+  const openClient = useCallback(
+    async (id: string) => {
+      try {
+        const dto = await getClient(id);
+        setClientContext((context) => ({
+          ...context,
+          [id]: clientFromDto(dto),
+        }));
+        setTab('clients');
+        setFile({ kind: 'client', id });
+      } catch {
+        setNotice('تعذّر تحميل تفاصيل العميل.');
+      }
+    },
+    [setClientContext],
   );
 
   // Notification deep-link support. The bell routes record activity to this page
@@ -199,11 +256,6 @@ export default function ManagerClientsPage() {
     handledKeyRef.current = deepLinkKey;
 
     if (clientIdParam) {
-      if (items.some((row) => row.id === clientIdParam)) {
-        setTab('clients');
-        setFile({ kind: 'client', id: clientIdParam });
-        return;
-      }
       // Out of the loaded window: fetch the real authorised record once, then
       // open the drawer with it (the drawer prefers `clientContext[id]`).
       void getClient(clientIdParam)
@@ -235,7 +287,6 @@ export default function ManagerClientsPage() {
   }, [
     clientsLoading,
     contactsLoading,
-    items,
     contacts,
     setClientContext,
     clientIdParam,
@@ -356,22 +407,32 @@ export default function ManagerClientsPage() {
             {clientsLoading ? 'جارٍ تحميل ملفات العملاء…' : `تعذر تحميل العملاء: ${clientsError}`}
           </p>
         )}
-        {tab === 'clients' && !clientsLoading && !clientsError && visibleClients.length === 0 && (
+        {tab === 'clients' && !clientsLoading && visibleClients.length === 0 && (
           <p className={styles.secondary}>لا يوجد عملاء مطابقون للبحث.</p>
         )}
-        {tab === 'clients' && !clientsLoading && !clientsError && visibleClients.length > 0 && (
+        {tab === 'clients' && !clientsLoading && visibleClients.length > 0 && (
           <div className={styles.peopleList}>
             {visibleClients.map((person) => (
               <ClientCard
                 key={person.id}
                 client={person}
-                onOpen={() => {
-                  setClientContext((prev) => ({ ...prev, [person.id]: person }));
-                  setFile({ kind: 'client', id: person.id });
-                }}
+                onOpen={() => void openClient(person.id)}
               />
             ))}
           </div>
+        )}
+        {tab === 'clients' && !clientsLoading && nextCursor && (
+          <p className={styles.secondary}>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => void loadMoreClients()}
+              disabled={clientsLoadingMore}
+              aria-busy={clientsLoadingMore}
+            >
+              {clientsLoadingMore ? 'جارٍ التحميل…' : 'تحميل المزيد'}
+            </Button>
+          </p>
         )}
 
         {tab === 'owners' && (contactsLoading || contactsError) && (
@@ -420,9 +481,9 @@ export default function ManagerClientsPage() {
           </div>
         )}
 
-        {file?.kind === 'client' && (
+        {file?.kind === 'client' && clientContext[file.id] && (
           <ClientDetailsDrawer
-            client={clientContext[file.id] || items.find((c) => c.id === file.id)!}
+            client={clientContext[file.id]!}
             onClose={() => setFile(null)}
             // The SAME authorized patch path with NO approval step: the edit
             // takes effect immediately, then the page's lists/stats re-read

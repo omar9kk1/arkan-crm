@@ -85,7 +85,7 @@ describeWithDatabase('Record-activity notifications (reviewed era)', () => {
     const manager2 = await createUser(ctx.prisma, {
       email: 'manager.two@records.local',
       name: 'Manager Two Records',
-      role: Role.MANAGER,
+      role: Role.OWNER,
     });
     const inactiveManager = await createUser(ctx.prisma, {
       email: 'manager.off@records.local',
@@ -109,12 +109,8 @@ describeWithDatabase('Record-activity notifications (reviewed era)', () => {
     inactiveManagerId = inactiveManager.id;
     employeeAId = employeeA.id;
     // Ownership resolves ONLY through EmployeeProfile profiles — provision them.
-    await ctx.prisma.employeeProfile.create({
-      data: { userId: employeeA.id },
-    });
-    await ctx.prisma.employeeProfile.create({
-      data: { userId: employeeB.id },
-    });
+    await ctx.prisma.employeeProfile.upsert({ where: { userId: employeeA.id }, create: { userId: employeeA.id }, update: {} });
+    await ctx.prisma.employeeProfile.upsert({ where: { userId: employeeB.id }, create: { userId: employeeB.id }, update: {} });
     managerToken = await login(ctx.app, manager.email);
     manager2Token = await login(ctx.app, manager2.email);
     employeeAToken = await login(ctx.app, employeeA.email);

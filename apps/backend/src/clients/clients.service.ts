@@ -16,6 +16,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { contactOwnershipWhere } from '../contacts/contact-policy';
 import { propertyVisibilityWhere } from '../properties/property-visibility';
 import { clientOwnershipWhere, ensureEmployeeProfile } from './client-policy';
+import { isManagement, isManager } from '../common/access/access-policy';
 import { clientRequestChangeSummary } from './client-request-data';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
@@ -25,21 +26,17 @@ import { PropertyInterestInputDto } from './dto/property-interest.dto';
 import type {
   ClientDto,
   ClientFollowUpDto,
+  ClientListItemDto,
   ClientListDto,
   ClientPropertyInterestDto,
+  ClientRecommendationCandidateDto,
+  ClientRecommendationCandidateListDto,
   ClientStatsDto,
 } from './client.dto';
 
-/** Upper bound of one `GET /clients` answer; the stats endpoint stays exact. */
-const MAX_CLIENTS_PER_PAGE = 1000;
-
-/**
- * Follow-ups kept per client in list/DTO answers (newest first). The detail
- * endpoint returns the full history; the cap only protects the list payload
- * from an unbounded nested scan.
- */
-const FOLLOW_UP_LIMIT = 100;
-const LINKED_PROPERTY_LIMIT = 100;
+/** One page of the lightweight client list. There is no total-record cap. */
+const DEFAULT_CLIENTS_PAGE_SIZE = 50;
+const MAX_CLIENTS_PAGE_SIZE = 100;
 
 /** Lifecycle values that take a client out of the "active" counter. */
 const INACTIVE_CLIENT_STATUSES = ['CLOSED', 'INACTIVE'];
@@ -67,26 +64,40 @@ const PROPERTY_SELECT = {
   currency: true,
 } satisfies Prisma.PropertySelect;
 
-const CLIENT_LIST_INCLUDE = {
-  ...CLIENT_BASE_INCLUDE,
+/**
+ * List projection: only scalar card fields plus two bounded summaries.
+ * It never loads the follow-up log, deals or property interests themselves.
+ */
+const CLIENT_LIST_SELECT = {
+  id: true,
+  name: true,
+  phone: true,
+  notes: true,
+  source: true,
+  status: true,
+  requestData: true,
+  createdAt: true,
+  updatedAt: true,
+  createdBy: { select: { userId: true } },
+  responsibleEmployee: {
+    select: { userId: true, user: { select: { name: true } } },
+  },
+  // Newest few follow-ups: enough to find the newest LOGGED one after
+  // unpacking the packed notes column, without loading the full history.
   followups: {
     orderBy: { createdAt: 'desc' as const },
-    take: FOLLOW_UP_LIMIT,
-    include: FOLLOW_UP_INCLUDE,
+    take: 5,
+    select: {
+      createdAt: true,
+      notes: true,
+      employee: { select: { user: { select: { name: true } } } },
+    },
   },
-  deals: {
-    orderBy: { createdAt: 'desc' as const },
-    take: LINKED_PROPERTY_LIMIT,
-    select: { property: { select: PROPERTY_SELECT } },
+  // Counts only: the detail endpoint returns the full collections.
+  _count: {
+    select: { deals: true, propertyInterests: true },
   },
-  // Recorded interests in EXISTING program properties share the list cap; the
-  // nested projection stays the same public PROPERTY_SELECT (never contact).
-  propertyInterests: {
-    orderBy: { createdAt: 'desc' as const },
-    take: LINKED_PROPERTY_LIMIT,
-    include: { property: { select: PROPERTY_SELECT } },
-  },
-} satisfies Prisma.ClientInclude;
+} satisfies Prisma.ClientSelect;
 
 const CLIENT_DETAIL_INCLUDE = {
   ...CLIENT_BASE_INCLUDE,
@@ -106,6 +117,10 @@ const CLIENT_DETAIL_INCLUDE = {
 
 type ClientRow = Prisma.ClientGetPayload<{
   include: typeof CLIENT_DETAIL_INCLUDE;
+}>;
+
+type ClientListRow = Prisma.ClientGetPayload<{
+  select: typeof CLIENT_LIST_SELECT;
 }>;
 
 // --- calendar helpers -------------------------------------------------------
@@ -202,6 +217,36 @@ function serializeFollowUp(
   };
 }
 
+function serializeClientListItem(
+  client: ClientListRow,
+  nextFollowUp: string | null,
+): ClientListItemDto {
+  const last = client.followups
+    .map((entry) => ({ entry, detail: unpackFollowUpNotes(entry.notes) }))
+    .find(({ detail }) => detail.outcome || detail.note);
+  return {
+    id: client.id,
+    name: client.name,
+    phone: client.phone,
+    notes: client.notes ?? '',
+    source: client.source ?? '',
+    status: client.status ?? '',
+    requestData: client.requestData ?? null,
+    responsibleUserId: client.responsibleEmployee?.userId ?? null,
+    responsibleEmployeeName: client.responsibleEmployee?.user.name ?? null,
+    createdByUserId: client.createdBy?.userId ?? null,
+    createdAt: client.createdAt.toISOString(),
+    updatedAt: client.updatedAt.toISOString(),
+    nextFollowUp,
+    lastFollowUpAt: last?.entry.createdAt.toISOString() ?? null,
+    lastFollowUpOutcome: last?.detail.outcome ?? '',
+    lastFollowUpNote: last?.detail.note ?? '',
+    lastFollowUpEmployeeName: last?.entry.employee.user.name ?? null,
+    propertiesCount: client._count.deals,
+    propertyInterestsCount: client._count.propertyInterests,
+  };
+}
+
 function serializeClient(client: ClientRow): ClientDto {
   const pendingKeys = client.followups
     .filter((entry) => entry.status === FollowUpStatus.PENDING)
@@ -285,27 +330,108 @@ export class ClientsService {
     query: ListClientsQueryDto,
   ): Promise<ClientListDto> {
     const search = query.search?.trim();
-    const scope = clientOwnershipWhere(viewer);
-    const where: Prisma.ClientWhereInput = search
-      ? {
-          AND: [
-            scope,
-            {
-              OR: [
-                { name: { contains: search, mode: 'insensitive' } },
-                { phone: { contains: search, mode: 'insensitive' } },
-              ],
+    const filters: Prisma.ClientWhereInput[] = [
+      clientOwnershipWhere(viewer),
+    ];
+
+    if (search) {
+      filters.push({
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { phone: { contains: search, mode: 'insensitive' } },
+        ],
+      });
+    }
+
+    if (query.filter) {
+      const todayStart = dateKeyToDate(todayKey());
+      const tomorrow = new Date(todayStart);
+      tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+      if (query.filter === 'today') {
+        // "Today" means the EARLIEST pending follow-up is today, not just any
+        // pending row today (an older overdue row would make it late).
+        filters.push({
+          followups: {
+            none: { status: FollowUpStatus.PENDING, dueAt: { lt: todayStart } },
+          },
+        });
+        filters.push({
+          followups: {
+            some: {
+              status: FollowUpStatus.PENDING,
+              dueAt: { gte: todayStart, lt: tomorrow },
             },
-          ],
-        }
-      : scope;
+          },
+        });
+      } else if (query.filter === 'late') {
+        filters.push({
+          followups: {
+            some: { status: FollowUpStatus.PENDING, dueAt: { lt: todayStart } },
+          },
+        });
+      } else {
+        // "Unmatched" keeps the existing contract: no deal-linked property.
+        filters.push({ deals: { none: {} } });
+      }
+    }
+
+    if (query.classification) {
+      if (query.classification === 'owner') {
+        filters.push({ deals: { some: {} } });
+      } else if (query.classification === 'interested') {
+        filters.push({ propertyInterests: { some: {} } });
+      } else {
+        const type =
+          query.classification === 'buyer'
+            ? 'BUYER'
+            : query.classification === 'renter'
+              ? 'RENTER'
+              : 'EXCHANGER';
+        filters.push({ requestData: { contains: `"${type}"` } });
+      }
+    }
+
+    const where: Prisma.ClientWhereInput =
+      filters.length === 1 ? (filters[0] ?? {}) : { AND: filters };
+    const limit = Math.min(
+      query.limit ?? DEFAULT_CLIENTS_PAGE_SIZE,
+      MAX_CLIENTS_PAGE_SIZE,
+    );
     const rows = await this.prisma.client.findMany({
       where,
+      select: CLIENT_LIST_SELECT,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: query.limit ?? MAX_CLIENTS_PER_PAGE,
-      include: CLIENT_LIST_INCLUDE,
+      take: limit + 1,
+      ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
     });
-    return { items: rows.map(serializeClient) };
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+
+    // One bounded aggregate for the page gives every card its next due date
+    // without loading the follow-up history.
+    const nextByClient = new Map<string, string>();
+    if (page.length) {
+      const pending = await this.prisma.followUp.groupBy({
+        by: ['clientId'],
+        where: {
+          clientId: { in: page.map((row) => row.id) },
+          status: FollowUpStatus.PENDING,
+        },
+        _min: { dueAt: true },
+      });
+      for (const row of pending) {
+        if (row.clientId && row._min.dueAt) {
+          nextByClient.set(row.clientId, toDateKey(row._min.dueAt));
+        }
+      }
+    }
+
+    return {
+      items: page.map((row) =>
+        serializeClientListItem(row, nextByClient.get(row.id) ?? null),
+      ),
+      nextCursor: hasMore ? (page[page.length - 1]?.id ?? null) : null,
+    };
   }
 
   /**
@@ -318,12 +444,6 @@ export class ClientsService {
     const today = todayKey();
     const weekStart = weekStartKey();
     const weekEndExclusive = addDaysKey(weekStart, 7);
-
-    const clientRows = await this.prisma.client.findMany({
-      where: scope,
-      select: { id: true },
-    });
-    const clientIds = clientRows.map((row) => row.id);
 
     // Follow-up scope: the manager sees every company follow-up; an employee
     // sees follow-ups on their own clients plus rows assigned to them.
@@ -340,84 +460,97 @@ export class ClientsService {
       followUpScope = { OR: orConditions };
     }
 
-    const [totalClients, activeClients, owners, brokers, followUpsThisWeek, pending, dealCounts] =
-      await Promise.all([
-        this.prisma.client.count({ where: scope }),
-        this.prisma.client.count({
-          where: {
-            AND: [
-              scope,
-              {
-                OR: [
-                  { status: null },
-                  { NOT: { status: { in: INACTIVE_CLIENT_STATUSES } } },
-                ],
+    // Database-side counters: no client-id list is materialized in memory.
+    // "Needs follow-up" = no pending row dated after today (none/today/overdue);
+    // "late" = at least one pending row before today.
+    const todayStart = dateKeyToDate(today);
+    const tomorrowStart = dateKeyToDate(addDaysKey(today, 1));
+    const [
+      totalClients,
+      activeClients,
+      owners,
+      brokers,
+      followUpsThisWeek,
+      clientsNeedingFollowUp,
+      clientsLate,
+      clientsWithoutProperty,
+    ] = await Promise.all([
+      this.prisma.client.count({ where: scope }),
+      this.prisma.client.count({
+        where: {
+          AND: [
+            scope,
+            {
+              OR: [
+                { status: null },
+                { NOT: { status: { in: INACTIVE_CLIENT_STATUSES } } },
+              ],
+            },
+          ],
+        },
+      }),
+      this.prisma.contact.count({
+        where: {
+          AND: [
+            { type: ContactType.OWNER },
+            contactOwnershipWhere(viewer),
+            // Matches the owners tab: employee-registered owner records.
+            { responsibleUserId: { not: null } },
+          ],
+        },
+      }),
+      this.prisma.contact.count({
+        where: {
+          AND: [{ type: ContactType.BROKER }, contactOwnershipWhere(viewer)],
+        },
+      }),
+      this.prisma.followUp.count({
+        where: {
+          AND: [
+            followUpScope,
+            {
+              dueAt: {
+                gte: dateKeyToDate(weekStart),
+                lt: dateKeyToDate(weekEndExclusive),
               },
-            ],
-          },
-        }),
-        this.prisma.contact.count({
-          where: {
-            AND: [
-              { type: ContactType.OWNER },
-              contactOwnershipWhere(viewer),
-              // Matches the owners tab: employee-registered owner records.
-              { responsibleUserId: { not: null } },
-            ],
-          },
-        }),
-        this.prisma.contact.count({
-          where: {
-            AND: [{ type: ContactType.BROKER }, contactOwnershipWhere(viewer)],
-          },
-        }),
-        this.prisma.followUp.count({
-          where: {
-            AND: [
-              followUpScope,
-              {
-                dueAt: {
-                  gte: dateKeyToDate(weekStart),
-                  lt: dateKeyToDate(weekEndExclusive),
+            },
+          ],
+        },
+      }),
+      this.prisma.client.count({
+        where: {
+          AND: [
+            scope,
+            {
+              followups: {
+                none: {
+                  status: FollowUpStatus.PENDING,
+                  dueAt: { gte: tomorrowStart },
                 },
               },
-            ],
-          },
-        }),
-        this.prisma.followUp.groupBy({
-          by: ['clientId'],
-          where: {
-            status: FollowUpStatus.PENDING,
-            clientId: { in: clientIds },
-          },
-          _min: { dueAt: true },
-        }),
-        this.prisma.deal.groupBy({
-          by: ['clientId'],
-          where: { clientId: { in: clientIds } },
-          _count: { _all: true },
-        }),
-      ]);
-
-    const pendingByKey = new Map<string, string>();
-    for (const row of pending) {
-      if (row.clientId && row._min.dueAt)
-        pendingByKey.set(row.clientId, toDateKey(row._min.dueAt));
-    }
-    const dealsByKey = new Map<string, number>();
-    for (const row of dealCounts) {
-      if (row.clientId) dealsByKey.set(row.clientId, row._count._all);
-    }
-
-    let clientsNeedingFollowUp = 0;
-    let clientsLate = 0;
-    let clientsWithoutProperty = 0;
-    for (const { id } of clientRows) {
-      const next = pendingByKey.get(id);
-      if (!next || next <= today) clientsNeedingFollowUp += 1;
-      if (next && next < today) clientsLate += 1;
-      if (!dealsByKey.get(id)) clientsWithoutProperty += 1;
-    }
+            },
+          ],
+        },
+      }),
+      this.prisma.client.count({
+        where: {
+          AND: [
+            scope,
+            {
+              followups: {
+                some: {
+                  status: FollowUpStatus.PENDING,
+                  dueAt: { lt: todayStart },
+                },
+              },
+            },
+          ],
+        },
+      }),
+      this.prisma.client.count({
+        where: { AND: [scope, { deals: { none: {} } }] },
+      }),
+    ]);
 
     return {
       totalClients,
@@ -429,6 +562,36 @@ export class ClientsService {
       clientsLate,
       clientsWithoutProperty,
     };
+  }
+
+  /**
+   * `GET /clients/recommendation-candidates` — every eligible client in the
+   * viewer's scope with a structured request document. This is deliberately
+   * NOT the paginated list: recommendation matching/ranking must see the whole
+   * authorised dataset (then the UI takes its top-N afterwards). Only the
+   * three fields the matcher needs are selected.
+   */
+  async recommendationCandidates(
+    viewer: AuthUser,
+  ): Promise<ClientRecommendationCandidateListDto> {
+    const rows = await this.prisma.client.findMany({
+      where: {
+        AND: [
+          clientOwnershipWhere(viewer),
+          { requestData: { not: null } },
+        ],
+      },
+      select: { id: true, name: true, requestData: true },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
+    const items: ClientRecommendationCandidateDto[] = rows
+      .filter((row) => Boolean(row.requestData?.trim()))
+      .map((row) => ({
+        id: row.id,
+        name: row.name,
+        requestData: row.requestData,
+      }));
+    return { items };
   }
 
   /** `GET /clients/:id` — full detail including the complete follow-up log. */
@@ -465,6 +628,10 @@ export class ClientsService {
       // responsible user (FollowUpSubject.responsibleUserId) — never invented
       // ownership, always this real relationship (§7).
       let createdByUserId: string | null = null;
+      // Managers/OWNER keep user-level attribution even when they assign a
+      // responsible employee, so an unassigned client never disappears from
+      // its creator's team scope later.
+      if (isManagement(viewer)) createdByUserId = viewer.id;
 
       if (viewer.role === Role.EMPLOYEE) {
         if (dto.responsibleUserId && dto.responsibleUserId !== viewer.id)
@@ -480,16 +647,16 @@ export class ClientsService {
         createdById = await ensureEmployeeProfile(tx, viewer.id);
         responsibleEmployeeId = createdById;
       } else if (dto.responsibleUserId) {
-        // Managers link responsibility by stable User.id, never by name.
-        const profile = await tx.employeeProfile.findUnique({
-          where: { userId: dto.responsibleUserId },
-          select: { id: true },
-        });
-        if (!profile)
-          throw new BadRequestException('حساب الموظف المسؤول غير موجود.');
-        responsibleEmployeeId = profile.id;
-      } else if (viewer.role === Role.MANAGER) {
-        // Manager-registered, unassigned client: HE is the responsible user.
+        // Managers link responsibility by stable User.id, never by name, and
+        // only within their current team. OWNER may assign any employee.
+        responsibleEmployeeId = await this.resolveResponsibleEmployee(
+          tx,
+          viewer,
+          dto.responsibleUserId,
+        );
+      } else if (isManagement(viewer)) {
+        // Management-registered, unassigned client: the actor is the
+        // responsible user (FollowUpSubject.responsibleUserId).
         createdByUserId = viewer.id;
       }
 
@@ -624,6 +791,27 @@ export class ClientsService {
    * the managers only on a real change — a repeated save with identical values
    * produces no notification (the DB write itself stays as before).
    */
+  /**
+   * Resolves a responsible employee by stable User.id. A MANAGER may only
+   * assign a currently assigned team member; OWNER may assign any employee.
+   * Cross-team ids answer 404 so existence never leaks.
+   */
+  private async resolveResponsibleEmployee(
+    tx: Prisma.TransactionClient,
+    viewer: AuthUser,
+    userId: string,
+  ): Promise<string> {
+    const profile = await tx.employeeProfile.findUnique({
+      where: { userId },
+      select: { id: true, managerUserId: true },
+    });
+    if (!profile)
+      throw new BadRequestException('حساب الموظف المسؤول غير موجود.');
+    if (isManager(viewer) && profile.managerUserId !== viewer.id)
+      throw new NotFoundException('employee not found');
+    return profile.id;
+  }
+
   private static clientPatchChanged(
     existing: {
       name: string;
@@ -706,7 +894,7 @@ export class ClientsService {
         throw new BadRequestException('شكل بيانات الطلب غير صالح.');
       }
     }
-    if (dto.responsibleUserId !== undefined && viewer.role !== Role.MANAGER)
+    if (dto.responsibleUserId !== undefined && !isManagement(viewer))
       throw new ForbiddenException(
         'إعادة تخصيص العميل إلى موظف آخر متاحة للمدير فقط.',
       );
@@ -719,17 +907,14 @@ export class ClientsService {
 
       let responsibleEmployeeId: string | null | undefined;
       if (dto.responsibleUserId !== undefined) {
-        if (dto.responsibleUserId === null) {
-          responsibleEmployeeId = null;
-        } else {
-          const profile = await tx.employeeProfile.findUnique({
-            where: { userId: dto.responsibleUserId },
-            select: { id: true },
-          });
-          if (!profile)
-            throw new BadRequestException('حساب الموظف المسؤول غير موجود.');
-          responsibleEmployeeId = profile.id;
-        }
+        responsibleEmployeeId =
+          dto.responsibleUserId === null
+            ? null
+            : await this.resolveResponsibleEmployee(
+                tx,
+                viewer,
+                dto.responsibleUserId,
+              );
       }
 
       const client = await tx.client.update({

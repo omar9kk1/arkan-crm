@@ -1,4 +1,5 @@
 import { StatCard } from '../../../components/ui/stat-card';
+import type { EmployeeSummaryApiDto } from '../../../lib/api/employee-types';
 import { money, UNAVAILABLE, type EmployeeRecord } from '../model';
 import styles from './employees.module.css';
 
@@ -15,9 +16,11 @@ const sumOrUnavailable = (values: readonly (number | null)[]) =>
 export function EmployeeStats({
   employee,
   items = [],
+  summary = null,
 }: {
   employee?: EmployeeRecord;
   items?: readonly EmployeeRecord[];
+  summary?: EmployeeSummaryApiDto | null;
 }) {
   if (employee)
     return (
@@ -45,20 +48,24 @@ export function EmployeeStats({
   return (
     <div className={styles.stats}>
       {[
-        { title: 'إجمالي الموظفين', value: items.length, hint: 'من سجلات الخادم' },
+        { title: 'إجمالي الموظفين', value: summary?.total ?? items.length, hint: 'من سجلات الخادم' },
         {
           title: 'موظفين نشطين',
-          value: items.filter((item) => item.active).length,
+          value: summary?.active ?? items.filter((item) => item.active).length,
           hint: 'من سجلات الخادم',
         },
         {
           title: 'إجمالي العملاء من الموظفين',
-          value: sumOrUnavailable(items.map((item) => item.clientsCount)),
+          value:
+            summary?.clientsTotal ??
+            sumOrUnavailable(items.map((item) => item.clientsCount)),
           hint: 'غير متوفر من الخادم بعد',
         },
         {
           title: 'متابعات متأخرة',
-          value: sumOrUnavailable(items.map((item) => item.lateCount)),
+          value:
+            summary?.lateTotal ??
+            sumOrUnavailable(items.map((item) => item.lateCount)),
           hint: 'غير متوفر من الخادم بعد',
         },
       ].map((item) => (

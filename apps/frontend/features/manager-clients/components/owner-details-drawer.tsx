@@ -27,7 +27,8 @@ export function OwnerDetailsDrawer({
 }) {
   const router = useRouter();
   const { user } = useAuth();
-  const isManager = user?.role === Role.MANAGER;
+  const isManager =
+    user?.role === Role.MANAGER || user?.role === Role.OWNER;
 
   // Reuses the existing property deep-link channel AND carries the id in the
   // URL: the properties page resolves both through one authorized
@@ -38,7 +39,9 @@ export function OwnerDetailsDrawer({
   const openProperty = (propertyId: string) => {
     requestOpenProperty(propertyId);
     const route =
-      user?.role === Role.MANAGER ? '/manager/properties' : '/employee/properties';
+      user?.role === Role.MANAGER || user?.role === Role.OWNER
+        ? '/manager/properties'
+        : '/employee/properties';
     router.push(`${route}?${PROPERTY_QUERY_PARAM}=${encodeURIComponent(propertyId)}`);
   };
 

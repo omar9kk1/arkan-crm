@@ -302,6 +302,12 @@ export function saveBundle(
     notes: bundleSummary(b),
     history: old?.history || [],
     next: old?.next || '',
+    lastFollowUp: old?.lastFollowUp || 'لا يوجد متابعة',
+    propertyCount: allProperties.length,
+    interestCount:
+      old?.interestCount ??
+      old?.propertyInterests?.length ??
+      persistedInterests.length,
     properties: allProperties,
     // Planned interests for DISPLAY until the post-save refresh refetches the
     // real persisted rows from `GET /clients` (which is the source of truth).

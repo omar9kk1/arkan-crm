@@ -11,11 +11,13 @@ import { Role } from '@arkan/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { clientOwnershipWhere, ensureEmployeeProfile } from '../clients/client-policy';
+import { isManagement, isManager } from '../common/access/access-policy';
 
 import {
   addHours,
   dueBucket,
   formatLateDuration,
+  kuwaitDayKey,
   policyFor,
   resolveReminderCooldownHours,
   resolveSchedule,
@@ -42,13 +44,21 @@ import {
   type NotificationDraft,
 } from '../notifications/notification-events';
 import type { SaveFollowUpBatchDto } from './dto/save-follow-up-batch.dto';
+import type {
+  FollowUpStatusQuery,
+  FollowUpTabQuery,
+  ListFollowUpsQueryDto,
+  ListSupervisionFollowUpsQueryDto,
+} from './dto/list-follow-ups.query';
 
 /** How many subjects one list response may carry (the scope is one employee). */
-const LIST_LIMIT = 1000;
-/** How many history entries one drawer fetches (newest first). */
-const HISTORY_LIMIT = 100;
+/** One feed page. There is no total-record cap. */
+const DEFAULT_FOLLOWUP_PAGE_SIZE = 50;
+const MAX_FOLLOWUP_PAGE_SIZE = 100;
 /** Milliseconds per hour (the keep-simple duration math of reminder spacing). */
 const HOUR_MS = 3_600_000;
+/** Kuwait is UTC+3 with no DST. */
+const KUWAIT_OFFSET_MS = 3 * HOUR_MS;
 
 /**
  * The shared subject selection for every read path: identity + person +
@@ -173,6 +183,32 @@ export interface FollowUpBatchResultDto {
 }
 
 /** ONE subject in the MANAGER supervision overview (§2 «متابعات الموظفين»). */
+/** Full-scope counters for the current authorized feed (not the loaded page). */
+export interface FollowUpSummaryDto {
+  total: number;
+  overdue: number;
+  today: number;
+  upcoming: number;
+  never: number;
+  tabs: Record<FollowUpTabId, number>;
+}
+
+export interface FollowUpPageDto {
+  items: FollowUpSubjectDto[];
+  nextCursor: string | null;
+  /** Backward-compatible alias for `nextCursor !== null`. */
+  truncated: boolean;
+  generatedAt: string;
+  /** Only present on the first page. */
+  summary?: FollowUpSummaryDto;
+}
+
+export interface FollowUpSupervisionPageDto extends FollowUpPageDto {
+  items: FollowUpSupervisionSubjectDto[];
+  /** All responsible employees in the full scope (for the filter), first page only. */
+  employees?: FollowUpResponsibleDto[];
+}
+
 export interface FollowUpSupervisionSubjectDto extends FollowUpSubjectDto {
   /** The responsible EMPLOYEE (supervision rows are always employee-owned). */
   responsible: FollowUpResponsibleDto;
@@ -573,33 +609,211 @@ export class FollowUpsService {
   // -------------------------------------------------------------------------
 
   /** The viewer's active subjects, synchronized from canonical data first. */
-  async list(viewer: AuthUser): Promise<{
-    items: FollowUpSubjectDto[];
-    truncated: boolean;
-    generatedAt: string;
-  }> {
+  async list(
+    viewer: AuthUser,
+    query: ListFollowUpsQueryDto = {},
+  ): Promise<FollowUpPageDto> {
     await this.ensureSchema();
-    await this.sync(viewer);
+    // Synchronize once for the first page; cursor pages continue the already
+    // synchronized feed without repeating the full canonical scan.
+    if (!query.cursor) await this.sync(viewer);
     const now = new Date();
     // Employees: `responsible.userId` (their rows carry responsibleId only).
     // Managers: HIS OWN manager-owned subjects («متابعاتي» §2) — never a
     // company-wide dump and never an employee's subjects.
     const scope: Prisma.FollowUpSubjectWhereInput =
-      viewer.role === Role.MANAGER
-        ? { responsibleUserId: viewer.id }
-        : { responsible: { userId: viewer.id } };
+      viewer.role === Role.EMPLOYEE
+        ? { responsible: { userId: viewer.id } }
+        : { responsibleUserId: viewer.id };
 
+    const page = await this.queryPage(scope, query, now, false);
+    const summary = query.cursor
+      ? undefined
+      : await this.buildSummary(scope, now);
+    return {
+      items: page.rows.map((row) => this.toSubjectDto(row, now)),
+      nextCursor: page.nextCursor,
+      truncated: page.truncated,
+      generatedAt: now.toISOString(),
+      ...(summary ? { summary } : {}),
+    };
+  }
+
+  private kuwaitBounds(now: Date): { start: Date; end: Date } {
+    const key = kuwaitDayKey(now);
+    const start = new Date(
+      Date.parse(`${key}T00:00:00.000Z`) - KUWAIT_OFFSET_MS,
+    );
+    return { start, end: new Date(start.getTime() + 24 * HOUR_MS) };
+  }
+
+  private statusWhere(
+    status: FollowUpStatusQuery | undefined,
+    now: Date,
+  ): Prisma.FollowUpSubjectWhereInput {
+    if (!status || status === 'all') return {};
+    if (status === 'NEVER') return { lastSavedAt: null };
+    const { start, end } = this.kuwaitBounds(now);
+    if (status === 'OVERDUE') return { nextDueAt: { lt: start } };
+    if (status === 'TODAY') {
+      return { nextDueAt: { gte: start, lt: end } };
+    }
+    return { nextDueAt: { gte: end } };
+  }
+
+  private tabWhere(
+    tab: FollowUpTabQuery | undefined,
+  ): Prisma.FollowUpSubjectWhereInput {
+    if (!tab || tab === 'all') return {};
+    if (tab === 'owners') return { kind: 'PROPERTY_OWNER' };
+    if (tab === 'sellers') {
+      return {
+        kind: 'PROPERTY_OWNER',
+        property: { is: { listingType: 'SALE' } },
+      };
+    }
+    if (tab === 'lessors') {
+      return {
+        kind: 'PROPERTY_OWNER',
+        property: { is: { listingType: 'RENT' } },
+      };
+    }
+    if (tab === 'inquiries') return { kind: 'INQUIRY' };
+    const type =
+      tab === 'buyers'
+        ? 'BUYER'
+        : tab === 'renters'
+          ? 'RENTER'
+          : 'EXCHANGER';
+    return {
+      kind: 'CLIENT_REQUEST',
+      targetKey: { endsWith: `:${type}` },
+    };
+  }
+
+  private searchWhere(
+    term: string,
+    includeResponsible: boolean,
+  ): Prisma.FollowUpSubjectWhereInput {
+    const contains = { contains: term, mode: 'insensitive' as const };
+    const OR: Prisma.FollowUpSubjectWhereInput[] = [
+      { property: { is: { reference: contains } } },
+      { property: { is: { title: contains } } },
+      { property: { is: { area: contains } } },
+      { property: { is: { contact: { is: { name: contains } } } } },
+      { property: { is: { contact: { is: { phone: contains } } } } },
+      { property: { is: { owner: { is: { name: contains } } } } },
+      { property: { is: { owner: { is: { phone: contains } } } } },
+      { client: { is: { name: contains } } },
+      { client: { is: { phone: contains } } },
+    ];
+    if (includeResponsible) {
+      OR.push({
+        responsible: { is: { user: { is: { name: contains } } } },
+      });
+      OR.push({ responsibleUser: { is: { name: contains } } });
+    }
+    return { OR };
+  }
+
+  private composeWhere(
+    scope: Prisma.FollowUpSubjectWhereInput,
+    query: ListFollowUpsQueryDto,
+    now: Date,
+    includeResponsibleSearch: boolean,
+  ): Prisma.FollowUpSubjectWhereInput {
+    const and: Prisma.FollowUpSubjectWhereInput[] = [scope];
+    const search = query.search?.trim();
+    if (search) and.push(this.searchWhere(search, includeResponsibleSearch));
+    if (query.tab && query.tab !== 'all') and.push(this.tabWhere(query.tab));
+    if (query.status && query.status !== 'all') {
+      and.push(this.statusWhere(query.status, now));
+    }
+    return and.length === 1 ? scope : { AND: and };
+  }
+
+  private async queryPage(
+    scope: Prisma.FollowUpSubjectWhereInput,
+    query: ListFollowUpsQueryDto,
+    now: Date,
+    includeResponsibleSearch: boolean,
+  ): Promise<{
+    rows: SubjectRow[];
+    nextCursor: string | null;
+    truncated: boolean;
+  }> {
+    const limit = Math.min(
+      query.limit ?? DEFAULT_FOLLOWUP_PAGE_SIZE,
+      MAX_FOLLOWUP_PAGE_SIZE,
+    );
     const rows = await this.prisma.followUpSubject.findMany({
-      where: { active: true, ...scope },
+      where: this.composeWhere(scope, query, now, includeResponsibleSearch),
       orderBy: [{ nextDueAt: 'asc' }, { id: 'asc' }],
-      take: LIST_LIMIT + 1,
+      take: limit + 1,
+      ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
       select: SUBJECT_SELECT,
     });
-    const truncated = rows.length > LIST_LIMIT;
-    const items = (truncated ? rows.slice(0, LIST_LIMIT) : rows).map((row) =>
-      this.toSubjectDto(row, now),
-    );
-    return { items, truncated, generatedAt: now.toISOString() };
+    const truncated = rows.length > limit;
+    const page = truncated ? rows.slice(0, limit) : rows;
+    return {
+      rows: page,
+      nextCursor: truncated ? (page[page.length - 1]?.id ?? null) : null,
+      truncated,
+    };
+  }
+
+  private async buildSummary(
+    scope: Prisma.FollowUpSubjectWhereInput,
+    now: Date,
+  ): Promise<FollowUpSummaryDto> {
+    const count = (extra?: Prisma.FollowUpSubjectWhereInput) =>
+      this.prisma.followUpSubject.count({
+        where: extra ? { AND: [scope, extra] } : scope,
+      });
+    const [
+      total,
+      overdue,
+      today,
+      upcoming,
+      never,
+      owners,
+      buyers,
+      sellers,
+      renters,
+      lessors,
+      inquiries,
+      exchanges,
+    ] = await Promise.all([
+      count(),
+      count(this.statusWhere('OVERDUE', now)),
+      count(this.statusWhere('TODAY', now)),
+      count(this.statusWhere('UPCOMING', now)),
+      count(this.statusWhere('NEVER', now)),
+      count(this.tabWhere('owners')),
+      count(this.tabWhere('buyers')),
+      count(this.tabWhere('sellers')),
+      count(this.tabWhere('renters')),
+      count(this.tabWhere('lessors')),
+      count(this.tabWhere('inquiries')),
+      count(this.tabWhere('exchanges')),
+    ]);
+    return {
+      total,
+      overdue,
+      today,
+      upcoming,
+      never,
+      tabs: {
+        all: total,
+        owners,
+        buyers,
+        sellers,
+        renters,
+        lessors,
+        inquiries,
+        exchanges,
+      },
+    };
   }
 
   private toSubjectDto(row: SubjectRow, now: Date): FollowUpSubjectDto {
@@ -796,8 +1010,7 @@ export class FollowUpsService {
     const entries = await this.prisma.followUpEntry.findMany({
       where: { subjectId: row.id },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: HISTORY_LIMIT,
-      select: {
+        select: {
         id: true,
         note: true,
         batchId: true,
@@ -998,20 +1211,24 @@ export class FollowUpsService {
     viewer: AuthUser,
     saved: FollowUpBatchResultDto['saved'],
   ): Promise<void> {
-    if (viewer.role === Role.MANAGER || saved.length === 0) return;
+    if (isManagement(viewer) || saved.length === 0) return;
     try {
-      const [actor, managers, subjects] = await Promise.all([
+      const [actor, owners, profile, subjects] = await Promise.all([
         this.prisma.user.findUnique({
           where: { id: viewer.id },
           select: { name: true },
         }),
         this.prisma.user.findMany({
           where: {
-            role: Role.MANAGER,
+            role: Role.OWNER,
             isActive: true,
             notifyEmployeeFollowUps: true,
           },
           select: { id: true },
+        }),
+        this.prisma.employeeProfile.findUnique({
+          where: { userId: viewer.id },
+          select: { managerUserId: true },
         }),
         this.prisma.followUpSubject.findMany({
           where: { id: { in: saved.map((entry) => entry.subjectId) } },
@@ -1030,7 +1247,20 @@ export class FollowUpsService {
           },
         }),
       ]);
-      if (!actor || managers.length === 0) return;
+      const recipients = new Set(owners.map((owner) => owner.id));
+      if (profile?.managerUserId) {
+        const manager = await this.prisma.user.findFirst({
+          where: {
+            id: profile.managerUserId,
+            role: Role.MANAGER,
+            isActive: true,
+            notifyEmployeeFollowUps: true,
+          },
+          select: { id: true },
+        });
+        if (manager) recipients.add(manager.id);
+      }
+      if (!actor || recipients.size === 0) return;
 
       // The notification names the REAL person/record of each subject from
       // authoritative persisted data (structured target key + related rows).
@@ -1058,9 +1288,9 @@ export class FollowUpsService {
 
       const drafts: NotificationDraft[] = [];
       for (const entry of saved) {
-        for (const manager of managers) {
+        for (const userId of recipients) {
           drafts.push({
-            userId: manager.id,
+            userId,
             type: 'FOLLOWUP_CREATED',
             title: recordEventTitle('FOLLOWUP_CREATED'),
             body: bodyOf(entry.subjectId),
@@ -1125,40 +1355,86 @@ export class FollowUpsService {
    * ascending order. Enriched with the responsible employee and the latest
    * manual reminder for the cooldown state.
    */
-  async listSupervision(): Promise<{
-    items: FollowUpSupervisionSubjectDto[];
-    truncated: boolean;
-    generatedAt: string;
-  }> {
+  async listSupervision(
+    viewer: AuthUser,
+    query: ListSupervisionFollowUpsQueryDto = {},
+  ): Promise<FollowUpSupervisionPageDto> {
     await this.ensureSupervisionSchema();
     const now = new Date();
-    const rows = await this.prisma.followUpSubject.findMany({
-      where: {
-        active: true,
-        // Employee-owned rows only: `responsibleId` is set exactly for them.
-        responsibleId: { not: null },
-      },
-      orderBy: [{ nextDueAt: 'asc' }, { id: 'asc' }],
-      take: LIST_LIMIT + 1,
-      select: SUBJECT_SELECT,
-    });
-    const truncated = rows.length > LIST_LIMIT;
-    const page = truncated ? rows.slice(0, LIST_LIMIT) : rows;
+    // Employee-owned rows only: `responsibleId` is set exactly for them.
+    // A Manager supervises ONLY their current team; OWNER supervises all.
+    const baseWithoutEmployee: Prisma.FollowUpSubjectWhereInput = {
+      active: true,
+      responsibleId: { not: null },
+      ...(isManager(viewer)
+        ? { responsible: { managerUserId: viewer.id } }
+        : {}),
+    };
+    const baseScope: Prisma.FollowUpSubjectWhereInput = query.employeeUserId
+      ? {
+          AND: [
+            baseWithoutEmployee,
+            { responsible: { userId: query.employeeUserId } },
+          ],
+        }
+      : baseWithoutEmployee;
+
+    const page = await this.queryPage(baseScope, query, now, true);
     const reminders = await this.lastReminderMap(
-      page.map((row) => row.id),
+      page.rows.map((row) => row.id),
     );
-    const items = page.map<FollowUpSupervisionSubjectDto>((row) => {
+    const items = page.rows.map<FollowUpSupervisionSubjectDto>((row) => {
       const subject = this.toSubjectDto(row, now);
       return {
         ...subject,
         // Supervision rows are employee-owned by the filter above, so the
         // responsible user is always resolvable from the owner profile.
-        responsible:
-          subject.responsible ?? { userId: '', name: '' },
+        responsible: subject.responsible ?? { userId: '', name: '' },
         lastReminderAt: reminders.get(row.id) ?? null,
       };
     });
-    return { items, truncated, generatedAt: now.toISOString() };
+    const summary = query.cursor
+      ? undefined
+      : await this.buildSummary(baseScope, now);
+    const employees = query.cursor
+      ? undefined
+      : await this.supervisionEmployees(baseWithoutEmployee);
+    return {
+      items,
+      nextCursor: page.nextCursor,
+      truncated: page.truncated,
+      generatedAt: now.toISOString(),
+      ...(summary ? { summary } : {}),
+      ...(employees ? { employees } : {}),
+    };
+  }
+
+  /** All responsible employees in the full supervision scope (filter options). */
+  private async supervisionEmployees(
+    scope: Prisma.FollowUpSubjectWhereInput,
+  ): Promise<FollowUpResponsibleDto[]> {
+    const rows = await this.prisma.followUpSubject.findMany({
+      where: scope,
+      select: {
+        responsibleId: true,
+        responsible: {
+          select: {
+            userId: true,
+            user: { select: { name: true } },
+          },
+        },
+      },
+      distinct: ['responsibleId'],
+    });
+    const employees = new Map<string, string>();
+    for (const row of rows) {
+      if (row.responsible) {
+        employees.set(row.responsible.userId, row.responsible.user.name);
+      }
+    }
+    return [...employees.entries()]
+      .map(([userId, name]) => ({ userId, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'ar'));
   }
 
   /** The latest manual reminder instant per subject id. */
@@ -1211,7 +1487,10 @@ export class FollowUpsService {
         kind: true,
         nextDueAt: true,
         responsible: {
-          select: { user: { select: { id: true, name: true, isActive: true } } },
+          select: {
+            managerUserId: true,
+            user: { select: { id: true, name: true, isActive: true } },
+          },
         },
         property: {
           select: {
@@ -1224,8 +1503,14 @@ export class FollowUpsService {
         client: { select: { id: true, name: true } },
       },
     });
-    if (!subject || !subject.responsible?.user) {
-      // Forged/foreign ids and ids of manager-owned subjects: indistinguishable.
+    if (
+      !subject ||
+      !subject.responsible?.user ||
+      (isManager(viewer) &&
+        subject.responsible.managerUserId !== viewer.id)
+    ) {
+      // Forged/foreign/cross-team ids and manager-owned subjects are
+      // indistinguishable: always 404.
       throw new NotFoundException(
         'موضوع المتابعة غير موجود أو ليس متابعة موظف.',
       );

@@ -233,7 +233,7 @@ describeWithDatabase('Contacts API (real authorization, isolated DB)', () => {
         reference: 'CNT-MGR-3',
         contactId,
         status: PropertyStatus.AVAILABLE,
-        createdByUserId: null,
+        createdByUserId: employeeAId,
       });
 
       const read = await api()
@@ -283,18 +283,23 @@ describeWithDatabase('Contacts API (real authorization, isolated DB)', () => {
         contactId,
         status: PropertyStatus.AVAILABLE,
         listingType: DealType.SALE,
+        createdByUserId: employeeAId,
       });
       await seedLinkedProperty({
         reference: 'PILLS-R1',
         contactId,
         status: PropertyStatus.PENDING,
         listingType: DealType.RENT,
+        // Pending rows are private to their creator's team; put this one in the
+        // Manager's team so the contact pill remains visible.
+        createdByUserId: employeeAId,
       });
       await seedLinkedProperty({
         reference: 'PILLS-X1',
         contactId,
         status: PropertyStatus.AVAILABLE,
         listingType: DealType.EXCHANGE,
+        createdByUserId: employeeAId,
       });
 
       const read = await api()

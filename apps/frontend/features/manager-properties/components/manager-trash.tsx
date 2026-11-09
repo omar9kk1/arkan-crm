@@ -28,11 +28,11 @@ function formatTrashDate(value?: string | null) {
 }
 
 /**
- * Dedicated Manager-only Deleted Properties page.
+ * Dedicated OWNER-only Deleted Properties page.
  *
  * Reuses the existing Trash/restore/permanent-delete APIs and the same
- * Astra-glass card language as the property list. Employees never reach this
- * route (RequireRole) and the backend enforces MANAGER on every endpoint.
+ * Astra-glass card language as the property list. Only the OWNER reaches this
+ * route (RequireRole), and the backend enforces OWNER on every endpoint.
  */
 export function ManagerTrash() {
   const { user } = useAuth();

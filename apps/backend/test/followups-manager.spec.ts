@@ -41,6 +41,7 @@ const propertyPayload = (suffix: string) => ({
  */
 describeWithDatabase('Manager follow-ups (own queue, supervision, reminders)', () => {
   let ctx: TestContext;
+  let ownerToken: string;
   let managerToken: string;
   let managerId: string;
   let employeeAToken: string;
@@ -89,16 +90,22 @@ describeWithDatabase('Manager follow-ups (own queue, supervision, reminders)', (
       name: 'موظف الإشراف ب',
       role: Role.EMPLOYEE,
     });
+    const owner = await createUser(ctx.prisma, {
+      email: 'owner-m@followups.local',
+      name: 'Owner Followups',
+      role: Role.OWNER,
+    });
+    ownerToken = await login(ctx.app, owner.email);
     managerToken = await login(ctx.app, manager.email);
     employeeAToken = await login(ctx.app, employeeA.email);
     employeeBToken = await login(ctx.app, employeeB.email);
     managerId = manager.id;
     employeeAId = employeeA.id;
     employeeAProfile = (
-      await ctx.prisma.employeeProfile.create({ data: { userId: employeeA.id } })
+      await ctx.prisma.employeeProfile.upsert({ where: { userId: employeeA.id }, create: { userId: employeeA.id }, update: {} })
     ).id;
     employeeBProfile = (
-      await ctx.prisma.employeeProfile.create({ data: { userId: employeeB.id } })
+      await ctx.prisma.employeeProfile.upsert({ where: { userId: employeeB.id }, create: { userId: employeeB.id }, update: {} })
     ).id;
     schedule = ctx.app.get(FollowUpsService);
   });
@@ -108,12 +115,12 @@ describeWithDatabase('Manager follow-ups (own queue, supervision, reminders)', (
   });
 
   const approveProperty = async (id: string) => {
+    // A Manager-created property now enters review; the OWNER makes the
+    // decision (a Manager may not self-approve).
     const approved = await api()
       .post(`/properties/${id}/approve`)
-      .set(auth(managerToken))
+      .set(auth(ownerToken))
       .send({});
-    // A MANAGER-created property may already be AVAILABLE (no review round) —
-    // the 409 simply means there is nothing left to approve.
     expect([200, 201, 409]).toContain(approved.status);
     if (approved.status !== 409) return;
     const row = await ctx.prisma.property.findUniqueOrThrow({

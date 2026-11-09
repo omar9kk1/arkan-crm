@@ -25,14 +25,21 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "npm run test -w @arkan/backend",
+    "test:auth": "npm run test -w @arkan/backend -- auth.spec.ts auth-cookie-mode.spec.ts frontend-auth-mode.spec.ts frontend-authorized.spec.ts",
+    "test:csp": "npm run test -w @arkan/backend -- csp-policy.spec.ts && npm run csp:test -w @arkan/frontend",
+    "check": "npm run typecheck && npm run lint",
     "db:generate": "npm run db:generate -w @arkan/backend",
     "db:migrate": "npm run db:migrate -w @arkan/backend",
     "db:deploy": "npm run db:deploy -w @arkan/backend"
   },
+  "overrides": {
+    "@nestjs/platform-express": {
+      "multer": "2.5.0"
+    }
+  },
   "devDependencies": {
     "@eslint/js": "^9.39.0",
     "@types/node": "^22.0.0",
-    "concurrently": "^9.2.0",
     "eslint": "^9.39.0",
     "eslint-config-prettier": "^10.1.0",
     "prettier": "^3.6.0",

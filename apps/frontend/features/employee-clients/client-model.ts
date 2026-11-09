@@ -47,6 +47,11 @@ export interface EmployeeClient {
   budget: string;
   notes: string;
   next: string;
+  /** Newest logged follow-up date (lightweight list summary). */
+  lastFollowUp: string;
+  /** Counts let list rows classify/filter without loading full relations. */
+  propertyCount?: number;
+  interestCount?: number;
   history: FollowUp[];
   properties: SuitableProperty[];
   propertyInterests: ClientInterest[];
@@ -76,12 +81,17 @@ export function filterClients(
     case 'late':
       return clients.filter((c) => isLate(c, today));
     case 'unmatched':
-      return clients.filter((c) => !c.properties.length);
+      return clients.filter(
+        (c) => (c.propertyCount ?? c.properties.length) === 0,
+      );
     default:
       return clients;
   }
 }
-import type { ClientApiDto } from '../../lib/api/client-types';
+import type {
+  ClientApiDto,
+  ClientListItemApiDto,
+} from '../../lib/api/client-types';
 
 const currencyLabel = (code: string | null): string => {
   if (!code) return 'د.ك';
@@ -128,7 +138,7 @@ export function clientClassifications(
   client: EmployeeClient,
 ): ClientClassification[] {
   const out = new Set<ClientClassification>();
-  if (client.properties && client.properties.length > 0) {
+  if ((client.propertyCount ?? client.properties.length) > 0) {
     out.add('الملاك');
   }
   // parse requestData types
@@ -144,14 +154,14 @@ export function clientClassifications(
   if (types.includes('BUYER')) out.add('المشترين');
   if (types.includes('RENTER')) out.add('المستأجرين');
   if (types.includes('EXCHANGER')) out.add('البدل');
-  if (client.propertyInterests && client.propertyInterests.length > 0) {
+  if ((client.interestCount ?? client.propertyInterests.length) > 0) {
     out.add('الاستفسارات');
   }
   // المؤجرين: owners (subset of owners, property owners who rent). Without
   // listingType we cannot distinguish; treat owners as potential lessors so the
   // category is never empty for owners. Overlap with "الملاك" is intentional
   // per the multi-role requirement.
-  if (client.properties && client.properties.length > 0) {
+  if ((client.propertyCount ?? client.properties.length) > 0) {
     out.add('المؤجرين');
   }
   return [...out];
@@ -170,6 +180,9 @@ export function employeeClientFromDto(dto: ClientApiDto): EmployeeClient {
     budget: '—',
     notes: dto.notes,
     next: dto.nextFollowUp || '',
+    lastFollowUp: logged[0]?.createdAt.slice(0, 10) || 'لا يوجد متابعة',
+    propertyCount: dto.properties.length,
+    interestCount: dto.propertyInterests.length,
     history: logged.map((f) => ({
       id: f.id,
       date: f.createdAt.slice(0, 10),
@@ -198,5 +211,29 @@ export function employeeClientFromDto(dto: ClientApiDto): EmployeeClient {
       reason: interest.reason,
       notes: interest.notes,
     })),
+  };
+}
+
+/** Lightweight list row -> card model; full relations load on drawer open. */
+export function employeeClientFromListItem(
+  dto: ClientListItemApiDto,
+): EmployeeClient {
+  return {
+    id: dto.id,
+    name: dto.name,
+    phone: dto.phone,
+    type: '—',
+    requestData: dto.requestData,
+    employee: dto.responsibleEmployeeName || 'لا يوجد موظف',
+    area: '—',
+    budget: '—',
+    notes: dto.notes,
+    next: dto.nextFollowUp || '',
+    lastFollowUp: dto.lastFollowUpAt?.slice(0, 10) || 'لا يوجد متابعة',
+    propertyCount: dto.propertiesCount,
+    interestCount: dto.propertyInterestsCount,
+    history: [],
+    properties: [],
+    propertyInterests: [],
   };
 }

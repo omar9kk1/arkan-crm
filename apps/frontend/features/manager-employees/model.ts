@@ -1,6 +1,8 @@
 import type { PropertyStatusApi } from '../../lib/api/property-types';
 import type {
   EmployeeDto,
+  EmployeeListItemDto,
+  EmployeePropertyDto,
   EmployeeRoleApi,
 } from '../../lib/api/employee-types';
 import { STATUS_LABEL } from '../../lib/property-adapter';
@@ -39,7 +41,10 @@ export interface EmployeeRecord {
   name: string;
   email: string;
   active: boolean;
+  role: EmployeeRoleApi;
   roleLabel: string;
+  managerUserId: string | null;
+  managerName: string | null;
   /** Empty string when the profile value is unset. */
   phone: string;
   /** `YYYY-MM-DD`, or an empty string when unset. */
@@ -56,13 +61,54 @@ export interface EmployeeRecord {
   lateCount: number | null;
 }
 
+export function mapEmployeeProperty(
+  dto: EmployeePropertyDto,
+): EmployeePropertyRef {
+  return {
+    id: dto.id,
+    reference: dto.reference,
+    title: dto.title,
+    status: dto.status,
+    statusLabel: STATUS_LABEL[dto.status],
+  };
+}
+
+export function mapEmployeeListItem(
+  dto: EmployeeListItemDto,
+): EmployeeRecord {
+  return {
+    id: dto.id,
+    name: dto.name,
+    email: dto.email,
+    active: dto.isActive,
+    role: dto.role,
+    roleLabel: ROLE_LABEL[dto.role],
+    managerUserId: dto.managerUserId,
+    managerName: dto.managerName,
+    phone: dto.phone ?? '',
+    hiredAt: dto.hiredAt ? dto.hiredAt.slice(0, 10) : '',
+    salary: dto.baseSalary === null ? null : Number(dto.baseSalary),
+    propertyCount: dto.propertyCount,
+    propertiesByStatus: dto.propertiesByStatus,
+    properties: [],
+    clientsCount: dto.clientsCount,
+    assignedCount: dto.assignedCount,
+    dealsCount: null,
+    commission: null,
+    lateCount: dto.lateCount,
+  };
+}
+
 export function mapEmployee(dto: EmployeeDto): EmployeeRecord {
   return {
     id: dto.id,
     name: dto.name,
     email: dto.email,
     active: dto.isActive,
+    role: dto.role,
     roleLabel: ROLE_LABEL[dto.role],
+    managerUserId: dto.managerUserId,
+    managerName: dto.managerName,
     phone: dto.phone ?? '',
     hiredAt: dto.hiredAt ? dto.hiredAt.slice(0, 10) : '',
     salary: dto.baseSalary === null ? null : Number(dto.baseSalary),

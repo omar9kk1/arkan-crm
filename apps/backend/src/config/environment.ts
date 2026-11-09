@@ -39,6 +39,7 @@ export const environmentSchema = Joi.object({
     .required(),
   REDIS_HOST: Joi.string().required(),
   REDIS_PORT: Joi.number().port().default(6379),
+  REDIS_PASSWORD: Joi.string().allow('').optional(),
   JWT_ACCESS_SECRET: Joi.string()
     .min(32)
     .invalid(
@@ -55,9 +56,33 @@ export const environmentSchema = Joi.object({
   JWT_ACCESS_TTL_SECONDS: Joi.number().integer().min(60).max(3600).default(900),
   JWT_ISSUER: Joi.string().required(),
   JWT_AUDIENCE: Joi.string().required(),
+  /**
+   * legacy (default) keeps the existing Bearer/sessionStorage behavior.
+   * dual issues cookies only when the client proves CSRF and keeps legacy
+   * tokens available; cookie is the future secure mode with no token JSON.
+   */
+  AUTH_COOKIE_MODE: Joi.string()
+    .valid('legacy', 'dual', 'cookie')
+    .default('legacy'),
+  /** Explicit override for local HTTPS testing; production must be true. */
+  COOKIE_SECURE: Joi.boolean().optional(),
   // Optional private storage root for uploaded property images. When unset the
   // StorageService falls back to `<home>/.arkan-crm/storage` (outside the repo).
   STORAGE_ROOT: Joi.string().optional(),
+  // Rate limiting / proxy topology. Trust proxy stays disabled unless the
+  // owner supplies explicit proxy IP/CIDR entries.
+  TRUST_PROXY: Joi.string().allow('').optional(),
+  RATE_LIMIT_STORAGE: Joi.string().valid('memory', 'redis').default('memory'),
+  RATE_LIMIT_WINDOW_SECONDS: Joi.number().integer().min(1).max(3600).optional(),
+  RATE_LIMIT_GLOBAL_PER_MIN: Joi.number().integer().min(1).max(100000).optional(),
+  RATE_LIMIT_LOGIN_PER_MIN: Joi.number().integer().min(1).max(100000).optional(),
+  RATE_LIMIT_REFRESH_PER_MIN: Joi.number().integer().min(1).max(100000).optional(),
+  RATE_LIMIT_CSRF_PER_MIN: Joi.number().integer().min(1).max(100000).optional(),
+  RATE_LIMIT_EXPENSIVE_READ_PER_MIN: Joi.number().integer().min(1).max(100000).optional(),
+  RATE_LIMIT_UPLOAD_PER_MIN: Joi.number().integer().min(1).max(100000).optional(),
+  RATE_LIMIT_PUSH_REGISTER_PER_MIN: Joi.number().integer().min(1).max(100000).optional(),
+  RATE_LIMIT_PUSH_TEST_PER_MIN: Joi.number().integer().min(1).max(100000).optional(),
+  RATE_LIMIT_KEY_PREFIX: Joi.string().optional(),
   // Web Push (VAPID) — secrets only, never hardcoded. The feature stays off
   // (and the API answers "not configured") until the keys are provided.
   PUSH_VAPID_PUBLIC_KEY: Joi.string().optional().allow(''),

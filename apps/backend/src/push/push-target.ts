@@ -55,12 +55,13 @@ export function isRecordEvent(type: NotificationType): boolean {
  * points at nothing openable.
  */
 export function pushTargetUrl(row: PushTargetRow, role: Role): string | null {
+  const management = role === Role.MANAGER || role === Role.OWNER;
   // A follow-up subject deep-links to the SAME page the in-app row points at
   // (the recipient is that subject's responsible employee, or a manager
   // monitoring it) — checked FIRST because those rows may also carry record
   // references. Only ids travel: never a name, a phone or a note.
   if (row.followUpSubjectId) {
-    const base = role === Role.MANAGER ? '/manager' : '/employee';
+    const base = management ? '/manager' : '/employee';
     const entryId = followUpEntryOf(row.type, row.eventKey);
     const entry = entryId
       ? `&follow-up-entry=${encodeURIComponent(entryId)}`
@@ -72,13 +73,13 @@ export function pushTargetUrl(row: PushTargetRow, role: Role): string | null {
   // Client review rows go to the requester (an employee) or to a manager —
   // both are authorized for the review by construction of the recipients.
   if (row.clientReviewId) {
-    const reviewBase = role === Role.MANAGER ? '/manager' : '/employee';
+    const reviewBase = management ? '/manager' : '/employee';
     return `${reviewBase}/clients?client-review=${encodeURIComponent(
       row.clientReviewId,
     )}`;
   }
   if (row.propertyId) {
-    const base = role === Role.MANAGER ? '/manager' : '/employee';
+    const base = management ? '/manager' : '/employee';
     return `${base}/properties?property=${encodeURIComponent(row.propertyId)}`;
   }
   if (row.clientId) {

@@ -234,7 +234,7 @@ describeWithDatabase('Follow-up batch manager notifications', () => {
     managerToken = await login(ctx.app, manager.email);
     employeeToken = await login(ctx.app, employee.email);
     employeeProfileId = (
-      await ctx.prisma.employeeProfile.create({ data: { userId: employee.id } })
+      await ctx.prisma.employeeProfile.upsert({ where: { userId: employee.id }, create: { userId: employee.id }, update: {} })
     ).id;
   });
 

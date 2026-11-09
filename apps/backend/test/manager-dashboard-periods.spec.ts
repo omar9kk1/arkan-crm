@@ -85,9 +85,7 @@ describeWithDatabase('Manager dashboard period filtering', () => {
       name: 'Period Employee',
       role: Role.EMPLOYEE,
     });
-    const profile = await ctx.prisma.employeeProfile.create({
-      data: { userId: employee.id },
-    });
+    const profile = await ctx.prisma.employeeProfile.upsert({ where: { userId: employee.id }, create: { userId: employee.id }, update: {} });
     managerId = manager.id;
     employeeId = employee.id;
     managerToken = await login(ctx.app, manager.email);

@@ -9,6 +9,7 @@ import {
   pngBytes,
   postProperty,
   resetDatabase,
+  resetRateLimiting,
   type TestContext,
 } from './support/test-app';
 
@@ -67,6 +68,12 @@ describeWithDatabase('New duplicate property rejection policy', () => {
 
   afterAll(async () => {
     await ctx.close();
+  });
+
+  beforeEach(() => {
+    // This suite intentionally creates many properties in one test minute;
+    // keep the production upload limiter intact but isolate tests from it.
+    resetRateLimiting(ctx.app);
   });
 
   it('A: a new unique property submission succeeds as PENDING', async () => {

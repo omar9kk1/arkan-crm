@@ -143,7 +143,7 @@ export function canViewContact(
   contact: RegistryContact,
 ): boolean {
   if (!user) return false;
-  if (user.role === Role.MANAGER) return true;
+  if (user.role === Role.MANAGER || user.role === Role.OWNER) return true;
   return !!contact.ownerUserId && contact.ownerUserId === user.id;
 }
 

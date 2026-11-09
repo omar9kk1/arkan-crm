@@ -11,8 +11,11 @@ import {
 import request from 'supertest';
 import { AuthController } from '../src/auth/auth.controller';
 import { AuthService } from '../src/auth/auth.service';
+import { AuthCookieService } from '../src/auth/auth-cookie.service';
+import { CsrfService } from '../src/auth/csrf.service';
 import { Public } from '../src/auth/decorators/public.decorator';
 import { configureApp } from '../src/common/configure-app';
+import { PrismaService } from '../src/prisma/prisma.service';
 
 @Public()
 @Controller('test-other')
@@ -69,6 +72,32 @@ describe('Auth rate limiting', () => {
       controllers: [AuthController, OtherController],
       providers: [
         { provide: AuthService, useValue: authServiceMock },
+        {
+          provide: AuthCookieService,
+          useValue: {
+            mode: 'legacy',
+            accessToken: () => null,
+            refreshToken: () => null,
+            csrfToken: () => null,
+            setSession: jest.fn(),
+            issueCsrf: jest.fn(),
+            clear: jest.fn(),
+          },
+        },
+        {
+          provide: CsrfService,
+          useValue: {
+            hasAttempt: () => false,
+            assert: jest.fn(),
+            issue: jest.fn(),
+          },
+        },
+        {
+          provide: PrismaService,
+          useValue: {
+            managerCapability: { findMany: jest.fn(async () => []) },
+          },
+        },
         ThrottlerGuard,
       ],
     }).compile();

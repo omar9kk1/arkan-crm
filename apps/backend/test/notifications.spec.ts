@@ -137,7 +137,9 @@ describeWithDatabase('In-app notifications', () => {
     const manager2 = await createUser(ctx.prisma, {
       email: 'manager.two@notifications.local',
       name: 'Manager Two',
-      role: Role.MANAGER,
+      // Second management recipient: OWNER receives company-wide events, while
+      // the assigned Manager receives only their team's events.
+      role: Role.OWNER,
     });
     const inactiveManager = await createUser(ctx.prisma, {
       email: 'manager.off@notifications.local',
@@ -215,8 +217,9 @@ describeWithDatabase('In-app notifications', () => {
   // ---------------------------------------------------------------------------
   // Event 6 — manager creates a directly-AVAILABLE property
   // ---------------------------------------------------------------------------
-  it('notifies the employees (not the manager) when a manager creates an AVAILABLE property', async () => {
-    const created = await createProperty(managerToken);
+  it('notifies the employees (not the creator) when an OWNER creates an AVAILABLE property', async () => {
+    // Managers no longer create AVAILABLE rows directly; OWNER does.
+    const created = await createProperty(manager2Token);
     expect(created.status).toBe('AVAILABLE');
 
     for (const token of [employeeAToken, employeeBToken]) {
@@ -498,11 +501,11 @@ describeWithDatabase('In-app notifications', () => {
   // Pagination
   // ---------------------------------------------------------------------------
   it('paginates newest-first with a bounded limit', async () => {
-    await createProperty(managerToken);
+    await createProperty(manager2Token);
     await sleep(10);
-    await createProperty(managerToken);
+    await createProperty(manager2Token);
     await sleep(10);
-    await createProperty(managerToken);
+    await createProperty(manager2Token);
 
     const firstPage = await api().get('/notifications?limit=2').set(auth(employeeBToken));
     expect(firstPage.status).toBe(200);

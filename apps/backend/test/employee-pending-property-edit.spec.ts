@@ -20,6 +20,7 @@ const image = [{ buffer: pngBytes(), filename: 'photo.png' }];
 
 describeWithDatabase('Employee PENDING property edits', () => {
   let ctx: TestContext;
+  let ownerToken: string;
   let managerToken: string;
   let managerId: string;
   let employeeToken: string;
@@ -104,8 +105,14 @@ describeWithDatabase('Employee PENDING property edits', () => {
       name: 'موظف آخر',
       role: Role.EMPLOYEE,
     });
+    const owner = await createUser(ctx.prisma, {
+      email: 'edit-owner@test.local',
+      name: 'Edit Owner Account',
+      role: Role.OWNER,
+    });
     managerId = manager.id;
     employeeId = employee.id;
+    ownerToken = await login(ctx.app, owner.email);
     managerToken = await login(ctx.app, manager.email);
     employeeToken = await login(ctx.app, employee.email);
     otherEmployeeToken = await login(ctx.app, other.email);
@@ -181,8 +188,10 @@ describeWithDatabase('Employee PENDING property edits', () => {
     const editRows = rows.filter(
       (row) => row.title === 'تم تعديل عقار تحت المراجعة',
     );
-    expect(editRows).toHaveLength(1);
-    const notification = editRows[0]!;
+    // OWNER + the assigned Manager are the management recipients.
+    expect(editRows).toHaveLength(2);
+    const notification = editRows.find((row) => row.userId === managerId)!;
+    expect(notification).toBeTruthy();
     expect(notification.userId).toBe(managerId);
     expect(notification.body).toContain(
       'قام الموظف بتحديث بيانات عقار بانتظار المراجعة. يُرجى الاطلاع على التعديلات.',
@@ -269,9 +278,9 @@ describeWithDatabase('Employee PENDING property edits', () => {
   });
 
   it('recalculates potential duplicates from the saved row, clears them on a distinct edit, and gates approval', async () => {
-    // A manager-created AVAILABLE house with a matching owner, area and floors
+    // An OWNER-created AVAILABLE house with a matching owner, area and floors
     // but no block -> a plot match is POTENTIAL, not CONFIRMED.
-    const candidate = await createAs(managerToken, {
+    const candidate = await createAs(ownerToken, {
       district: 'الأحمدي',
       plotNumber: '970401',
       block: null,

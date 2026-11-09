@@ -17,6 +17,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { Throttle } from '@nestjs/throttler';
 import { Role, type AuthUser } from '@arkan/shared';
 import type { Response } from 'express';
 import { parseAndValidatePayload } from '../common/validation/json-payload';
@@ -24,6 +25,11 @@ import { RawResponse } from '../common/decorators/raw-response.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { MAX_IMAGE_BYTES, type UploadedImageFile } from '../files/files.service';
 import { PropertiesService } from './properties.service';
+import {
+  RATE_LIMIT_DEFAULTS,
+  rateLimit,
+  rateLimitWindowMs,
+} from '../config/rate-limit';
 import { CreatePropertyMultipartDto } from './dto/create-property-multipart.dto';
 import { CreatePropertyPayloadDto } from './dto/create-property-payload.dto';
 import { UpdatePropertyPayloadDto } from './dto/update-property-payload.dto';
@@ -35,14 +41,35 @@ import { RequestChangesDto } from './dto/request-changes.dto';
 import { TrashPropertyDto } from './dto/trash-property.dto';
 import { PermanentDeletePropertyDto } from './dto/permanent-delete-property.dto';
 
+/**
+ * Hard multipart envelope limits. Besides the image size, this bounds the
+ * number/size of text fields and total parts, so a crafted multipart request
+ * cannot make the parser allocate unbounded field arrays (a class of multer
+ * denial-of-service that does not depend on application validation).
+ */
+const PROPERTY_UPLOAD_LIMITS = {
+  fileSize: MAX_IMAGE_BYTES,
+  files: 1,
+  fields: 10,
+  fieldSize: 1024 * 1024,
+  parts: 20,
+  headerPairs: 2000,
+} as const;
+
 @Controller('properties')
 export class PropertiesController {
   constructor(private readonly properties: PropertiesService) {}
 
   @Post()
+  @Throttle({
+    default: {
+      limit: rateLimit('UPLOAD', RATE_LIMIT_DEFAULTS.upload),
+      ttl: rateLimitWindowMs,
+    },
+  })
   @UseInterceptors(
     FileInterceptor('image', {
-      limits: { fileSize: MAX_IMAGE_BYTES, files: 1 },
+      limits: PROPERTY_UPLOAD_LIMITS,
     }),
   )
   async create(
@@ -64,6 +91,12 @@ export class PropertiesController {
   }
 
   @Get()
+  @Throttle({
+    default: {
+      limit: rateLimit('EXPENSIVE_READ', RATE_LIMIT_DEFAULTS.expensiveRead),
+      ttl: rateLimitWindowMs,
+    },
+  })
   list(
     @Req() request: { user: AuthUser },
     @Query() query: ListPropertiesQueryDto,
@@ -92,14 +125,14 @@ export class PropertiesController {
     return new StreamableFile(stream);
   }
 
-  /** Manager-only: soft-deleted properties (Trash). Must precede `:id`. */
-  @Roles(Role.MANAGER)
+  /** OWNER-only: soft-deleted properties (Trash). Must precede `:id`. */
+  @Roles(Role.OWNER)
   @Get('trash')
   listTrash(@Req() request: { user: AuthUser }) {
     return this.properties.listTrash(request.user);
   }
 
-  @Roles(Role.MANAGER)
+  @Roles(Role.OWNER)
   @Post(':id/trash')
   @HttpCode(200)
   trash(
@@ -110,7 +143,7 @@ export class PropertiesController {
     return this.properties.softDelete(request.user, id, body.reason);
   }
 
-  @Roles(Role.MANAGER)
+  @Roles(Role.OWNER)
   @Post(':id/restore')
   @HttpCode(200)
   restore(
@@ -120,7 +153,7 @@ export class PropertiesController {
     return this.properties.restore(request.user, id);
   }
 
-  @Roles(Role.MANAGER)
+  @Roles(Role.OWNER)
   @Delete(':id/permanent')
   @HttpCode(200)
   permanentDelete(
@@ -158,9 +191,15 @@ export class PropertiesController {
   }
 
   @Patch(':id')
+  @Throttle({
+    default: {
+      limit: rateLimit('UPLOAD', RATE_LIMIT_DEFAULTS.upload),
+      ttl: rateLimitWindowMs,
+    },
+  })
   @UseInterceptors(
     FileInterceptor('image', {
-      limits: { fileSize: MAX_IMAGE_BYTES, files: 1 },
+      limits: PROPERTY_UPLOAD_LIMITS,
     }),
   )
   async update(
@@ -181,7 +220,7 @@ export class PropertiesController {
     return this.properties.update(request.user, id, payload, file);
   }
 
-  @Roles(Role.MANAGER)
+  @Roles(Role.OWNER, Role.MANAGER)
   @Post(':id/approve')
   @HttpCode(200)
   approve(
@@ -192,7 +231,7 @@ export class PropertiesController {
     return this.properties.approve(request.user, id, body);
   }
 
-  @Roles(Role.MANAGER)
+  @Roles(Role.OWNER, Role.MANAGER)
   @Post(':id/reject')
   @HttpCode(200)
   reject(
@@ -204,7 +243,7 @@ export class PropertiesController {
   }
 
   /** Manager-only: keep the property PENDING but ask the creator to change it. */
-  @Roles(Role.MANAGER)
+  @Roles(Role.OWNER, Role.MANAGER)
   @Post(':id/request-changes')
   @HttpCode(200)
   requestChanges(

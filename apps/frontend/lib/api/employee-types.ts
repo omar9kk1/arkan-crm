@@ -19,6 +19,11 @@ export interface EmployeePropertyDto {
 }
 
 /** One real EMPLOYEE-role account and its real property statistics. */
+export interface ManagerCapabilitiesApi {
+  approveProperties: boolean;
+  rejectProperties: boolean;
+}
+
 export interface EmployeeDto {
   id: string;
   name: string;
@@ -28,6 +33,9 @@ export interface EmployeeDto {
   phone: string | null;
   hiredAt: string | null;
   baseSalary: string | null;
+  managerUserId: string | null;
+  managerName: string | null;
+  capabilities: ManagerCapabilitiesApi | null;
   /** Real count linked through `Property.createdByUserId`. */
   propertyCount: number;
   propertiesByStatus: Record<PropertyStatusApi, number>;
@@ -41,8 +49,27 @@ export interface EmployeeDto {
   lateCount: number;
 }
 
+/** Directory row: all card/stat fields, no property list. */
+export type EmployeeListItemDto = Omit<EmployeeDto, 'properties'>;
+
+export interface EmployeeSummaryApiDto {
+  total: number;
+  active: number;
+  clientsTotal: number;
+  lateTotal: number;
+}
+
+export interface EmployeePropertyPageApiDto {
+  items: EmployeePropertyDto[];
+  nextCursor: string | null;
+  total: number;
+}
+
 export interface EmployeeListDto {
-  items: EmployeeDto[];
+  items: EmployeeListItemDto[];
+  nextCursor: string | null;
+  /** Full-scope counters; present on the first page. */
+  summary?: EmployeeSummaryApiDto;
 }
 
 /**
@@ -58,6 +85,37 @@ export interface CreateEmployeePayload {
   hiredAt?: string;
   baseSalary?: number;
   isActive?: boolean;
+  managerUserId?: string;
+}
+
+export interface ManagerTeamMemberApiDto {
+  id: string;
+  name: string;
+  isActive: boolean;
+}
+
+export interface ManagerDto {
+  id: string;
+  name: string;
+  email: string;
+  isActive: boolean;
+  capabilities: ManagerCapabilitiesApi;
+  teamCount: number;
+  /** Complete current team for the expandable manager card. */
+  team: ManagerTeamMemberApiDto[];
+}
+
+export interface ManagerListDto {
+  items: ManagerDto[];
+}
+
+export interface AssignManagerPayload {
+  managerUserId: string | null;
+}
+
+export interface ManagerPermissionsPayload {
+  canApprove: boolean;
+  canReject: boolean;
 }
 
 /** Body of `PATCH /employees/:id` — the display name is the only editable field. */

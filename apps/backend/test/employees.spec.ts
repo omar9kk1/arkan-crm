@@ -82,10 +82,12 @@ describeWithDatabase('Employees directory API', () => {
   beforeAll(async () => {
     ctx = await createTestApp();
     await resetDatabase(ctx.prisma);
+    // Account management is OWNER-only; the existing directory tests exercise
+    // the OWNER management surface.
     const manager = await createUser(ctx.prisma, {
       email: 'manager@employees.local',
       name: 'Manager One',
-      role: Role.MANAGER,
+      role: Role.OWNER,
     });
     const employeeA = await createUser(ctx.prisma, {
       email: 'employee.a@employees.local',
@@ -164,14 +166,25 @@ describeWithDatabase('Employees directory API', () => {
     )!;
     expect(employee.propertyCount).toBe(2);
     expect(employee.propertiesByStatus.PENDING).toBe(2);
-    expect(employee.properties).toHaveLength(2);
-    expect(employee.properties.every((p) => p.status === 'PENDING')).toBe(true);
+
+    const detail = await api()
+      .get(`/employees/${employeeAId}`)
+      .set(auth(managerToken));
+    expect(detail.status).toBe(200);
+    const detailDto = detail.body.data as EmployeeDto;
+    expect(detailDto.properties).toHaveLength(2);
+    expect(
+      detailDto.properties.every((p) => p.status === 'PENDING'),
+    ).toBe(true);
 
     const other = (await list(managerToken)).find(
       (item) => item.id === employeeBId,
     )!;
     expect(other.propertyCount).toBe(0);
-    expect(other.properties).toEqual([]);
+    const otherDetail = await api()
+      .get(`/employees/${employeeBId}`)
+      .set(auth(managerToken));
+    expect((otherDetail.body.data as EmployeeDto).properties).toEqual([]);
   });
 
   it('renames the display name and keeps the property pill in sync', async () => {

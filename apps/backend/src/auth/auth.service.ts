@@ -23,6 +23,7 @@ const SESSION_USER_SELECT = {
   id: true,
   role: true,
   isActive: true,
+  authVersion: true,
 } as const;
 
 @Injectable()
@@ -62,6 +63,8 @@ export class AuthService {
   }
 
   async refresh(input: RefreshTokenDto) {
+    if (!input.refreshToken)
+      throw new UnauthorizedException('Invalid or expired refresh token');
     const tokenHash = hashRefreshToken(input.refreshToken);
     return this.prisma.$transaction(async (tx) => {
       const session = await tx.refreshToken.findUnique({
@@ -94,6 +97,24 @@ export class AuthService {
         !current.user.isActive
       )
         throw new UnauthorizedException('Invalid or expired refresh token');
+      // A role/permission change bumps User.authVersion. An old refresh token
+      // must never be able to mint a token with the NEW role: revoke the whole
+      // lineage and require a fresh login instead.
+      if (current.authVersion !== current.user.authVersion) {
+        await tx.refreshToken.updateMany({
+          where: {
+            userId: current.userId,
+            ...(current.lineageId
+              ? { lineageId: current.lineageId }
+              : { id: current.id }),
+            revokedAt: null,
+          },
+          data: { revokedAt: new Date() },
+        });
+        throw new UnauthorizedException(
+          'Session expired after an account change; sign in again',
+        );
+      }
       // Conditional update makes refresh single-use even for concurrent requests.
       const consumed = await tx.refreshToken.updateMany({
         where: { id: session.id, revokedAt: null, expiresAt: { gt: new Date() } },
@@ -109,9 +130,11 @@ export class AuthService {
   }
 
   async logout(input: RefreshTokenDto) {
+    const refreshToken = input.refreshToken;
+    if (!refreshToken) return { loggedOut: true };
     return this.prisma.$transaction(async (tx) => {
       const session = await tx.refreshToken.findUnique({
-        where: { tokenHash: hashRefreshToken(input.refreshToken) },
+        where: { tokenHash: hashRefreshToken(refreshToken) },
       });
       if (session) {
         // The same lineage lock as the refresh path: the two can never
@@ -163,7 +186,7 @@ export class AuthService {
 
   private async issueTokens(
     tx: Prisma.TransactionClient,
-    user: Pick<User, 'id' | 'role'>,
+    user: Pick<User, 'id' | 'role' | 'authVersion'>,
     action: string,
     lineageId: string | null,
   ) {
@@ -174,6 +197,7 @@ export class AuthService {
       sub: user.id,
       role: user.role,
       sid: sessionId,
+      av: user.authVersion,
     });
     await tx.refreshToken.create({
       data: {
@@ -182,6 +206,7 @@ export class AuthService {
         tokenHash: hashRefreshToken(refreshToken),
         expiresAt: new Date(Date.now() + REFRESH_LIFETIME_MS),
         lineageId,
+        authVersion: user.authVersion,
       },
     });
     await tx.auditLog.create({
@@ -192,6 +217,11 @@ export class AuthService {
         entityId: sessionId,
       },
     });
-    return { accessToken, refreshToken, expiresIn };
+    return {
+      accessToken,
+      refreshToken,
+      expiresIn,
+      user: { id: user.id, role: user.role },
+    };
   }
 }

@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { usePathname } from 'next/navigation';
 import type { AuthUser } from '@arkan/shared';
+import { AUTH_MODE } from '../../../lib/auth-mode';
 import type { LoginInput } from '../api/auth-api';
 import { restoreSession, signIn, signOut, SESSION_EXPIRED_EVENT } from '../session';
 
@@ -71,9 +72,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return session.user;
   }, []);
   const logout = useCallback(async () => {
+    if (AUTH_MODE === 'legacy') {
+      // Preserve the existing local-first logout behavior for Bearer mode.
+      setUser(null);
+      setError(null);
+      await signOut();
+      return;
+    }
+    // HttpOnly cookies cannot be cleared by JavaScript. Only drop the
+    // in-memory user after the server confirmed the logout, otherwise the
+    // next reload would silently sign the user back in.
+    await signOut();
     setUser(null);
     setError(null);
-    await signOut();
   }, []);
   return (
     <AuthContext.Provider

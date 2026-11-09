@@ -6,14 +6,12 @@ import { SearchBar } from '../../../components/ui/search-bar';
 import { Button } from '../../../components/ui/button';
 import { Card } from '../../../components/ui/card';
 import { GlassSelect } from '../../../components/ui/glass-select';
-import { Toast } from '../../../components/ui/toast';
 import { PropertiesSegmentedTabs as SegmentedTabs } from '../../../components/ui/properties-segmented-tabs';
 import {
   BUCKET_LABELS,
   STATUS_FILTERS,
   TABS,
   entryCountLabel,
-  filterSubjects,
   groupByPerson,
   subjectCountLabel,
   subjectDueLine,
@@ -23,9 +21,14 @@ import {
 } from '../model';
 import {
   followUpApiMessage,
+  getFollowUpHistory,
   listFollowUps,
 } from '../../../lib/api/followups-api';
-import type { FollowUpListDto } from '../../../lib/api/followup-types';
+import type {
+  FollowUpSummaryApiDto,
+  FollowUpSubjectDto,
+} from '../../../lib/api/followup-types';
+import { useDebouncedValue } from '../../../lib/use-debounced-value';
 import { FOLLOW_UP_SUBJECT_QUERY_PARAM } from '../../notifications/notification-target';
 import { FollowUpPersonDrawer } from './followup-person-drawer';
 import styles from './followups.module.css';
@@ -61,12 +64,23 @@ export function FollowUpsBoard({
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const [feed, setFeed] = useState<FollowUpListDto | null>(null);
+  const [items, setItems] = useState<FollowUpSubjectDto[]>([]);
+  const [summary, setSummary] = useState<FollowUpSummaryApiDto | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<FollowUpTabId>('all');
   const [status, setStatus] = useState<FollowUpStatusFilter>('all');
   const [query, setQuery] = useState('');
+  const debouncedQuery = useDebouncedValue(query, 300);
+  const cursorRef = useRef<string | null>(null);
+  const requestIdRef = useRef(0);
+  const busyRef = useRef(false);
+  const paramsRef = useRef({ search: debouncedQuery, tab, status });
+  paramsRef.current = { search: debouncedQuery, tab, status };
+  /** Deep-link target that is not on the currently loaded page. */
+  const [focusGroup, setFocusGroup] = useState<PersonGroup | null>(null);
   /** Hand-written note drafts, per subject — untouched subjects stay empty.
    * Board-level on purpose: drafts survive closing the drawer and switching
    * its tabs, and an API failure can never clear them. */
@@ -80,27 +94,79 @@ export function FollowUpsBoard({
     tab: string;
     subjectId: string | null;
   } | null>(null);
-  const [notice, setNotice] = useState('');
 
   const load = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
+    busyRef.current = true;
     setLoading(true);
+    setLoadingMore(false);
     setError(null);
+    setItems([]);
+    setNextCursor(null);
+    cursorRef.current = null;
     try {
-      const data = await listFollowUps();
-      setFeed(data);
-      if (data.truncated)
-        setNotice(
-          'عدد المتابعات كبير جدًا والقائمة مقتطعة عند أول 1000 موضوع.',
-        );
+      const data = await listFollowUps({
+        search: debouncedQuery.trim() || undefined,
+        tab,
+        status,
+        limit: 50,
+      });
+      if (requestId !== requestIdRef.current) return;
+      setItems(data.items);
+      setSummary(data.summary ?? null);
+      setNextCursor(data.nextCursor);
+      cursorRef.current = data.nextCursor;
     } catch (cause) {
+      if (requestId !== requestIdRef.current) return;
       setError(
-        followUpApiMessage(cause, 'تعذر تحميل المتابعات. حاول مرة أخرى.'),
+        followUpApiMessage(cause, 'تعذّر تحميل المتابعات. حاول مرة أخرى.'),
       );
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+        busyRef.current = false;
+      }
+    }
+  }, [debouncedQuery, tab, status]);
+
+  const loadMore = useCallback(async () => {
+    const cursor = cursorRef.current;
+    if (!cursor || busyRef.current) return;
+    const requestId = requestIdRef.current;
+    const params = paramsRef.current;
+    busyRef.current = true;
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const data = await listFollowUps({
+        search: params.search.trim() || undefined,
+        tab: params.tab,
+        status: params.status,
+        cursor,
+        limit: 50,
+      });
+      if (requestId !== requestIdRef.current) return;
+      setItems((previous) => {
+        const seen = new Set(previous.map((subject) => subject.id));
+        return [
+          ...previous,
+          ...data.items.filter((subject) => !seen.has(subject.id)),
+        ];
+      });
+      setNextCursor(data.nextCursor);
+      cursorRef.current = data.nextCursor;
+    } catch (cause) {
+      if (requestId !== requestIdRef.current) return;
+      setError(
+        followUpApiMessage(cause, 'تعذّر تحميل المزيد من المتابعات.'),
+      );
+    } finally {
+      if (requestId === requestIdRef.current) {
+        setLoadingMore(false);
+        busyRef.current = false;
+      }
     }
   }, []);
-
   useEffect(() => {
     void load();
   }, [load]);
@@ -114,7 +180,6 @@ export function FollowUpsBoard({
     }
   }, [refreshSignal, load]);
 
-  const items = feed?.items ?? [];
   const allGroups = useMemo(() => groupByPerson(items), [items]);
 
   const setNote = useCallback((subjectId: string, value: string) => {
@@ -153,12 +218,28 @@ export function FollowUpsBoard({
       focusTab === 'associations'
         ? focusTab
         : 'history';
-    if (group)
+    if (group) {
       setDrawer({
         key: group.key,
         tab: restoredTab,
         subjectId: focusSubjectId,
       });
+    } else {
+      // The target is beyond the loaded page: fetch exactly that authorized
+      // subject; a foreign/stale id rejects and stays silent.
+      void getFollowUpHistory(focusSubjectId)
+        .then((data) => {
+          const fallback = groupByPerson([data.subject])[0];
+          if (!fallback) return;
+          setFocusGroup(fallback);
+          setDrawer({
+            key: fallback.key,
+            tab: restoredTab,
+            subjectId: focusSubjectId,
+          });
+        })
+        .catch(() => undefined);
+    }
     const params = new URLSearchParams(searchParams);
     params.delete(FOLLOW_UP_SUBJECT_QUERY_PARAM);
     const value = params.toString();
@@ -175,41 +256,36 @@ export function FollowUpsBoard({
     router,
   ]);
 
-  const countIn = useCallback(
-    (id: FollowUpTabId) =>
-      id === 'all'
-        ? items.length
-        : items.filter((subject) => subject.tabs.includes(id)).length,
-    [items],
-  );
   const tabItems = useMemo(
-    () => TABS.map((item) => ({ ...item, count: countIn(item.id) })),
-    [countIn],
+    () =>
+      TABS.map((item) => ({
+        ...item,
+        count: summary?.tabs[item.id] ?? 0,
+      })),
+    [summary],
   );
 
   const counts = useMemo(
     () => ({
-      overdue: items.filter((subject) => subject.bucket === 'OVERDUE').length,
-      today: items.filter((subject) => subject.bucket === 'TODAY').length,
-      upcoming: items.filter((subject) => subject.bucket === 'UPCOMING').length,
-      never: items.filter((subject) => subject.lastSavedAt === null).length,
+      overdue: summary?.overdue ?? 0,
+      today: summary?.today ?? 0,
+      upcoming: summary?.upcoming ?? 0,
+      never: summary?.never ?? 0,
     }),
-    [items],
+    [summary],
   );
 
-  const groups = useMemo(
-    () => groupByPerson(filterSubjects(items, tab, status, query)),
-    [items, tab, status, query],
-  );
+  const groups = useMemo(() => groupByPerson(items), [items]);
 
   // The CURRENT snapshot of the open person's group (the feed may have been
   // refreshed since the drawer opened). Nobody matching → effectively closed.
   const drawerGroup: PersonGroup | null =
     drawer === null
       ? null
-      : (allGroups.find((group) => group.key === drawer.key) ?? null);
+      : (allGroups.find((group) => group.key === drawer.key) ??
+        (focusGroup?.key === drawer.key ? focusGroup : null));
 
-  const busy = loading && !feed;
+  const busy = loading && items.length === 0;
 
   return (
     <>
@@ -218,18 +294,18 @@ export function FollowUpsBoard({
           جارٍ تحميل المتابعات…
         </p>
       )}
-      {!busy && error && (
+      {!busy && error && items.length === 0 && (
         <Card>
           <p className={styles.errorText}>{error}</p>
           <Button onClick={() => void load()}>إعادة المحاولة</Button>
         </Card>
       )}
 
-      {!busy && !error && (
+      {!busy && (!error || items.length > 0) && (
         <>
           <div className={styles.stats}>
             {[
-              { title: 'إجمالي متابعاتك', value: items.length },
+              { title: 'إجمالي متابعاتك', value: summary?.total ?? items.length },
               { title: 'متأخرة', value: counts.overdue },
               { title: 'مستحقة اليوم', value: counts.today },
               { title: ' لم تتم متابعتها', value: counts.never },
@@ -434,13 +510,27 @@ export function FollowUpsBoard({
                     : previous,
                 )
               }
-              onClose={() => setDrawer(null)}
+              onClose={() => {
+                setDrawer(null);
+                setFocusGroup(null);
+              }}
             />
+          )}
+          {nextCursor && !loading && (
+            <p className={styles.state}>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => void loadMore()}
+                disabled={loadingMore}
+                aria-busy={loadingMore}
+              >
+                {loadingMore ? 'جارٍ التحميل…' : 'تحميل المزيد'}
+              </Button>
+            </p>
           )}
         </>
       )}
-
-      <Toast message={notice} onDismiss={() => setNotice('')} />
     </>
   );
 }

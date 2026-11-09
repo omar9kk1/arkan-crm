@@ -79,7 +79,7 @@ describeWithDatabase('Request Changes workflow (Phase 4B)', () => {
     const manager = await createUser(ctx.prisma, {
       email: 'manager@changes.local',
       name: 'Manager',
-      role: Role.MANAGER,
+      role: Role.OWNER,
     });
     const employeeA = await createUser(ctx.prisma, {
       email: 'employee.a@changes.local',
@@ -368,7 +368,7 @@ describeWithDatabase('Request Changes workflow (Phase 4B)', () => {
     expect(otherRow?.isMine).toBe(false);
   });
 
-  it('still creates a manager property as AVAILABLE with no approval record', async () => {
+  it('still creates an OWNER property as AVAILABLE with no approval record', async () => {
     const response = await postProperty(
       ctx.app,
       managerToken,

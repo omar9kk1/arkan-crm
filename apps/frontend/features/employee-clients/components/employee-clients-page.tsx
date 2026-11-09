@@ -4,7 +4,7 @@ import type { EmployeeClient } from '../client-model';
 
 import { Toast } from '../../../components/ui/toast';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { EmployeePageShell } from '../../../components/layout/employee/employee-page-shell';
 import { StatCard } from '../../../components/ui/stat-card';
@@ -15,13 +15,11 @@ import { PropertiesSegmentedTabs as SegmentedTabs } from '../../../components/ui
 import { GlassSelect } from '../../../components/ui/glass-select';
 import {
   employeeClientFromDto,
-  filterClients,
-  localDate,
+  employeeClientFromListItem,
   tabs,
-  clientClassifications,
   CLIENT_CLASSIFICATIONS,
-  type ClientClassification,
 } from '../client-model';
+import type { ClientListClassification } from '../../../lib/api/client-types';
 import { ownerFromRegistryContact } from '../../manager-clients/client-model';
 import { EmployeeClientCard } from './client-cards';
 import { EmployeeClientDetailsDrawer } from './employee-client-details-drawer';
@@ -33,7 +31,10 @@ import {
 } from '../../../lib/contact-registry';
 import { useAuth } from '../../auth/components/auth-provider';
 import { useClients } from '../../../lib/use-clients';
-import { createClientFollowUp } from '../../../lib/api/clients-api';
+import {
+  createClientFollowUp,
+  getClient,
+} from '../../../lib/api/clients-api';
 import {
   submitClientReview,
   type ClientReviewInterestPayload,
@@ -60,6 +61,18 @@ function ownerFromContact(contact: RegistryContact) {
   return ownerFromRegistryContact(contact);
 }
 
+/** UI Arabic label -> stable server-side classification filter. */
+function classificationFilter(
+  label: string,
+): ClientListClassification | undefined {
+  if (label === 'الملاك' || label === 'المؤجرين') return 'owner';
+  if (label === 'المشترين') return 'buyer';
+  if (label === 'المستأجرين') return 'renter';
+  if (label === 'الاستفسارات') return 'interested';
+  if (label === 'البدل') return 'exchanger';
+  return undefined;
+}
+
 /** Server Arabic copy first, then a generic Arabic fallback. */
 function reviewErrorMessage(cause: unknown, fallback: string): string {
   if (cause instanceof ApiError && cause.messages.length)
@@ -71,18 +84,35 @@ function reviewErrorMessage(cause: unknown, fallback: string): string {
 export default function EmployeeClientsPage() {
   const { user } = useAuth();
   const router = useRouter();
+  const [query, setQuery] = useState('');
+  const [tab, setTab] = useState('all');
+  const [classification, setClassification] = useState('الكل');
+  const [category, setCategory] = useState<
+    'clients' | 'owners' | 'brokers' | 'reviews'
+  >('clients');
   const {
     clients: clientRows,
     stats,
     loading: clientsLoading,
+    loadingMore: clientsLoadingMore,
     error: clientsError,
+    nextCursor,
     refresh: refreshClients,
-  } = useClients();
+    loadMore: loadMoreClients,
+  } = useClients({
+    search: category === 'clients' ? query : '',
+    filter:
+      category === 'clients' && tab !== 'all'
+        ? (tab as 'today' | 'late' | 'unmatched')
+        : undefined,
+    classification:
+      category === 'clients' ? classificationFilter(classification) : undefined,
+  });
   // The real «تحت المراجعة» badge number: the SAME authorized feed the tab
   // renders (the employee's own submissions only), kept in step by the tab.
   const reviewCount = useClientReviewCount();
   const clients = useMemo(
-    () => clientRows.map(employeeClientFromDto),
+    () => clientRows.map(employeeClientFromListItem),
     [clientRows],
   );
   // Owners/brokers read the resource form so each tab keeps its own loading
@@ -108,19 +138,27 @@ export default function EmployeeClientsPage() {
   const brokersLoading = brokersResource.loading;
   const brokersError = brokersResource.error;
 
-  const [query, setQuery] = useState('');
-  const today = localDate();
-  const [tab, setTab] = useState('all');
-  const [classification, setClassification] = useState('الكل');
-  const [category, setCategory] = useState<
-    'clients' | 'owners' | 'brokers' | 'reviews'
-  >('clients');
   const [adding, setAdding] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string>('');
   const [clientContext, setClientContext] = useDraftState<
     Record<string, EmployeeClient>
   >('employee-clients:context', {});
+  const openClient = useCallback(
+    async (id: string) => {
+      try {
+        const dto = await getClient(id);
+        setClientContext((context) => ({
+          ...context,
+          [id]: employeeClientFromDto(dto),
+        }));
+        setSelectedId(id);
+      } catch {
+        setNotice('تعذّر تحميل تفاصيل العميل.');
+      }
+    },
+    [setClientContext],
+  );
   const [selectedContact, setSelectedContact] =
     useState<RegistryContact | null>(null);
   const [ownerFile, setOwnerFile] = useState<string | null>(null);
@@ -174,15 +212,9 @@ export default function EmployeeClientsPage() {
     });
   }, [focusReviewId, searchParams, pathname, router]);
 
-  const filtered = filterClients(clients, tab, today)
-    .filter(
-      (c) =>
-        classification === 'الكل' ||
-        clientClassifications(c).includes(
-          classification as ClientClassification,
-        ),
-    )
-    .filter((c) => `${c.name} ${c.phone}`.includes(query));
+  // The server already applied search, status and classification to the whole
+  // authorised dataset; this is only the current loaded page.
+  const filtered = clients;
 
   const ownersList = contacts ?? [];
   const brokersList = brokers ?? [];
@@ -194,7 +226,7 @@ export default function EmployeeClientsPage() {
     .filter((o) => o.name.includes(query) || o.phone.includes(query));
 
   const selected = selectedId
-    ? clients.find((c) => c.id === selectedId) || clientContext[selectedId]
+    ? clientContext[selectedId] || clients.find((c) => c.id === selectedId)
     : null;
 
   return (
@@ -311,16 +343,26 @@ export default function EmployeeClientsPage() {
               <EmployeeClientCard
                 key={c.id}
                 client={c}
-                onOpen={() => {
-                  setClientContext((p) => ({ ...p, [c.id]: c }));
-                  setSelectedId(c.id);
-                }}
+                onOpen={() => void openClient(c.id)}
               />
             ))}
             {filtered.length === 0 && (
               <Card>لا يوجد عملاء يطابقون البحث والفلاتر.</Card>
             )}
           </div>
+          {nextCursor && !clientsLoading && !clientsError && (
+            <p className={styles.muted}>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => void loadMoreClients()}
+                disabled={clientsLoadingMore}
+                aria-busy={clientsLoadingMore}
+              >
+                {clientsLoadingMore ? 'جارٍ التحميل…' : 'تحميل المزيد'}
+              </Button>
+            </p>
+          )}
         </>
       )}
 
@@ -375,7 +417,7 @@ export default function EmployeeClientsPage() {
           onOpenProperty={(propertyId) => {
             requestOpenProperty(propertyId);
             const route =
-              user?.role === Role.MANAGER
+              user?.role === Role.MANAGER || user?.role === Role.OWNER
                 ? '/manager/properties'
                 : '/employee/properties';
             router.push(
@@ -394,7 +436,7 @@ export default function EmployeeClientsPage() {
           onOpenProperty={(propertyId) => {
             requestOpenProperty(propertyId);
             const route =
-              user?.role === Role.MANAGER
+              user?.role === Role.MANAGER || user?.role === Role.OWNER
                 ? '/manager/properties'
                 : '/employee/properties';
             router.push(

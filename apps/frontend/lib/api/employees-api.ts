@@ -1,8 +1,13 @@
 import { authorizedRequest } from './authorized';
 import type {
+  AssignManagerPayload,
   CreateEmployeePayload,
   EmployeeDto,
   EmployeeListDto,
+  EmployeePropertyPageApiDto,
+  ManagerDto,
+  ManagerListDto,
+  ManagerPermissionsPayload,
   SetEmployeeActivationPayload,
   UpdateEmployeePayload,
 } from './employee-types';
@@ -14,8 +19,64 @@ const BASE = '/employees';
  * their property statistics; the caller's role is enforced by the backend, never
  * by the UI.
  */
-export function listEmployees(): Promise<EmployeeListDto> {
-  return authorizedRequest<EmployeeListDto>(BASE);
+export type EmployeeStatusQuery = 'all' | 'active' | 'inactive';
+
+export type EmployeeSortQuery =
+  | 'clientsCount'
+  | 'propertiesCount'
+  | 'dealsCount';
+
+export interface EmployeeListQuery {
+  search?: string;
+  status?: EmployeeStatusQuery;
+  sort?: EmployeeSortQuery;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface EmployeePropertyQuery {
+  cursor?: string;
+  limit?: number;
+}
+
+function employeeQueryString(query: EmployeeListQuery): string {
+  const params = new URLSearchParams();
+  if (query.search) params.set('search', query.search);
+  if (query.status && query.status !== 'all') {
+    params.set('status', query.status);
+  }
+  if (query.sort) params.set('sort', query.sort);
+  if (query.cursor) params.set('cursor', query.cursor);
+  if (query.limit) params.set('limit', String(query.limit));
+  const value = params.toString();
+  return value ? `?${value}` : '';
+}
+
+export function listEmployees(
+  query: EmployeeListQuery = {},
+): Promise<EmployeeListDto> {
+  return authorizedRequest<EmployeeListDto>(
+    BASE + employeeQueryString(query),
+  );
+}
+
+/** `GET /employees/:id` — full employee detail for the drawer. */
+export function getEmployee(id: string): Promise<EmployeeDto> {
+  return authorizedRequest<EmployeeDto>(`${BASE}/${id}`);
+}
+
+/** `GET /employees/:id/properties` — authorized cursor page of properties. */
+export function listEmployeeProperties(
+  id: string,
+  query: EmployeePropertyQuery = {},
+): Promise<EmployeePropertyPageApiDto> {
+  const params = new URLSearchParams();
+  if (query.cursor) params.set('cursor', query.cursor);
+  if (query.limit) params.set('limit', String(query.limit));
+  const value = params.toString();
+  return authorizedRequest<EmployeePropertyPageApiDto>(
+    `${BASE}/${id}/properties${value ? `?${value}` : ''}`,
+  );
 }
 
 /**
@@ -61,5 +122,33 @@ export function setEmployeeActivation(
   return authorizedRequest<EmployeeDto>(`${BASE}/${id}/activation`, {
     method: 'PATCH',
     body,
+  });
+}
+
+/** `GET /managers` — OWNER-only Manager directory with live capabilities. */
+export function listManagers(): Promise<ManagerListDto> {
+  return authorizedRequest<ManagerListDto>('/managers');
+}
+
+/** `PATCH /employees/:id/manager` — OWNER assigns/transfers or unassigns. */
+export function assignEmployeeManager(
+  id: string,
+  managerUserId: string | null,
+): Promise<EmployeeDto> {
+  const body: AssignManagerPayload = { managerUserId };
+  return authorizedRequest<EmployeeDto>(`${BASE}/${id}/manager`, {
+    method: 'PATCH',
+    body,
+  });
+}
+
+/** `PATCH /managers/:id/permissions` — independent approve/reject grant. */
+export function setManagerPermissions(
+  id: string,
+  payload: ManagerPermissionsPayload,
+): Promise<ManagerDto> {
+  return authorizedRequest<ManagerDto>(`/managers/${id}/permissions`, {
+    method: 'PATCH',
+    body: payload,
   });
 }

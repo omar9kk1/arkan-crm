@@ -77,8 +77,46 @@ export interface ClientApiDto {
   propertyInterests: ClientPropertyInterestApiDto[];
 }
 
+/**
+ * Lightweight row returned by `GET /clients` (cursor-paginated). Full
+ * follow-ups/deals/interests are fetched only by `GET /clients/:id`.
+ */
+export interface ClientListItemApiDto {
+  id: string;
+  name: string;
+  phone: string;
+  notes: string;
+  source: string;
+  status: string;
+  requestData: string | null;
+  responsibleUserId: string | null;
+  responsibleEmployeeName: string | null;
+  createdByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  nextFollowUp: string | null;
+  lastFollowUpAt: string | null;
+  lastFollowUpOutcome: string;
+  lastFollowUpNote: string;
+  lastFollowUpEmployeeName: string | null;
+  propertiesCount: number;
+  propertyInterestsCount: number;
+}
+
 export interface ClientListApiDto {
-  items: ClientApiDto[];
+  items: ClientListItemApiDto[];
+  nextCursor: string | null;
+}
+
+/** Minimal fields needed by the employee recommendation matcher. */
+export interface ClientRecommendationCandidateApiDto {
+  id: string;
+  name: string;
+  requestData: string | null;
+}
+
+export interface ClientRecommendationCandidateListApiDto {
+  items: ClientRecommendationCandidateApiDto[];
 }
 
 export interface ClientStatsApiDto {
@@ -124,7 +162,18 @@ export interface CreateClientFollowUpPayload {
   note?: string;
 }
 
+export type ClientListFilter = 'today' | 'late' | 'unmatched';
+export type ClientListClassification =
+  | 'owner'
+  | 'buyer'
+  | 'renter'
+  | 'exchanger'
+  | 'interested';
+
 export interface ListClientsQuery {
   search?: string;
+  cursor?: string;
   limit?: number;
+  filter?: ClientListFilter;
+  classification?: ClientListClassification;
 }

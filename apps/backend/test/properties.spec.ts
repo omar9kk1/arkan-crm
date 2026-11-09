@@ -80,7 +80,7 @@ describeWithDatabase('Properties API (workflow, visibility, privacy)', () => {
     ).toBe(401);
   });
 
-  it('makes a MANAGER property AVAILABLE immediately with no approval record', async () => {
+  it('makes a MANAGER property PENDING with a review record (no review bypass)', async () => {
     const response = await postProperty(
       ctx.app,
       managerToken,
@@ -90,7 +90,7 @@ describeWithDatabase('Properties API (workflow, visibility, privacy)', () => {
       image,
     );
     expect(response.status).toBe(201);
-    expect(response.body.data.status).toBe('AVAILABLE');
+    expect(response.body.data.status).toBe('PENDING');
     // Creator role is server-derived, so the card can label a manager-created
     // row «مدير» without exposing the manager's personal name.
     expect(response.body.data.responsibleRole).toBe('MANAGER');
@@ -98,7 +98,7 @@ describeWithDatabase('Properties API (workflow, visibility, privacy)', () => {
     const approvals = await ctx.prisma.propertyApprovalRequest.count({
       where: { propertyId: response.body.data.id },
     });
-    expect(approvals).toBe(0);
+    expect(approvals).toBe(1);
     expect(managerId).toBeTruthy();
   });
 

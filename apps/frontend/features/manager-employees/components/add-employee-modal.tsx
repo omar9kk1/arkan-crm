@@ -18,14 +18,19 @@ import type { EmployeeRecord } from '../model';
 import styles from './add-employee.module.css';
 export function AddEmployeeModal({
   existing,
+  defaultRole = 'EMPLOYEE',
   onClose,
   onCreated,
 }: {
   existing: readonly EmployeeRecord[];
+  /** OWNER can open the same form as a Manager-account creator. */
+  defaultRole?: EmployeeRoleApi;
   onClose: () => void;
   onCreated: (id: string) => void;
 }) {
-  const formKey = 'add-employee';
+  const isManagerForm = defaultRole === 'MANAGER';
+  const formKey = isManagerForm ? 'add-manager' : 'add-employee';
+  const defaultRoleLabel = isManagerForm ? 'مدير' : 'موظف مبيعات';
   const { clear: clearFormDraft } = useDraftScope(formKey);
   const draftField = useDraftFields(formKey);
 
@@ -38,13 +43,15 @@ export function AddEmployeeModal({
   const saved = useRef(false);
   return (
     <PropertyOverlay
-      title="إضافة موظف"
+      title={isManagerForm ? 'إضافة مدير' : 'إضافة موظف'}
       onClose={onClose}
       className={styles.modal}
     >
       {result ? (
         <Card className={styles.result}>
-          <h3>تم إنشاء حساب الموظف</h3>
+          <h3>
+            {isManagerForm ? 'تم إنشاء حساب المدير' : 'تم إنشاء حساب الموظف'}
+          </h3>
           <p>
             أُنشئ الحساب فعليًا في قاعدة البيانات. احتفظ بهذه البيانات وأرسلها
             للموظف.
@@ -180,7 +187,7 @@ export function AddEmployeeModal({
                   <label>
                     الدور الوظيفي
                     <GlassSelect
-                      {...draftField('jobRole', 'موظف مبيعات')}
+                      {...draftField('jobRole', defaultRoleLabel)}
                       name="jobRole"
                     >
                       <option>موظف مبيعات</option>

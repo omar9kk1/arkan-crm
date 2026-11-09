@@ -92,7 +92,7 @@ describeWithDatabase('Manager review notification — real changes', () => {
     const otherManager = await createUser(ctx.prisma, {
       email: 'manager.two@review.local',
       name: 'Manager Two Review',
-      role: Role.MANAGER,
+      role: Role.OWNER,
     });
     const employee = await createUser(ctx.prisma, {
       email: 'employee@review.local',

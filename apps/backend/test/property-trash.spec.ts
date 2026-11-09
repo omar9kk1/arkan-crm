@@ -20,6 +20,7 @@ describeWithDatabase('Property Trash + permanent deep delete', () => {
   let ctx: TestContext;
   let managerId: string;
   let managerToken: string;
+  let managerOnlyToken: string;
   let employeeToken: string;
   const api = () => request(ctx.app.getHttpServer());
 
@@ -44,18 +45,25 @@ describeWithDatabase('Property Trash + permanent deep delete', () => {
   beforeAll(async () => {
     ctx = await createTestApp();
     await resetDatabase(ctx.prisma);
+    // Trash is a management surface; OWNER exercises company-wide Trash.
     const manager = await createUser(ctx.prisma, {
       email: 'trash-manager@test.local',
       name: 'Trash Manager',
-      role: Role.MANAGER,
+      role: Role.OWNER,
     });
     const employee = await createUser(ctx.prisma, {
       email: 'trash-employee@test.local',
       name: 'Trash Employee',
       role: Role.EMPLOYEE,
     });
+    const managerOnly = await createUser(ctx.prisma, {
+      email: 'trash-real-manager@test.local',
+      name: 'Real Manager',
+      role: Role.MANAGER,
+    });
     managerId = manager.id;
     managerToken = await login(ctx.app, manager.email);
+    managerOnlyToken = await login(ctx.app, managerOnly.email);
     employeeToken = await login(ctx.app, employee.email);
   });
 
@@ -105,6 +113,31 @@ describeWithDatabase('Property Trash + permanent deep delete', () => {
           .send({ confirmationCode: code })
       ).status,
     ).toBe(403);
+  });
+
+  it('1b. MANAGER can never view or operate Trash endpoints (OWNER-only)', async () => {
+    const created = await createManagerProperty({ plotNumber: '9151' });
+    const id = created.id;
+    const code = created.reference;
+
+    expect((await api().get('/properties/trash').set(auth(managerOnlyToken))).status).toBe(403);
+    expect(
+      (await api().post(`/properties/${id}/trash`).set(auth(managerOnlyToken)).send({})).status,
+    ).toBe(403);
+    expect(
+      (await api().post(`/properties/${id}/restore`).set(auth(managerOnlyToken)).send({})).status,
+    ).toBe(403);
+    expect(
+      (
+        await api()
+          .delete(`/properties/${id}/permanent`)
+          .set(auth(managerOnlyToken))
+          .send({ confirmationCode: code })
+      ).status,
+    ).toBe(403);
+    // The property stayed active: MANAGER could not move it to Trash.
+    const row = await ctx.prisma.property.findUnique({ where: { id } });
+    expect(row!.deletedAt).toBeNull();
   });
 
   it('2. manager soft delete hides the row from normal reads and shows it in Trash', async () => {

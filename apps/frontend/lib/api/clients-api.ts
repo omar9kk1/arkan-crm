@@ -3,6 +3,7 @@ import type {
   ClientApiDto,
   ClientFollowUpApiDto,
   ClientListApiDto,
+  ClientRecommendationCandidateListApiDto,
   ClientStatsApiDto,
   CreateClientFollowUpPayload,
   CreateClientPayload,
@@ -15,7 +16,10 @@ const BASE = '/clients';
 function queryString(query: ListClientsQuery): string {
   const params = new URLSearchParams();
   if (query.search) params.set('search', query.search);
+  if (query.cursor) params.set('cursor', query.cursor);
   if (query.limit) params.set('limit', String(query.limit));
+  if (query.filter) params.set('filter', query.filter);
+  if (query.classification) params.set('classification', query.classification);
   const value = params.toString();
   return value ? `?${value}` : '';
 }
@@ -25,6 +29,16 @@ export function listClients(
   query: ListClientsQuery = {},
 ): Promise<ClientListApiDto> {
   return authorizedRequest<ClientListApiDto>(BASE + queryString(query));
+}
+
+/**
+ * `GET /clients/recommendation-candidates` — all eligible clients in the
+ * viewer's scope, not just the first list page.
+ */
+export function listClientRecommendationCandidates(): Promise<ClientRecommendationCandidateListApiDto> {
+  return authorizedRequest<ClientRecommendationCandidateListApiDto>(
+    `${BASE}/recommendation-candidates`,
+  );
 }
 
 /** `GET /clients/stats` — authorised counters for summary cards and tab badges. */

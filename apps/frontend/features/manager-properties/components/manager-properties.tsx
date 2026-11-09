@@ -41,6 +41,15 @@ const MAX_PAGES_PER_LOAD = 3;
 export function ManagerProperties() {
   const { user } = useAuth();
   const router = useRouter();
+  // Display hint only: the backend re-checks the live capability on every
+  // approve/reject request. OWNER is always allowed.
+  const canApprove =
+    user?.role === 'OWNER' || user?.capabilities?.approveProperties === true;
+  const canReject =
+    user?.role === 'OWNER' || user?.capabilities?.rejectProperties === true;
+  const canReview = canApprove || canReject;
+  // Deletion is OWNER-only; MANAGER keeps review decisions only.
+  const canDelete = user?.role === 'OWNER';
   const [tab, setTab] = useState('program');
   const [query, setQuery] = useState('');
   const [adding, setAdding] = useDraftState(
@@ -244,6 +253,7 @@ export function ManagerProperties() {
       setReviewError('');
       setReview({ property, action: 'reject' });
     } else if (action === 'حذف') {
+      if (!canDelete) return;
       setTrashDialogError('');
       setTrashTarget(property);
     }
@@ -440,8 +450,9 @@ export function ManagerProperties() {
                 router.back();
               }
             }}
-            onAction={onAction}
-            onApproveDistinct={approveDistinct}
+            onAction={canReview ? onAction : undefined}
+            canDelete={canDelete}
+            onApproveDistinct={canApprove ? approveDistinct : undefined}
             busy={busyId === selectedLive.id}
           />
         )}
@@ -471,7 +482,7 @@ export function ManagerProperties() {
             }}
           />
         )}
-        {trashTarget && (
+        {canDelete && trashTarget && (
           <TrashDeleteDialog
             propertyCode={trashTarget.code}
             busy={trashBusy}

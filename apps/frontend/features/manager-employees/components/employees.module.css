@@ -144,6 +144,240 @@
   font-size: var(--text-caption);
   color: var(--muted);
 }
+.tabs {
+  margin-bottom: var(--space-5);
+}
+.tabSection {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.managerList {
+  display: grid;
+  gap: var(--space-3);
+}
+.managerCard {
+  padding: 0;
+  overflow: hidden;
+  background: var(--manager-glass-highlight), var(--dashboard-surface);
+}
+.managerHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-4);
+  color: inherit;
+  text-align: start;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.managerHeader:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: -3px;
+}
+.managerIdentity {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  flex: 1;
+}
+.managerIdentity strong {
+  font-size: var(--text-heading);
+}
+.managerChevron {
+  font-size: var(--text-heading);
+  color: var(--accent);
+}
+.managerBody {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: var(--space-4);
+  padding: 0 var(--space-4) var(--space-4);
+  border-top: 1px solid var(--glass-border);
+}
+.managerBody h3 {
+  margin: var(--space-3) 0 var(--space-2);
+  font-size: var(--text-small);
+}
+.teamList,
+.permissions {
+  min-width: 0;
+}
+.permissions {
+  display: grid;
+  align-content: start;
+  gap: var(--space-2);
+}
+.permissions label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-small);
+  cursor: pointer;
+}
+.permissionSwitch {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--manager-button-surface);
+  cursor: pointer;
+  transition:
+    background var(--motion-fast),
+    border-color var(--motion-fast);
+}
+.permissionSwitch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  inset-inline-start: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--ink);
+  opacity: 0.4;
+  box-shadow: 0 1px 3px rgba(58, 39, 20, 0.18);
+  transition:
+    transform var(--motion-fast),
+    background var(--motion-fast),
+    opacity var(--motion-fast);
+}
+.permissionSwitch:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.permissionSwitch:checked::after {
+  transform: translateX(-18px);
+  background: #fff;
+  opacity: 1;
+}
+.permissionSwitch:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+.permissionSwitch:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.statusActive,
+.statusInactive {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-caption);
+  white-space: nowrap;
+}
+.statusActive {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.statusInactive {
+  color: var(--muted);
+  background: var(--manager-button-surface);
+}
+.emptyState {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+}
+
+/* Compact, calm employee-profile drawer. Scoped to the drawer only. */
+.employeeDrawer {
+  display: grid;
+  gap: var(--space-3);
+  padding-bottom: var(--space-1);
+}
+.employeeDrawer section[role='tabpanel']:not([hidden]) {
+  display: grid;
+  gap: var(--space-3);
+}
+.employeeDrawer > p:first-child {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-caption);
+}
+.employeeDrawer .drawerCard {
+  padding: var(--space-3) var(--space-4);
+  border-color: rgba(255, 255, 255, 0.55);
+  background: var(--manager-inset-surface), var(--dashboard-surface);
+  box-shadow: 0 2px 8px rgba(58, 39, 20, 0.035);
+}
+.employeeDrawer .drawerCard h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-small);
+  font-weight: 700;
+}
+.employeeDrawer .drawerCard p {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-small);
+  line-height: 1.6;
+}
+.employeeDrawer .metrics {
+  gap: var(--space-2);
+  margin: 0;
+}
+.employeeDrawer .metrics > div {
+  padding: var(--space-2) var(--space-3);
+  background: var(--manager-inset-surface);
+  border-color: rgba(255, 255, 255, 0.5);
+  box-shadow: none;
+}
+.employeeDrawer .metrics dt {
+  font-size: var(--text-caption);
+}
+.employeeDrawer .metrics dd {
+  margin-top: 2px;
+  font-size: var(--text-small);
+  font-weight: 600;
+}
+.employeeDrawer .field {
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+  font-size: var(--text-caption);
+}
+.employeeDrawer .field input,
+.employeeDrawer .field select {
+  min-height: 36px;
+  padding: var(--space-1) var(--space-2);
+  border-color: rgba(255, 255, 255, 0.55);
+  background: var(--manager-button-surface);
+}
+.employeeDrawer .actions {
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.employeeDrawer .actions button {
+  flex: 0 1 auto;
+  min-height: 34px;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-caption);
+  font-weight: 600;
+}
+.employeeDrawer .notice,
+.employeeDrawer .list li {
+  padding: var(--space-2) var(--space-3);
+  background: var(--manager-inset-surface);
+  border-color: rgba(255, 255, 255, 0.45);
+  box-shadow: none;
+}
+.employeeDrawer .list {
+  gap: var(--space-2);
+}
+.employeeDrawer .list p {
+  margin: 2px 0 0;
+  font-size: var(--text-caption);
+}
+.employeeDrawer a {
+  font-size: var(--text-caption);
+}
 .list {
   list-style: none;
   padding: 0;
@@ -179,6 +413,15 @@
 @media (max-width: 600px) {
   .stats,
   .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .managerBody {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .employeeDrawer .drawerCard {
+    padding: var(--space-2) var(--space-3);
+  }
+  .employeeDrawer .metrics {
     grid-template-columns: minmax(0, 1fr);
   }
   .filters {

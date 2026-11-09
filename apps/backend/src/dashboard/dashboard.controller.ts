@@ -9,7 +9,7 @@ export class DashboardController {
   constructor(private readonly dashboard: DashboardService) {}
 
   /** Manager-only live home dashboard aggregates for the selected period. */
-  @Roles(Role.MANAGER)
+  @Roles(Role.OWNER, Role.MANAGER)
   @Get('manager')
   manager(
     @Req() request: { user: AuthUser },

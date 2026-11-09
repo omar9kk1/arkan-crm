@@ -11,6 +11,7 @@ import { SettingsPermissionList } from './settings-permission-list';
 import { PushNotificationToggle } from './push-notification-toggle';
 import styles from './settings.module.css';
 import { authorizedRequest } from '../../../lib/api/authorized';
+import { useAuth } from '../../auth/components/auth-provider';
 import {
   NOTIFICATION_PREFERENCE_ERROR,
   NOTIFICATION_PREFERENCE_PATH,
@@ -24,6 +25,8 @@ import {
 } from '../notification-preference-model';
 
 export function SettingsPage() {
+  const { user } = useAuth();
+  const isOwner = user?.role === 'OWNER';
   const [notice, setNotice] = useState({ message: '', key: 0 });
   const notify = (message: string) =>
     setNotice((previous) => ({ message, key: previous.key + 1 }));
@@ -87,12 +90,19 @@ export function SettingsPage() {
   return (
     <ManagerPageShell
       title="الإعدادات"
-      description="إدارة إعدادات النظام الأساسية، بيانات الشركة، قواعد المتابعة، الصلاحيات، والتنبيهات."
+      description={
+        isOwner
+          ? 'إدارة إعدادات النظام الأساسية، بيانات الشركة، قواعد المتابعة، الصلاحيات، والتنبيهات.'
+          : 'عرض إعدادات المتابعة والتنبيهات الشخصية؛ أما بيانات الشركة والحضور والصلاحيات فمتاحة لمالك النظام فقط.'
+      }
     >
       <p className={styles.banner}>
-        هذه الإعدادات تجريبية حاليًا، وسيتم ربطها بالنظام في مرحلة الـ APIs.
+        {isOwner
+          ? 'هذه الإعدادات تجريبية حاليًا، وسيتم ربطها بالنظام في مرحلة الـ APIs.'
+          : 'يمكنك عرض إعدادات المتابعة فقط، بينما تبقى بيانات الشركة والحضور والصلاحيات وإعدادات الصفقات لدى مالك النظام.'}
       </p>
       <div className={styles.grid}>
+        {isOwner ? (
         <SettingsSectionCard title="بيانات الشركة" onSave={save}>
           <SettingsField
             label="اسم الشركة"
@@ -121,7 +131,12 @@ export function SettingsPage() {
             شعار الشركة <small>مكان مخصص للشعار — رفع الملفات لاحقًا</small>
           </div>
         </SettingsSectionCard>
-        <SettingsSectionCard title="إعدادات المتابعات" onSave={save}>
+        ) : null}
+        <SettingsSectionCard
+          title="إعدادات المتابعات"
+          onSave={isOwner ? save : undefined}
+          readOnly={!isOwner}
+        >
           {[
             ['متابعة المالك كل (أيام)', 3],
             ['متابعة العميل بعد (أيام)', 5],
@@ -139,7 +154,13 @@ export function SettingsPage() {
               defaultValue={value}
             />
           ))}
+          {!isOwner ? (
+            <p className={styles.note}>
+              إعدادات المتابعة للعرض فقط. تعديلها متاح لمالك النظام.
+            </p>
+          ) : null}
         </SettingsSectionCard>
+        {isOwner ? (
         <SettingsSectionCard title="إعدادات الصفقات والعمولات" onSave={save}>
           <SettingsField label="العملة الافتراضية">
             <GlassSelect defaultValue="KWD" aria-label="العملة الافتراضية">
@@ -153,6 +174,9 @@ export function SettingsPage() {
           />
           <p className={styles.note}>في MVP المدير فقط هو من يسجل الصفقات.</p>
         </SettingsSectionCard>
+        ) : null}
+        {isOwner ? (
+        <>
         <SettingsSectionCard title="إعدادات الحضور والانصراف" onSave={save}>
           <SettingsField
             label="وقت بداية الدوام"
@@ -179,6 +203,8 @@ export function SettingsPage() {
         <SettingsSectionCard title="الصلاحيات">
           <SettingsPermissionList />
         </SettingsSectionCard>
+        </>
+        ) : null}
         <SettingsSectionCard title="إعدادات التنبيهات">
           <SettingsToggle
             label="تفعيل إشعارات المتابعة"

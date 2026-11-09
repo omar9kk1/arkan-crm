@@ -34,9 +34,13 @@ process.env.PUSH_VAPID_PUBLIC_KEY = 'test-public-key';
 process.env.PUSH_VAPID_PRIVATE_KEY = 'test-private-key';
 process.env.PUSH_VAPID_SUBJECT = 'mailto:push-tests@arkan.test';
 
-const DESKTOP_ENDPOINT = 'https://push.example.com/desktop-device';
-const MOBILE_ENDPOINT = 'https://push.example.com/mobile-device';
-const SHARED_ENDPOINT = 'https://push.example.com/shared-browser';
+// One endpoint per officially supported provider family. These are the real
+// provider hostnames (only the path is a test id); the network call itself is
+// mocked, so no external request is ever made.
+const DESKTOP_ENDPOINT = 'https://fcm.googleapis.com/fcm/send/desktop-device';
+const MOBILE_ENDPOINT =
+  'https://updates.push.services.mozilla.com/wpush/v2/mobile-device';
+const SHARED_ENDPOINT = 'https://web.push.apple.com/shared-browser';
 
 const keys = {
   p256dh: 'A'.repeat(87),
@@ -114,7 +118,7 @@ describeWithDatabase('Web Push (manager devices)', () => {
     await createUser(ctx.prisma, {
       email: otherManagerEmail,
       name: 'مدير آخر',
-      role: Role.MANAGER,
+      role: Role.OWNER,
     });
     await createUser(ctx.prisma, {
       email: employeeEmail,
@@ -128,13 +132,19 @@ describeWithDatabase('Web Push (manager devices)', () => {
   });
 
   beforeEach(async () => {
-    webpush.sendNotification.mockClear();
+    webpush.sendNotification.mockReset();
+    webpush.sendNotification.mockResolvedValue(undefined);
     // Many logins in these tests: the auth rate limiter must not interfere.
     resetRateLimiting(ctx.app);
     // Every test starts from healthy accounts (a deactivation in one test
     // must not leak into the next).
     await ctx.prisma.user.updateMany({
+      where: { email: managerEmail },
       data: { role: 'MANAGER', isActive: true },
+    });
+    await ctx.prisma.user.updateMany({
+      where: { email: otherManagerEmail },
+      data: { role: 'OWNER', isActive: true },
     });
     await ctx.prisma.user.updateMany({
       where: { email: employeeEmail },
@@ -158,6 +168,14 @@ describeWithDatabase('Web Push (manager devices)', () => {
     expect(pushedEndpoints().sort()).toEqual(
       [DESKTOP_ENDPOINT, MOBILE_ENDPOINT].sort(),
     );
+    // The real transport is attached: connection-time DNS/IP validation and a
+    // bounded network timeout.
+    const sendOptions = webpush.sendNotification.mock.calls[0]?.[2] as {
+      agent?: { options?: { lookup?: unknown } };
+      timeout?: number;
+    };
+    expect(sendOptions.timeout).toBe(10_000);
+    expect(typeof sendOptions.agent?.options?.lookup).toBe('function');
     const payload = JSON.parse(
       webpush.sendNotification.mock.calls[0]?.[1] as string,
     ) as { title: string; body: string; url: string };
@@ -412,6 +430,73 @@ describeWithDatabase('Web Push (manager devices)', () => {
     expect(await subscribe(employee.accessToken, DESKTOP_ENDPOINT)).toBe(403);
   });
 
+  it('rejects attacker-controlled, private and malformed endpoints without storing them', async () => {
+    const manager = await loginAs(managerEmail);
+    const rejected = [
+      'https://attacker.example/push',
+      'http://fcm.googleapis.com/fcm/send/x',
+      'https://fcm.googleapis.com:8443/fcm/send/x',
+      'https://user:pass@fcm.googleapis.com/fcm/send/x',
+      'https://fcm.googleapis.com/fcm/send/x#fragment',
+      'https://localhost/push',
+      'https://127.0.0.1/push',
+      'https://[::1]/push',
+      'https://169.254.169.254/latest/meta-data',
+      'https://10.0.0.5/push',
+      'https://fcm.googleapis.com.evil.example/fcm/send/x',
+      'https://evil-notify.windows.com.attacker.example/push',
+      'https://notify.windows.com.attacker.example/push',
+    ];
+    for (const endpoint of rejected) {
+      expect(await subscribe(manager.accessToken, endpoint)).toBe(400);
+    }
+    expect(await ctx.prisma.pushSubscription.count()).toBe(0);
+
+    // A valid official endpoint is still accepted afterwards.
+    expect(await subscribe(manager.accessToken, DESKTOP_ENDPOINT)).toBe(200);
+    expect(await ctx.prisma.pushSubscription.count()).toBe(1);
+  });
+
+  it('keeps an existing but now-disallowed subscription and never contacts it', async () => {
+    const desktop = await loginAs(managerEmail);
+    const manager = await ctx.prisma.user.findUnique({
+      where: { email: managerEmail },
+    });
+    const session = await ctx.prisma.refreshToken.findFirst({
+      where: { userId: manager?.id as string, revokedAt: null },
+      orderBy: { createdAt: 'desc' },
+      select: { lineageId: true },
+    });
+    const blockedEndpoint = 'https://169.254.169.254/latest/meta-data';
+    await ctx.prisma.pushSubscription.create({
+      data: {
+        userId: manager?.id as string,
+        lineageId: session?.lineageId as string,
+        endpoint: blockedEndpoint,
+        p256dh: keys.p256dh,
+        auth: keys.auth,
+      },
+    });
+
+    const employee = await loginAs(employeeEmail);
+    await stageReview(employee.accessToken);
+    await dispatch();
+
+    expect(webpush.sendNotification).not.toHaveBeenCalled();
+    expect(
+      await ctx.prisma.pushSubscription.count({
+        where: { endpoint: blockedEndpoint },
+      }),
+    ).toBe(1);
+    // The valid device of the same manager is unaffected.
+    expect(await subscribe(desktop.accessToken, MOBILE_ENDPOINT)).toBe(200);
+    expect(
+      await ctx.prisma.pushSubscription.count({
+        where: { endpoint: MOBILE_ENDPOINT },
+      }),
+    ).toBe(1);
+  });
+
   it('pushes exactly the change text the manager sees in the bell', async () => {
     const manager = await loginAs(managerEmail);
     const employee = await loginAs(employeeEmail);
@@ -527,12 +612,33 @@ describeWithDatabase('Web Push (manager devices)', () => {
     const removed = await api()
       .delete('/push/subscriptions')
       .set(auth(desktop.accessToken))
-      .send({ endpoint: `https://push.example.com/${randomUUID()}` });
+      .send({
+        endpoint: `https://fcm.googleapis.com/fcm/send/${randomUUID()}`,
+      });
     expect(removed.status).toBe(200);
     expect(
       await ctx.prisma.pushSubscription.count({
         where: { endpoint: DESKTOP_ENDPOINT },
       }),
     ).toBe(1);
+  });
+
+  // Keep this last: the 302 is intentionally retryable, so the dispatcher
+  // retains the row in its in-memory pending queue. No later test should
+  // inherit that pending item.
+  it('treats a provider redirect as a failed send and never follows it', async () => {
+    const desktop = await loginAs(managerEmail);
+    expect(await subscribe(desktop.accessToken, DESKTOP_ENDPOINT)).toBe(200);
+    webpush.sendNotification.mockRejectedValueOnce(
+      Object.assign(new Error('redirect'), { statusCode: 302 }),
+    );
+
+    const employee = await loginAs(employeeEmail);
+    await stageReview(employee.accessToken);
+    await dispatch();
+
+    // Exactly one outbound attempt to the original provider endpoint.
+    expect(webpush.sendNotification).toHaveBeenCalledTimes(1);
+    expect(pushedEndpoints()).toEqual([DESKTOP_ENDPOINT]);
   });
 });

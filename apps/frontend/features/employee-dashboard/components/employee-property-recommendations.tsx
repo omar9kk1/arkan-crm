@@ -2,9 +2,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card } from '../../../components/ui/card';
 import { Button } from '../../../components/ui/button';
-import { listClients } from '../../../lib/api/clients-api';
+import { listClientRecommendationCandidates } from '../../../lib/api/clients-api';
 import { listProperties } from '../../../lib/api/properties-api';
-import type { ClientApiDto } from '../../../lib/api/client-types';
+import type { ClientRecommendationCandidateApiDto } from '../../../lib/api/client-types';
 import type { PropertyViewDto } from '../../../lib/api/property-types';
 import { parseStoredRequestData } from '../../employee-clients/components/request-wizard/client-request-model';
 import type { ClientType } from '../../employee-clients/components/request-wizard/client-request-model';
@@ -19,7 +19,7 @@ interface MatchReason {
 interface Recommendation {
   key: string;
   property: PropertyViewDto;
-  client: ClientApiDto;
+  client: ClientRecommendationCandidateApiDto;
   requestType: ClientType;
   reasons: MatchReason[];
   unknowns: string[];
@@ -46,7 +46,7 @@ function areaMatches(requestArea: string, property: PropertyViewDto): boolean {
 }
 
 function buildRecommendations(
-  clients: ClientApiDto[],
+  clients: ClientRecommendationCandidateApiDto[],
   properties: PropertyViewDto[],
 ): Recommendation[] {
   const availableProps = properties.filter((p) => p.status === 'AVAILABLE');
@@ -152,7 +152,7 @@ function formatPrice(value: string | null): string {
 }
 
 export function EmployeePropertyRecommendations() {
-  const [clients, setClients] = useState<ClientApiDto[]>([]);
+  const [clients, setClients] = useState<ClientRecommendationCandidateApiDto[]>([]);
   const [properties, setProperties] = useState<PropertyViewDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -163,7 +163,7 @@ export function EmployeePropertyRecommendations() {
     setError(null);
     try {
       const [cRes, pRes] = await Promise.all([
-        listClients(),
+        listClientRecommendationCandidates(),
         listProperties({ status: 'AVAILABLE', limit: 50 }),
       ]);
       setClients(cRes.items);

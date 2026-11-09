@@ -108,6 +108,9 @@ describe('Auth HTTP flow (Prisma test double)', () => {
         },
       ),
     },
+    managerCapability: {
+      findMany: jest.fn(async () => []),
+    },
     auditLog: { create: audit },
     // The real service serializes refresh/logout of one session lineage with a
     // transaction-scoped advisory lock.
@@ -117,6 +120,11 @@ describe('Auth HTTP flow (Prisma test double)', () => {
     ): Promise<unknown> => work(database),
   };
   beforeAll(async () => {
+    // This suite models the legacy Bearer flow. Local activation may set
+    // AUTH_COOKIE_MODE=cookie in .env, so pin the unit-test mode explicitly
+    // instead of letting the developer's local activation change this test.
+    process.env.AUTH_COOKIE_MODE = 'legacy';
+    process.env.COOKIE_SECURE = 'false';
     const passwordHash = await hashPassword('ChangeMe123!');
     for (const role of [Role.MANAGER, Role.EMPLOYEE]) {
       users.set(role, {
@@ -126,6 +134,7 @@ describe('Auth HTTP flow (Prisma test double)', () => {
         passwordHash,
         role,
         isActive: true,
+        authVersion: 0,
         createdAt: new Date(),
         updatedAt: new Date(),
         notifyEmployeeFollowUps: false,
@@ -212,7 +221,14 @@ describe('Auth HTTP flow (Prisma test double)', () => {
         .get('/auth/me')
         .set('Authorization', 'Bearer ' + tokens.accessToken)
         .expect(200);
-      expect(me.body.data).toEqual({ id: role, role });
+      expect(me.body.data).toEqual({
+        id: role,
+        role,
+        capabilities: {
+          approveProperties: false,
+          rejectProperties: false,
+        },
+      });
       expect(
         [...sessions.values()].some(
           (row) => row.tokenHash === hashRefreshToken(tokens.refreshToken),

@@ -72,10 +72,23 @@ export interface FollowUpSubjectDto {
   latest: FollowUpLatestDto | null;
 }
 
+export interface FollowUpSummaryApiDto {
+  total: number;
+  overdue: number;
+  today: number;
+  upcoming: number;
+  never: number;
+  tabs: Record<'all' | FollowUpTabApi, number>;
+}
+
 export interface FollowUpListDto {
   items: FollowUpSubjectDto[];
+  nextCursor: string | null;
+  /** Backward-compatible alias for `nextCursor !== null`. */
   truncated: boolean;
   generatedAt: string;
+  /** Full-scope counters; present on the first page only. */
+  summary?: FollowUpSummaryApiDto;
 }
 
 /**
@@ -91,8 +104,14 @@ export interface FollowUpSupervisionSubjectDto extends FollowUpSubjectDto {
 
 export interface FollowUpSupervisionListDto {
   items: FollowUpSupervisionSubjectDto[];
+  nextCursor: string | null;
+  /** Backward-compatible alias for `nextCursor !== null`. */
   truncated: boolean;
   generatedAt: string;
+  /** Full-scope counters (after the employee filter); first page only. */
+  summary?: FollowUpSummaryApiDto;
+  /** All responsible employees in the full scope; first page only. */
+  employees?: FollowUpResponsibleDto[];
 }
 
 /** The result of ONE manual manager reminder (sent or replayed, with cooldown). */

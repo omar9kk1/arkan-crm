@@ -2,6 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { ContactType, PropertyStatus, Role } from '@prisma/client';
 import type { AuthUser } from '@arkan/shared';
 import { PrismaService } from '../prisma/prisma.service';
+import { clientOwnershipWhere } from '../clients/client-policy';
+import { contactOwnershipWhere } from '../contacts/contact-policy';
+import { propertyVisibilityWhere } from '../properties/property-visibility';
+import {
+  isManager,
+  teamEmployeeProfileIds,
+  teamEmployeeUserIds,
+} from '../common/access/access-policy';
 import type {
   ManagerDashboardDto,
   ManagerDashboardPeriod,
@@ -180,6 +188,24 @@ export class DashboardService {
     const window = periodWindow(period, now);
     const periodRange = rangeFilter(window);
 
+    // OWNER is company-wide. MANAGER metrics are restricted to the employees
+    // currently assigned to that Manager (plus the Manager's own activity).
+    const managerScoped = isManager(viewer);
+    const scopedUserIds = managerScoped
+      ? await teamEmployeeUserIds(this.prisma, viewer)
+      : null;
+    const scopedProfileIds = managerScoped
+      ? await teamEmployeeProfileIds(this.prisma, viewer)
+      : null;
+    const propertyScope = propertyVisibilityWhere(viewer);
+    const clientScope = clientOwnershipWhere(viewer);
+    const contactScope = contactOwnershipWhere(viewer);
+    const employeeScope: { id?: { in: string[] } } =
+      managerScoped && scopedUserIds
+        ? { id: { in: scopedUserIds } }
+        : {};
+    const profileFilter = scopedProfileIds ?? undefined;
+
     const [
       propertyStatusRows,
       trashProperties,
@@ -200,32 +226,81 @@ export class DashboardService {
     ] = await Promise.all([
       this.prisma.property.groupBy({
         by: ['status'],
-        where: { deletedAt: null },
+        where: { ...propertyScope },
         _count: { _all: true },
       }),
-      this.prisma.property.count({ where: { deletedAt: { not: null } } }),
-      this.prisma.client.count(),
-      this.prisma.client.count({
-        where: periodRange ? { createdAt: periodRange } : {},
-      }),
-      // Official owner Contacts only. Property.proposedOwner is provisional
-      // JSON and is deliberately never counted here.
-      this.prisma.contact.count({ where: { type: ContactType.OWNER } }),
-      this.prisma.contact.count({
+      this.prisma.property.count({
         where: {
-          type: ContactType.OWNER,
+          deletedAt: { not: null },
+          ...(managerScoped
+            ? {
+                OR: [
+                  { createdByUserId: viewer.id },
+                  {
+                    createdByUser: {
+                      employee: { managerUserId: viewer.id },
+                    },
+                  },
+                ],
+              }
+            : {}),
+        },
+      }),
+      this.prisma.client.count({ where: { ...clientScope } }),
+      this.prisma.client.count({
+        where: {
+          ...clientScope,
           ...(periodRange ? { createdAt: periodRange } : {}),
         },
       }),
-      this.prisma.user.count({ where: { role: Role.EMPLOYEE } }),
+      // Official owner Contacts only. Property.proposedOwner is provisional
+      // JSON and is deliberately never counted here.
+      this.prisma.contact.count({
+        where: { type: ContactType.OWNER, ...contactScope },
+      }),
+      this.prisma.contact.count({
+        where: {
+          type: ContactType.OWNER,
+          ...contactScope,
+          ...(periodRange ? { createdAt: periodRange } : {}),
+        },
+      }),
       this.prisma.user.count({
-        where: { role: Role.EMPLOYEE, isActive: true },
+        where: { role: Role.EMPLOYEE, ...employeeScope },
+      }),
+      this.prisma.user.count({
+        where: { role: Role.EMPLOYEE, isActive: true, ...employeeScope },
       }),
       this.prisma.followUpSubject.count({
-        where: { active: true, nextDueAt: { lt: window.todayStart } },
+        where: {
+          active: true,
+          nextDueAt: { lt: window.todayStart },
+          ...(managerScoped
+            ? {
+                OR: [
+                  ...(profileFilter
+                    ? [{ responsibleId: { in: profileFilter } }]
+                    : []),
+                  { responsibleUserId: viewer.id },
+                ],
+              }
+            : {}),
+        },
       }),
       this.prisma.followUpEntry.count({
-        where: periodRange ? { createdAt: periodRange } : {},
+        where: {
+          ...(periodRange ? { createdAt: periodRange } : {}),
+          ...(managerScoped
+            ? {
+                OR: [
+                  ...(profileFilter
+                    ? [{ authorId: { in: profileFilter } }]
+                    : []),
+                  { authorUserId: viewer.id },
+                ],
+              }
+            : {}),
+        },
       }),
       this.prisma.notification.count({
         where: {
@@ -235,7 +310,17 @@ export class DashboardService {
         },
       }),
       this.prisma.deal.findMany({
-        where: periodRange ? { closedAt: periodRange } : {},
+        where: {
+          ...(periodRange ? { closedAt: periodRange } : {}),
+          ...(profileFilter
+            ? {
+                OR: [
+                  { propertyEmployeeId: { in: profileFilter } },
+                  { clientEmployeeId: { in: profileFilter } },
+                ],
+              }
+            : {}),
+        },
         select: {
           price: true,
           companyCommission: true,
@@ -245,7 +330,7 @@ export class DashboardService {
         },
       }),
       this.prisma.user.findMany({
-        where: { role: Role.EMPLOYEE, isActive: true },
+        where: { role: Role.EMPLOYEE, isActive: true, ...employeeScope },
         select: {
           id: true,
           name: true,
@@ -255,7 +340,9 @@ export class DashboardService {
       this.prisma.client.groupBy({
         by: ['responsibleEmployeeId'],
         where: {
-          responsibleEmployeeId: { not: null },
+          responsibleEmployeeId: profileFilter
+            ? { in: profileFilter }
+            : { not: null },
           ...(periodRange ? { createdAt: periodRange } : {}),
         },
         _count: { _all: true },
@@ -264,7 +351,9 @@ export class DashboardService {
         by: ['createdByUserId'],
         where: {
           deletedAt: null,
-          createdByUserId: { not: null },
+          ...(scopedUserIds
+            ? { createdByUserId: { in: scopedUserIds } }
+            : { createdByUserId: { not: null } }),
           ...(periodRange ? { createdAt: periodRange } : {}),
         },
         _count: { _all: true },
@@ -273,6 +362,9 @@ export class DashboardService {
         where: {
           action: { in: Object.keys(ACTION_LABELS) },
           ...(periodRange ? { createdAt: periodRange } : {}),
+          ...(managerScoped && scopedUserIds
+            ? { actorId: { in: [...scopedUserIds, viewer.id] } }
+            : {}),
         },
         orderBy: { createdAt: 'desc' },
         take: 3,

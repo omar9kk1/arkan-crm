@@ -19,7 +19,14 @@ import type {
 /** Relations loaded for every detail/list response. */
 export const propertyDetailInclude = {
   contact: true,
-  createdByUser: { select: { id: true, name: true, role: true } },
+  createdByUser: {
+    select: {
+      id: true,
+      name: true,
+      role: true,
+      employee: { select: { managerUserId: true } },
+    },
+  },
   deletedBy: { select: { id: true, name: true } },
   priorityHolder: { select: { id: true, name: true } },
   registrants: { select: { employeeUserId: true, status: true } },
@@ -69,7 +76,12 @@ export interface PropertySerializationSource {
     notes: string | null;
     responsibleUserId: string | null;
   } | null;
-  createdByUser: { id: string; name: string; role: Role } | null;
+  createdByUser: {
+    id: string;
+    name: string;
+    role: Role;
+    employee?: { managerUserId: string | null } | null;
+  } | null;
   priorityHolderUserId: string | null;
   priorityHolder: { id: string; name: string } | null;
   priorityDeadline: Date | null;
@@ -191,7 +203,9 @@ export function toPublicPropertyDto(
     version: source.version,
     deletedAt: source.deletedAt?.toISOString() ?? null,
     deletedByName:
-      viewer.role === Role.MANAGER ? (source.deletedBy?.name ?? null) : null,
+      viewer.role === Role.MANAGER || viewer.role === Role.OWNER
+        ? (source.deletedBy?.name ?? null)
+        : null,
     deletionReason: source.deletionReason,
     // Viewer-derived ownership flag.
     isMine: viewer.id === source.createdByUserId,
@@ -226,14 +240,23 @@ export function serializeProperty(
   viewer: AuthUser,
 ): PropertyViewDto {
   const base = toPublicPropertyDto(source, viewer);
+  const isOwner = viewer.role === Role.OWNER;
   const isManager = viewer.role === Role.MANAGER;
   const isCreator = source.createdByUserId === viewer.id;
-  if (!isManager && !isCreator) return base;
+  if (!isOwner && !isManager && !isCreator) return base;
 
   const contact = source.contact;
   const ownsContact =
     contact !== null && contact.responsibleUserId === viewer.id;
-  const canSeeContact = isManager || (isCreator && ownsContact);
+  // A Manager only sees private contact data for rows in their own team scope.
+  // Another team's approved property remains visible, but never its contact.
+  const managerTeamScope =
+    isManager &&
+    (isCreator ||
+      source.createdByUser?.employee?.managerUserId === viewer.id ||
+      source.createdByUser?.role === Role.OWNER);
+  const canSeeContact =
+    isOwner || managerTeamScope || (isCreator && ownsContact);
 
   const contactDto: ContactSummaryDto | null =
     canSeeContact && contact

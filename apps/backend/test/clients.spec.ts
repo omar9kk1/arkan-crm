@@ -72,7 +72,8 @@ interface ClientStatsShape {
   clientsWithoutProperty: number;
 }
 
-const CLIENT_DTO_KEYS = [
+/** Lightweight list rows intentionally omit the heavy collections. */
+const CLIENT_LIST_KEYS = [
   'id',
   'name',
   'phone',
@@ -86,9 +87,12 @@ const CLIENT_DTO_KEYS = [
   'createdAt',
   'updatedAt',
   'nextFollowUp',
-  'followUps',
-  'properties',
-  'propertyInterests',
+  'lastFollowUpAt',
+  'lastFollowUpOutcome',
+  'lastFollowUpNote',
+  'lastFollowUpEmployeeName',
+  'propertiesCount',
+  'propertyInterestsCount',
 ];
 
 // --- business-calendar helpers (mirrors the service's Saturday–Friday week) --
@@ -160,7 +164,7 @@ describeWithDatabase(
       const manager = await createUser(ctx.prisma, {
         email: 'manager@clients.local',
         name: 'مدير النظام',
-        role: Role.MANAGER,
+        role: Role.OWNER,
       });
       const employeeA = await createUser(ctx.prisma, {
         email: 'employee.a@clients.local',
@@ -175,11 +179,9 @@ describeWithDatabase(
       managerId = manager.id;
       employeeAId = employeeA.id;
       employeeBId = employeeB.id;
-      const profileA = await ctx.prisma.employeeProfile.create({
-        data: { userId: employeeA.id },
-      });
+      const profileA = await ctx.prisma.employeeProfile.upsert({ where: { userId: employeeA.id }, create: { userId: employeeA.id }, update: {} });
       profileAId = profileA.id;
-      await ctx.prisma.employeeProfile.create({ data: { userId: employeeB.id } });
+      await ctx.prisma.employeeProfile.upsert({ where: { userId: employeeB.id }, create: { userId: employeeB.id }, update: {} });
       managerToken = await login(ctx.app, manager.email);
       employeeAToken = await login(ctx.app, employeeA.email);
       employeeBToken = await login(ctx.app, employeeB.email);
@@ -410,7 +412,7 @@ describeWithDatabase(
       expect(all.status).toBe(200);
       const items = (all.body.data as { items: ClientDtoShape[] }).items;
       expect(items).toHaveLength(4);
-      expect(items.every((item) => CLIENT_DTO_KEYS.every((key) => key in item))).toBe(
+      expect(items.every((item) => CLIENT_LIST_KEYS.every((key) => key in item))).toBe(
         true,
       );
 
@@ -892,7 +894,7 @@ describeWithDatabase(
         .items[0];
       expect(firstListItem).toBeDefined();
       const keys = Object.keys(firstListItem as ClientDtoShape).sort();
-      expect(keys).toEqual([...CLIENT_DTO_KEYS].sort());
+      expect(keys).toEqual([...CLIENT_LIST_KEYS].sort());
     });
 
     it('auto-provisions the EmployeeProfile at REVIEW APPROVAL so an account created outside the employees flow OWNS the client it submitted', async () => {
@@ -900,6 +902,7 @@ describeWithDatabase(
         email: 'employee.orphan@clients.local',
         name: 'Employee Orphan',
         role: Role.EMPLOYEE,
+        createProfile: false,
       });
       const orphanToken = await login(ctx.app, orphan.email);
       const submitted = await api()
@@ -1121,7 +1124,13 @@ describeWithDatabase(
           relisted.items.filter((entry) => entry.name === 'عميل عقارين'),
         ).toHaveLength(1);
         expect(
-          relisted.items.find((entry) => entry.id === clientId)?.propertyInterests,
+          relisted.items.find((entry) => entry.id === clientId)?.id,
+        ).toBe(clientId);
+        const detail = await api()
+          .get(`/clients/${clientId}`)
+          .set(auth(employeeAToken));
+        expect(
+          (detail.body.data as ClientDtoShape).propertyInterests,
         ).toHaveLength(2);
       });
 
@@ -1271,7 +1280,7 @@ describeWithDatabase(
       const manager = await createUser(ctx.prisma, {
         email: 'manager@clientstats.local',
         name: 'مدير الإحصاءات',
-        role: Role.MANAGER,
+        role: Role.OWNER,
       });
       const employeeA = await createUser(ctx.prisma, {
         email: 'employee.a@clientstats.local',
@@ -1284,8 +1293,8 @@ describeWithDatabase(
         role: Role.EMPLOYEE,
       });
       managerId = manager.id;
-      await ctx.prisma.employeeProfile.create({ data: { userId: employeeA.id } });
-      await ctx.prisma.employeeProfile.create({ data: { userId: employeeB.id } });
+      await ctx.prisma.employeeProfile.upsert({ where: { userId: employeeA.id }, create: { userId: employeeA.id }, update: {} });
+      await ctx.prisma.employeeProfile.upsert({ where: { userId: employeeB.id }, create: { userId: employeeB.id }, update: {} });
       managerToken = await login(ctx.app, manager.email);
       employeeAToken = await login(ctx.app, employeeA.email);
       employeeBToken = await login(ctx.app, employeeB.email);

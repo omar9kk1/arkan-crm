@@ -20,6 +20,7 @@ describeWithDatabase('Owner approval lifecycle (provisional -> official)', () =>
   let ctx: TestContext;
   let managerId: string;
   let employeeAId: string;
+  let ownerToken: string;
   let managerToken: string;
   let employeeAToken: string;
   let employeeBToken: string;
@@ -68,8 +69,14 @@ describeWithDatabase('Owner approval lifecycle (provisional -> official)', () =>
       name: 'Employee B',
       role: Role.EMPLOYEE,
     });
+    const owner = await createUser(ctx.prisma, {
+      email: 'owner-lifecycle-owner@test.local',
+      name: 'Lifecycle Owner',
+      role: Role.OWNER,
+    });
     managerId = manager.id;
     employeeAId = a.id;
+    ownerToken = await login(ctx.app, owner.email);
     managerToken = await login(ctx.app, manager.email);
     employeeAToken = await login(ctx.app, a.email);
     employeeBToken = await login(ctx.app, b.email);
@@ -275,9 +282,11 @@ describeWithDatabase('Owner approval lifecycle (provisional -> official)', () =>
   });
 
   it('9. an existing approved owner is reused and owner history is preserved', async () => {
+    // OWNER-created properties are official immediately (the highest-authority
+    // bypass); MANAGER creations now require review.
     const managerCreated = await postProperty(
       ctx.app,
-      managerToken,
+      ownerToken,
       payload({ plotNumber: '8210', newContact: { type: 'OWNER', name: 'Existing Owner', phone: '60000011' } }),
       image,
     );
@@ -372,16 +381,16 @@ describeWithDatabase('Owner approval lifecycle (provisional -> official)', () =>
   it('12. Trash + permanent delete never delete the owner', async () => {
     const created = await postProperty(
       ctx.app,
-      managerToken,
+      ownerToken,
       payload({ plotNumber: '8215', newContact: { type: 'OWNER', name: 'Trash Owner', phone: '60000014' } }),
       image,
     );
     const ownerId = created.body.data.contactId as string;
     const id = created.body.data.id as string;
-    await api().post(`/properties/${id}/trash`).set(auth(managerToken)).send({});
+    await api().post(`/properties/${id}/trash`).set(auth(ownerToken)).send({});
     const deleted = await api()
       .delete(`/properties/${id}/permanent`)
-      .set(auth(managerToken))
+      .set(auth(ownerToken))
       .send({ confirmationCode: created.body.data.reference });
     expect(deleted.status).toBe(200);
     expect(

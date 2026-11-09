@@ -2,6 +2,7 @@
 import { usePathname } from 'next/navigation';
 import { LogoutButton } from '../../../features/auth/components/logout-button';
 import { NotificationBell } from '../../../features/notifications/components/notification-bell';
+import { useAuth } from '../../../features/auth/components/auth-provider';
 import styles from './manager-shell.module.css';
 
 /**
@@ -15,6 +16,9 @@ import styles from './manager-shell.module.css';
  */
 export function ManagerTopbar() {
   const pathname = usePathname();
+  const { user } = useAuth();
+  const roleLabel =
+    user?.role === 'OWNER' ? 'مالك النظام' : 'مدير النظام';
   const minimal = pathname?.startsWith('/manager/clients') ?? false;
   return (
     <header
@@ -31,7 +35,7 @@ export function ManagerTopbar() {
         </div>
       )}
       <div className={styles.account}>
-        <span className={styles.role}>مدير النظام</span>
+        <span className={styles.role}>{roleLabel}</span>
         <NotificationBell className={styles.notificationButton} />
         <LogoutButton iconOnly className={styles.notificationButton} />
       </div>

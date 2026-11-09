@@ -6,10 +6,13 @@ export function SettingsSectionCard({
   title,
   children,
   onSave,
+  readOnly = false,
 }: {
   title: string;
   children: ReactNode;
   onSave?: () => void;
+  /** Renders the fields disabled, without a save action. */
+  readOnly?: boolean;
 }) {
   const id = useId();
   return (
@@ -26,6 +29,10 @@ export function SettingsSectionCard({
           <div className={styles.fields}>{children}</div>
           <Button type="submit">حفظ التغييرات</Button>
         </form>
+      ) : readOnly ? (
+        <fieldset className={styles.readOnly} disabled>
+          {children}
+        </fieldset>
       ) : (
         children
       )}

@@ -9,7 +9,7 @@ export class UsersController {
   constructor(private readonly prisma: PrismaService) {}
 
   @Get('me/notification-preferences')
-  @Roles(Role.MANAGER)
+  @Roles(Role.OWNER, Role.MANAGER)
   async getMyNotificationPreferences(@Req() request: { user: { id: string } }) {
     const user = await this.prisma.user.findUnique({
       where: { id: request.user.id },
@@ -21,13 +21,16 @@ export class UsersController {
   }
 
   @Patch('me/notification-preferences')
-  @Roles(Role.MANAGER)
+  @Roles(Role.OWNER, Role.MANAGER)
   async updateMyNotificationPreferences(
     @Req() request: { user: { id: string } },
     @Body() body: UpdateManagerFollowUpNotificationsDto,
   ) {
     const user = await this.prisma.user.update({
-      where: { id: request.user.id, role: Role.MANAGER },
+      where: {
+        id: request.user.id,
+        role: { in: [Role.OWNER, Role.MANAGER] },
+      },
       data: { notifyEmployeeFollowUps: body.enabled },
       select: { notifyEmployeeFollowUps: true },
     });

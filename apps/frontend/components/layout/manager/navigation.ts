@@ -62,3 +62,21 @@ export const moreNavigation: ManagerNavItem[] = [
     href: '/manager/settings',
   },
 ];
+
+/**
+ * OWNER sees the same management route, but the navigation entry is deliberately
+ * worded as «المديرين» because that page is the account-management surface.
+ * MANAGER keeps the existing «الموظفون» wording.
+ */
+export function managerMoreNavigation(
+  role: string | undefined,
+): ManagerNavItem[] {
+  // Finance and Trash are OWNER-only surfaces: MANAGER must not see them.
+  if (role !== 'OWNER')
+    return moreNavigation.filter(
+      (item) => item.id !== 'finance' && item.id !== 'trash',
+    );
+  return moreNavigation.map((item) =>
+    item.id === 'employees' ? { ...item, label: 'المديرين' } : item,
+  );
+}

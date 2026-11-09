@@ -337,6 +337,16 @@ describeWithDatabase('Property images + EXCHANGE (storage, validation, mapping)'
       // column + the submission sequence row (existing rows are backfilled,
       // never deleted).
       '20261104160000_property_pa_numbering',
+      // Added by the OWNER/MANAGER/EMPLOYEE hierarchy: the appended OWNER
+      // role value.
+      '20261108090000_add_owner_role',
+      // Added by the hierarchy: session authVersion columns, the indexed
+      // EmployeeProfile.managerUserId assignment and the ManagerCapability
+      // table (additive only; existing rows keep their data).
+      '20261108090100_owner_hierarchy',
+      // Defense-in-depth session revocation: authVersion + refresh-token
+      // revocation triggers for any role change or deactivation.
+      '20261108090200_auth_revocation_triggers',
     ]);
   });
 });

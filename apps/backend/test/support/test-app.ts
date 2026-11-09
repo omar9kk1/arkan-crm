@@ -1,8 +1,9 @@
 import { INestApplication } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { Role } from '@arkan/shared';
 import type { User } from '@prisma/client';
+import { ManagerCapabilityType } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -19,9 +20,11 @@ import { NotificationsModule } from '../../src/notifications/notifications.modul
 import { FollowupsModule } from '../../src/followups/followups.module';
 import { DashboardModule } from '../../src/dashboard/dashboard.module';
 import { PushModule } from '../../src/push/push.module';
+import { UsersModule } from '../../src/users/users.module';
 import { FilesModule } from '../../src/files/files.module';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { configureApp } from '../../src/common/configure-app';
+import { configureCors } from '../../src/common/configure-cors';
 import { hashPassword } from '../../src/auth/password';
 
 export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
@@ -79,6 +82,7 @@ const TEST_PASSWORD = 'ChangeMe123!';
  */
 export async function createTestApp(options?: {
   storageRoot?: string;
+  env?: Record<string, string>;
 }): Promise<TestContext> {
   if (!TEST_DATABASE_URL)
     throw new Error('TEST_DATABASE_URL is not set; refusing to run writes.');
@@ -90,6 +94,11 @@ export async function createTestApp(options?: {
   process.env.JWT_ACCESS_TTL_SECONDS = '900';
   process.env.JWT_ISSUER = 'arkan-test';
   process.env.JWT_AUDIENCE = 'arkan-test';
+  // Default every test app to the existing legacy behavior. Individual suites
+  // opt into dual/cookie explicitly and never leak that mode to other suites.
+  process.env.AUTH_COOKIE_MODE = 'legacy';
+  process.env.COOKIE_SECURE = 'false';
+  Object.assign(process.env, options?.env ?? {});
   const storageRoot =
     options?.storageRoot ??
     (await mkdtemp(path.join(tmpdir(), 'arkan-api-test-')));
@@ -112,11 +121,13 @@ export async function createTestApp(options?: {
       FollowupsModule,
       DashboardModule,
       PushModule,
+      UsersModule,
     ],
   }).compile();
 
   const app = moduleRef.createNestApplication();
   configureApp(app);
+  configureCors(app, app.get(ConfigService));
   if (!process.env.TEST_VERBOSE) app.useLogger(false);
   await app.init();
 
@@ -147,9 +158,27 @@ export async function resetDatabase(prisma: PrismaService): Promise<void> {
 
 export async function createUser(
   prisma: PrismaService,
-  input: { email: string; name: string; role: Role },
+  input: {
+    email: string;
+    name: string;
+    role: Role;
+    /**
+     * Test-fixture team assignment. Omit to attach a new EMPLOYEE to the first
+     * active MANAGER (legacy suite compatibility); pass `null` explicitly to
+     * create a genuinely unassigned employee for hierarchy/scope tests.
+     */
+    managerUserId?: string | null;
+    /**
+     * Test-fixture review capability. Defaults to TRUE so legacy suites keep
+     * exercising the pre-hierarchy approve/reject flows; hierarchy tests pass
+     * `false` to assert the real default-deny policy.
+     */
+    grantReviewPermissions?: boolean;
+    /** Set false to model an account with no EmployeeProfile yet. */
+    createProfile?: boolean;
+  },
 ): Promise<User> {
-  return prisma.user.create({
+  const user = await prisma.user.create({
     data: {
       email: input.email.toLowerCase(),
       name: input.name,
@@ -157,6 +186,45 @@ export async function createUser(
       passwordHash: await hashPassword(TEST_PASSWORD),
     },
   });
+  if (input.role === Role.EMPLOYEE && input.createProfile !== false) {
+    let managerUserId: string | null;
+    if (Object.prototype.hasOwnProperty.call(input, 'managerUserId')) {
+      managerUserId = input.managerUserId ?? null;
+    } else {
+      const manager = await prisma.user.findFirst({
+        where: { role: Role.MANAGER, isActive: true },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      });
+      managerUserId = manager?.id ?? null;
+    }
+    await prisma.employeeProfile.upsert({
+      where: { userId: user.id },
+      create: { userId: user.id, managerUserId },
+      update: {},
+    });
+  }
+  if (
+    input.role === Role.MANAGER &&
+    input.grantReviewPermissions !== false
+  ) {
+    for (const capability of [
+      ManagerCapabilityType.PROPERTY_APPROVE,
+      ManagerCapabilityType.PROPERTY_REJECT,
+    ]) {
+      await prisma.managerCapability.upsert({
+        where: {
+          managerUserId_capability: {
+            managerUserId: user.id,
+            capability,
+          },
+        },
+        create: { managerUserId: user.id, capability, granted: true },
+        update: { granted: true },
+      });
+    }
+  }
+  return user;
 }
 
 export async function login(

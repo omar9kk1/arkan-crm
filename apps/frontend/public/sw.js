@@ -7,8 +7,6 @@
  * privacy-safe) and the in-app deep link, so no client data is duplicated
  * here and nothing sensitive is stored in the browser.
  */
-/* eslint-disable no-restricted-globals */
-
 self.addEventListener('install', () => {
   self.skipWaiting();
 });
@@ -47,7 +45,13 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const target = (event.notification.data && event.notification.data.url) || '/';
+  const raw = (event.notification.data && event.notification.data.url) || '/';
+  // Only same-origin app paths are ever opened. A notification payload can
+  // never turn a click into an open redirect to another origin.
+  const target =
+    typeof raw === 'string' && raw.startsWith('/') && !raw.startsWith('//')
+      ? raw
+      : '/';
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
       for (const client of windows) {

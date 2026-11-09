@@ -68,7 +68,7 @@ export class ClientReviewsController {
   }
 
   @Post(':id/approve')
-  @Roles(Role.MANAGER)
+  @Roles(Role.OWNER, Role.MANAGER)
   approve(
     @Req() request: { user: AuthUser },
     @Param('id', ParseUUIDPipe) id: string,
@@ -78,7 +78,7 @@ export class ClientReviewsController {
   }
 
   @Post(':id/reject')
-  @Roles(Role.MANAGER)
+  @Roles(Role.OWNER, Role.MANAGER)
   reject(
     @Req() request: { user: AuthUser },
     @Param('id', ParseUUIDPipe) id: string,
@@ -88,7 +88,7 @@ export class ClientReviewsController {
   }
 
   @Post(':id/request-changes')
-  @Roles(Role.MANAGER)
+  @Roles(Role.OWNER, Role.MANAGER)
   requestChanges(
     @Req() request: { user: AuthUser },
     @Param('id', ParseUUIDPipe) id: string,

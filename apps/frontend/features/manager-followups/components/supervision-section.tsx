@@ -6,33 +6,32 @@ import { SearchBar } from '../../../components/ui/search-bar';
 import { Button } from '../../../components/ui/button';
 import { Card } from '../../../components/ui/card';
 import { GlassSelect } from '../../../components/ui/glass-select';
-import { Toast } from '../../../components/ui/toast';
 import { PropertiesSegmentedTabs as SegmentedTabs } from '../../../components/ui/properties-segmented-tabs';
 import {
   TABS,
   entryCountLabel,
   subjectCountLabel,
   subjectDueLine,
-  subjectMatchesTab,
   type FollowUpTabId,
 } from '../../employee-followups/model';
 import {
   MANAGER_BUCKET_LABELS,
   MANAGER_STATUS_FILTERS,
-  employeeFilterOptions,
-  filterSupervision,
   groupSupervision,
-  supervisionMatchesEmployee,
+  type SupervisionGroup,
   type SupervisionStatusFilter,
 } from '../model';
 import {
   followUpApiMessage,
+  getFollowUpHistory,
   listSupervisionFollowUps,
 } from '../../../lib/api/followups-api';
 import type {
-  FollowUpSupervisionListDto,
+  FollowUpResponsibleDto,
+  FollowUpSummaryApiDto,
   FollowUpSupervisionSubjectDto,
 } from '../../../lib/api/followup-types';
+import { useDebouncedValue } from '../../../lib/use-debounced-value';
 import {
   FOLLOW_UP_ENTRY_QUERY_PARAM,
   FOLLOW_UP_SUBJECT_QUERY_PARAM,
@@ -69,18 +68,35 @@ export function SupervisionSection({
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const [feed, setFeed] = useState<FollowUpSupervisionListDto | null>(null);
+  const [rows, setRows] = useState<FollowUpSupervisionSubjectDto[]>([]);
+  const [summary, setSummary] = useState<FollowUpSummaryApiDto | null>(null);
+  const [employees, setEmployees] = useState<FollowUpResponsibleDto[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<FollowUpTabId>('all');
   const [status, setStatus] = useState<SupervisionStatusFilter>('all');
   const [employeeUserId, setEmployeeUserId] = useState('');
   const [query, setQuery] = useState('');
+  const debouncedQuery = useDebouncedValue(query, 300);
+  const cursorRef = useRef<string | null>(null);
+  const requestIdRef = useRef(0);
+  const busyRef = useRef(false);
+  const paramsRef = useRef({
+    search: debouncedQuery,
+    tab,
+    status,
+    employeeUserId,
+  });
+  paramsRef.current = { search: debouncedQuery, tab, status, employeeUserId };
   const [drawer, setDrawer] = useState<{
     key: string;
     tab: string;
     subjectId: string | null;
   } | null>(null);
+  /** Deep-link target that is not on the currently loaded page. */
+  const [focusGroup, setFocusGroup] = useState<SupervisionGroup | null>(null);
   // The exact target a follow-up deep link focused (the entry highlight in
   // the drawer's history tab); cleared as soon as the drawer is closed.
   const [focus, setFocus] = useState<{
@@ -90,36 +106,88 @@ export function SupervisionSection({
   // Committed reminder results (subject → sentAt) applied on top of the
   // feed, so «آخر تذكير» flips even before the next full refresh.
   const [reminded, setReminded] = useState<Record<string, string>>({});
-  const [notice, setNotice] = useState('');
   const handleReminded = useCallback((subjectId: string, sentAt: string) => {
     setReminded((previous) => ({ ...previous, [subjectId]: sentAt }));
   }, []);
 
   const load = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
+    busyRef.current = true;
     setLoading(true);
+    setLoadingMore(false);
     setError(null);
+    setRows([]);
+    setNextCursor(null);
+    cursorRef.current = null;
     try {
-      const data = await listSupervisionFollowUps();
-      setFeed(data);
-      if (data.truncated)
-        setNotice(
-          'عدد المتابعات كبير جدًا والقائمة مقتطعة عند أول 1000 موضوع.',
-        );
+      const data = await listSupervisionFollowUps({
+        search: debouncedQuery.trim() || undefined,
+        tab,
+        status,
+        employeeUserId: employeeUserId || undefined,
+        limit: 50,
+      });
+      if (requestId !== requestIdRef.current) return;
+      setRows(data.items);
+      setSummary(data.summary ?? null);
+      if (data.employees) setEmployees(data.employees);
+      setNextCursor(data.nextCursor);
+      cursorRef.current = data.nextCursor;
     } catch (cause) {
+      if (requestId !== requestIdRef.current) return;
       setError(
         followUpApiMessage(
           cause,
-          'تعذر تحميل متابعات الموظفين. حاول مرة أخرى.',
+          'تعذّر تحميل متابعات الفريق. حاول مرة أخرى.',
         ),
       );
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+        busyRef.current = false;
+      }
+    }
+  }, [debouncedQuery, tab, status, employeeUserId]);
+
+  const loadMore = useCallback(async () => {
+    const cursor = cursorRef.current;
+    if (!cursor || busyRef.current) return;
+    const requestId = requestIdRef.current;
+    const params = paramsRef.current;
+    busyRef.current = true;
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const data = await listSupervisionFollowUps({
+        search: params.search.trim() || undefined,
+        tab: params.tab,
+        status: params.status,
+        employeeUserId: params.employeeUserId || undefined,
+        cursor,
+        limit: 50,
+      });
+      if (requestId !== requestIdRef.current) return;
+      setRows((previous) => {
+        const seen = new Set(previous.map((subject) => subject.id));
+        return [
+          ...previous,
+          ...data.items.filter((subject) => !seen.has(subject.id)),
+        ];
+      });
+      setNextCursor(data.nextCursor);
+      cursorRef.current = data.nextCursor;
+    } catch (cause) {
+      if (requestId !== requestIdRef.current) return;
+      setError(
+        followUpApiMessage(cause, 'تعذّر تحميل المزيد من متابعات الفريق.'),
+      );
+    } finally {
+      if (requestId === requestIdRef.current) {
+        setLoadingMore(false);
+        busyRef.current = false;
+      }
     }
   }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
 
   // Host-shell refresh counter → reload the feed.
   const firstRefreshSignal = useRef(refreshSignal);
@@ -132,57 +200,38 @@ export function SupervisionSection({
 
   const items: FollowUpSupervisionSubjectDto[] = useMemo(
     () =>
-      (feed?.items ?? []).map((item) =>
+      rows.map((item) =>
         reminded[item.id]
           ? { ...item, lastReminderAt: reminded[item.id] ?? null }
           : item,
       ),
-    [feed, reminded],
+    [rows, reminded],
   );
 
   // The EMPLOYEE filter FIRST — the stats and the tab counts are computed
   // over employee-filtered subjects (the requirements' exact accounting).
-  const employeeFiltered = useMemo(
-    () =>
-      items.filter((item) => supervisionMatchesEmployee(item, employeeUserId)),
-    [items, employeeUserId],
-  );
-  const employeeOptions = useMemo(() => employeeFilterOptions(items), [items]);
+  const employeeOptions = employees;
 
   const tabItems = useMemo(
     () =>
       TABS.map((item) => ({
         ...item,
-        count:
-          item.id === 'all'
-            ? employeeFiltered.length
-            : employeeFiltered.filter((subject) =>
-                subjectMatchesTab(subject, item.id),
-              ).length,
+        count: summary?.tabs[item.id] ?? 0,
       })),
-    [employeeFiltered],
+    [summary],
   );
 
   const counts = useMemo(
     () => ({
-      total: employeeFiltered.length,
-      overdue: employeeFiltered.filter(
-        (subject) => subject.bucket === 'OVERDUE',
-      ).length,
-      today: employeeFiltered.filter((subject) => subject.bucket === 'TODAY')
-        .length,
-      upcoming: employeeFiltered.filter(
-        (subject) => subject.bucket === 'UPCOMING',
-      ).length,
+      total: summary?.total ?? 0,
+      overdue: summary?.overdue ?? 0,
+      today: summary?.today ?? 0,
+      upcoming: summary?.upcoming ?? 0,
     }),
-    [employeeFiltered],
+    [summary],
   );
 
-  const filtered = useMemo(
-    () => filterSupervision(items, status, employeeUserId, query),
-    [items, status, employeeUserId, query],
-  );
-  const groups = useMemo(() => groupSupervision(filtered), [filtered]);
+  const groups = useMemo(() => groupSupervision(items), [items]);
 
   // Notification deep link `?follow-up=<subjectId>[&follow-up-entry=<id>]` —
   // the same transient contract as the personal board: open on «سجل
@@ -213,13 +262,13 @@ export function SupervisionSection({
     const group = allGroups.find((candidate) =>
       candidate.subjects.some((subject) => subject.id === focusSubjectId),
     );
+    const restoredTab =
+      focusTab === 'record' ||
+      focusTab === 'history' ||
+      focusTab === 'associations'
+        ? focusTab
+        : 'history';
     if (group) {
-      const restoredTab =
-        focusTab === 'record' ||
-        focusTab === 'history' ||
-        focusTab === 'associations'
-          ? focusTab
-          : 'history';
       setDrawer({
         key: group.key,
         tab: restoredTab,
@@ -227,9 +276,29 @@ export function SupervisionSection({
       });
       setFocus({ subjectId: focusSubjectId, entryId: focusEntryId || null });
     } else {
-      setNotice(
-        'المتابعة المطلوبة غير موجودة أو غير متاحة في متابعات الموظفين.',
-      );
+      // Beyond the loaded page: fetch exactly that authorized subject.
+      void getFollowUpHistory(focusSubjectId)
+        .then((data) => {
+          const subject: FollowUpSupervisionSubjectDto = {
+            ...data.subject,
+            responsible:
+              data.subject.responsible ?? { userId: '', name: '' },
+            lastReminderAt: null,
+          };
+          const fallback = groupSupervision([subject])[0];
+          if (!fallback) return;
+          setFocusGroup(fallback);
+          setDrawer({
+            key: fallback.key,
+            tab: restoredTab,
+            subjectId: focusSubjectId,
+          });
+          setFocus({
+            subjectId: focusSubjectId,
+            entryId: focusEntryId || null,
+          });
+        })
+        .catch(() => undefined);
     }
     const params = new URLSearchParams(searchParams);
     params.delete(FOLLOW_UP_SUBJECT_QUERY_PARAM);
@@ -252,9 +321,10 @@ export function SupervisionSection({
   const drawerGroup =
     drawer === null
       ? null
-      : (allGroups.find((group) => group.key === drawer.key) ?? null);
+      : (allGroups.find((group) => group.key === drawer.key) ??
+        (focusGroup?.key === drawer.key ? focusGroup : null));
 
-  const busy = loading && !feed;
+  const busy = loading && rows.length === 0;
 
   return (
     <>
@@ -263,14 +333,14 @@ export function SupervisionSection({
           جارٍ تحميل متابعات الموظفين…
         </p>
       )}
-      {!busy && error && (
+      {!busy && error && rows.length === 0 && (
         <Card>
           <p className={styles.errorText}>{error}</p>
           <Button onClick={() => void load()}>إعادة المحاولة</Button>
         </Card>
       )}
 
-      {!busy && !error && (
+      {!busy && (!error || rows.length > 0) && (
         <>
           {/* The supervision stats: the manager's OWN bucket wording —
               «متأخرة / متابعة اليوم / قادمة», never «مستحقة». */}
@@ -372,6 +442,20 @@ export function SupervisionSection({
             )}
           </div>
 
+          {nextCursor && !loading && (
+            <p className={styles.state}>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => void loadMore()}
+                disabled={loadingMore}
+                aria-busy={loadingMore}
+              >
+                {loadingMore ? 'جارٍ التحميل…' : 'تحميل المزيد'}
+              </Button>
+            </p>
+          )}
+
           {drawer && drawerGroup && (
             <EmployeeFollowUpDrawer
               key={drawerGroup.key}
@@ -396,13 +480,12 @@ export function SupervisionSection({
               onClose={() => {
                 setDrawer(null);
                 setFocus(null);
+                setFocusGroup(null);
               }}
             />
           )}
         </>
       )}
-
-      <Toast message={notice} onDismiss={() => setNotice('')} />
     </>
   );
 }

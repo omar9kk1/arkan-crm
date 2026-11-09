@@ -10,6 +10,14 @@ datasource db {
 enum Role {
   MANAGER
   EMPLOYEE
+  OWNER
+}
+
+/// Per-Manager review capabilities. Absence of a row means NOT granted; the
+/// OWNER can independently grant or revoke each capability.
+enum ManagerCapabilityType {
+  PROPERTY_APPROVE
+  PROPERTY_REJECT
 }
 
 enum PropertyStatus {
@@ -145,9 +153,17 @@ model User {
   name                    String
   role                    Role                      @default(EMPLOYEE)
   isActive                Boolean                   @default(true)
+  /// Bumped on role changes and deactivation. Access tokens carry the issued
+  /// version; refresh tokens compare it to the live user row. A mismatch means
+  /// every pre-change session is permanently invalid (fresh login required).
+  authVersion             Int                       @default(0)
   createdAt               DateTime                  @default(now())
   updatedAt               DateTime                  @updatedAt
   employee                EmployeeProfile?
+  /// Employees currently assigned to this Manager. Reassigning changes future
+  /// team visibility only; historical rows keep their creator/user ids.
+  managedEmployees        EmployeeProfile[]         @relation("ManagerEmployees")
+  managerCapabilities     ManagerCapability[]
   refreshTokens           RefreshToken[]
   pushSubscriptions       PushSubscription[]
   notifications           Notification[]
@@ -187,12 +203,16 @@ model User {
 }
 
 model RefreshToken {
-  id        String    @id @default(uuid()) @db.Uuid
-  userId    String    @db.Uuid
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tokenHash String    @unique
-  expiresAt DateTime
-  revokedAt DateTime?
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @db.Uuid
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  /// User.authVersion at issue time. Refresh is refused (and the lineage
+  /// revoked) when it no longer matches, so role changes cannot be laundered
+  /// through an old refresh token.
+  authVersion Int       @default(0)
   createdAt DateTime  @default(now())
   // Stable "login family" id. A refresh ROTATES the token row, so the row id
   // alone cannot identify a device; this lineage survives every rotation and
@@ -231,11 +251,16 @@ model EmployeeProfile {
   id                 String               @id @default(uuid()) @db.Uuid
   userId             String               @unique @db.Uuid
   user               User                 @relation(fields: [userId], references: [id], onDelete: Restrict)
+  /// Current Manager assignment. NULL = unassigned (visible to OWNER only).
+  /// Transfers update this single row; no historical row is deleted.
+  managerUserId      String?              @db.Uuid
+  manager            User?                @relation("ManagerEmployees", fields: [managerUserId], references: [id], onDelete: SetNull)
   phone              String?
   hiredAt            DateTime?
   baseSalary         Decimal?             @db.Decimal(14, 2)
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
+  @@index([managerUserId])
   createdClients     Client[]             @relation("ClientCreator")
   responsibleClients Client[]             @relation("ClientResponsible")
   createdOwners      Owner[]              @relation("OwnerCreator")
@@ -250,6 +275,22 @@ model EmployeeProfile {
   attendance         AttendanceRecord[]
   followUpSubjects   FollowUpSubject[]
   followUpEntries    FollowUpEntry[]
+}
+
+/// One capability grant/revocation for one Manager. Default is absence = false.
+/// Authorization always reads this table live; capabilities are never trusted
+/// from a client payload or a JWT claim.
+model ManagerCapability {
+  id            String                @id @default(uuid()) @db.Uuid
+  managerUserId String                @db.Uuid
+  manager       User                  @relation(fields: [managerUserId], references: [id], onDelete: Cascade)
+  capability    ManagerCapabilityType
+  granted       Boolean               @default(false)
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  @@unique([managerUserId, capability])
+  @@index([managerUserId, granted])
 }
 
 model Client {
@@ -289,6 +330,8 @@ model Client {
   @@index([responsibleEmployeeId])
   @@index([phone])
   @@index([createdByUserId])
+  @@index([createdById])
+  @@index([createdAt])
 }
 
 model Owner {
@@ -380,6 +423,7 @@ model Property {
   @@index([contactId])
   @@index([createdByUserId])
   @@index([deletedAt])
+  @@index([createdAt])
   @@index([governorate, district])
   // Indexed prefix lookup for the property code (`A-000123`): the pattern
   // operator lets a `LIKE 'A-0001%'` search use the index instead of a scan.
@@ -602,6 +646,7 @@ model PropertyApprovalRequest {
   duplicateCandidateIds Json?
 
   @@index([status, createdAt])
+  @@index([propertyId, createdAt])
 }
 
 model PropertyRegistrant {
@@ -646,6 +691,7 @@ model FollowUp {
   notifications Notification[]
 
   @@index([employeeId, status, dueAt])
+  @@index([clientId, status, dueAt])
 }
 
 /**
@@ -746,6 +792,7 @@ model FollowUpSubject {
 
   @@index([responsibleId, active, nextDueAt])
   @@index([responsibleUserId, active, nextDueAt])
+  @@index([responsibleUserId, nextDueAt])
   @@index([active, kind])
 }
 
@@ -839,6 +886,9 @@ model Deal {
 
   @@index([propertyId])
   @@index([clientId])
+  @@index([closedAt])
+  @@index([propertyEmployeeId])
+  @@index([clientEmployeeId])
 }
 
 model Commission {
@@ -995,6 +1045,7 @@ model Notification {
   // the per-recipient event deduplication guarantee.
   @@unique([userId, eventKey])
   @@index([userId, readAt, createdAt])
+  @@index([userId, createdAt])
 }
 
 model AuditLog {
@@ -1010,6 +1061,7 @@ model AuditLog {
 
   @@index([entityType, entityId])
   @@index([actorId, createdAt])
+  @@index([createdAt])
 }
 
 model FileAsset {

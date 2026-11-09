@@ -37,7 +37,12 @@ export class ClientsController {
     return this.clients.list(request.user, query);
   }
 
-  // Declared before ':id' so the static segment always wins the route match.
+  // Declared before ':id' so static segments always win the route match.
+  @Get('recommendation-candidates')
+  recommendationCandidates(@Req() request: { user: AuthUser }) {
+    return this.clients.recommendationCandidates(request.user);
+  }
+
   @Get('stats')
   stats(@Req() request: { user: AuthUser }) {
     return this.clients.stats(request.user);

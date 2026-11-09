@@ -88,12 +88,8 @@ describeWithDatabase('Employee client edit + manager notifications', () => {
     employeeAName = employeeA.name;
     employeeAId = employeeA.id;
     employeeBId = employeeB.id;
-    await ctx.prisma.employeeProfile.create({
-      data: { userId: employeeA.id },
-    });
-    await ctx.prisma.employeeProfile.create({
-      data: { userId: employeeB.id },
-    });
+    await ctx.prisma.employeeProfile.upsert({ where: { userId: employeeA.id }, create: { userId: employeeA.id }, update: {} });
+    await ctx.prisma.employeeProfile.upsert({ where: { userId: employeeB.id }, create: { userId: employeeB.id }, update: {} });
     managerToken = await login(ctx.app, manager.email);
     employeeAToken = await login(ctx.app, employeeA.email);
   });

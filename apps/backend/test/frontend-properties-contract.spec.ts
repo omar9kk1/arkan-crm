@@ -188,7 +188,13 @@ describeWithDatabase('Phase 4A frontend API contract', () => {
       password: PASSWORD,
     });
     expect(session.user.role).toBe('EMPLOYEE');
-    expect(session.accessToken).toBeTruthy();
+    // The session object exposes only the user; the legacy credentials live in
+    // the dedicated storage entry, never on the returned object.
+    const stored = JSON.parse(
+      sessionStorage.getItem('arkan.auth.v1') ?? '{}',
+    ) as { accessToken?: string; refreshToken?: string };
+    expect(stored.accessToken).toBeTruthy();
+    expect(stored.refreshToken).toBeTruthy();
   });
 
   it('rejects an unauthenticated request with the Arabic 401 message', async () => {

@@ -1,8 +1,14 @@
+'use client';
+
 import { Brand } from '../brand';
 import { ManagerNavItem } from './manager-nav-item';
-import { primaryNavigation, moreNavigation } from './navigation';
+import { primaryNavigation, managerMoreNavigation } from './navigation';
+import { useAuth } from '../../../features/auth/components/auth-provider';
 import styles from './manager-shell.module.css';
+
 export function ManagerSidebar() {
+  const { user } = useAuth();
+  const moreItems = managerMoreNavigation(user?.role);
   return (
     <aside className={styles.sidebar}>
       <div className={styles.brand}>
@@ -15,7 +21,7 @@ export function ManagerSidebar() {
           <ManagerNavItem key={item.id} item={item} />
         ))}
         <p className={styles.groupLabel}>الإدارة والمتابعة</p>
-        {moreNavigation.map((item) => (
+        {moreItems.map((item) => (
           <ManagerNavItem key={item.id} item={item} />
         ))}
       </nav>

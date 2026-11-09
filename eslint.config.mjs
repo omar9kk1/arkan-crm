@@ -15,6 +15,33 @@ export default tseslint.config(
   prettier,
   { files: ['**/*.cjs'], languageOptions: { globals: { module: 'readonly' } } },
   {
+    // The public service worker runs in the service-worker global scope.
+    files: ['apps/frontend/public/*.js'],
+    languageOptions: {
+      globals: {
+        self: 'readonly',
+        clients: 'readonly',
+        caches: 'readonly',
+        registration: 'readonly',
+      },
+    },
+  },
+  {
+    // Node build tooling for the CSP hash pipeline.
+    files: ['apps/frontend/scripts/*.mjs'],
+    languageOptions: {
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+        Buffer: 'readonly',
+        URL: 'readonly',
+        fetch: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+      },
+    },
+  },
+  {
     rules: {
       '@typescript-eslint/no-unused-vars': [
         'error',

@@ -19,10 +19,12 @@ export function LogoutButton({
     setBusy(true);
     try {
       await logout();
-    } catch {
-      /* Local tokens are cleared even if the API is unreachable. */
-    } finally {
       router.replace('/login');
+    } catch {
+      // In cookie mode the HttpOnly session remains if the server cannot
+      // confirm logout. Stay on the page so the user can retry instead of
+      // bouncing between /login and the authenticated shell.
+    } finally {
       setBusy(false);
     }
   };

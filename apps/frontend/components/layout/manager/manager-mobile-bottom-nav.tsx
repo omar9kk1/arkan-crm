@@ -3,9 +3,12 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from '../../ui/button';
 import { Icon } from '../../ui/icon';
 import { ManagerNavItem } from './manager-nav-item';
-import { primaryNavigation, moreNavigation } from './navigation';
+import { primaryNavigation, managerMoreNavigation } from './navigation';
+import { useAuth } from '../../../features/auth/components/auth-provider';
 import styles from './manager-shell.module.css';
 export function ManagerMobileBottomNav() {
+  const { user } = useAuth();
+  const moreItems = managerMoreNavigation(user?.role);
   const dialog = useRef<HTMLDialogElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -84,7 +87,7 @@ export function ManagerMobileBottomNav() {
             </Button>
           </header>
           <nav aria-label="أقسام المدير الإضافية" className={styles.moreItems}>
-            {moreNavigation.map((item) => (
+            {moreItems.map((item) => (
               <ManagerNavItem key={item.id} item={item} />
             ))}
           </nav>

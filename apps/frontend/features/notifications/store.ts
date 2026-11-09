@@ -72,14 +72,34 @@ function getServerSnapshot(): NotificationFeed {
   return EMPTY;
 }
 
+/**
+ * Hidden tabs do no network work: the 15s poll, focus and visibility events
+ * all re-read only while the page is actually visible. A background tab
+ * therefore stops generating notification list/count requests until the user
+ * returns, and re-syncs immediately on return.
+ */
+function isPageVisible(): boolean {
+  return typeof document === 'undefined' || document.visibilityState === 'visible';
+}
+
+function onVisibilityChange(): void {
+  if (isPageVisible()) void refresh();
+}
+
 function startTimer(): void {
   if (timer !== null) return;
-  timer = window.setInterval(() => void refresh(), NOTIFICATION_POLL_MS);
+  timer = window.setInterval(() => {
+    if (isPageVisible()) void refresh();
+  }, NOTIFICATION_POLL_MS);
+  document.addEventListener('visibilitychange', onVisibilityChange);
+  window.addEventListener('focus', onVisibilityChange);
 }
 
 function stopTimer(): void {
   if (timer === null) return;
   window.clearInterval(timer);
+  document.removeEventListener('visibilitychange', onVisibilityChange);
+  window.removeEventListener('focus', onVisibilityChange);
   timer = null;
 }
 
@@ -89,8 +109,9 @@ function subscribe(listener: () => void): () => void {
   if (refCount === 1) {
     startTimer();
     // A remount with an unchanged identity also re-reads once, so a page never
-    // shows rows that another tab changed while it was unmounted.
-    void refresh();
+    // shows rows that another tab changed while it was unmounted. Hidden tabs
+    // wait for the visibility event instead of polling in the background.
+    if (isPageVisible()) void refresh();
   }
   return () => {
     listeners.delete(listener);
@@ -160,7 +181,7 @@ export function bindNotificationUser(userId: string | null): void {
     status: userId ? 'loading' : 'idle',
     loadingMore: false,
   });
-  if (userId) void refresh();
+  if (userId && isPageVisible()) void refresh();
 }
 
 /** Optimistically marks one row read, then persists; a failure re-syncs. */

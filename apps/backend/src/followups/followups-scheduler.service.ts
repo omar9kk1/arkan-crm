@@ -131,7 +131,12 @@ export class FollowUpSchedulerService implements OnModuleInit, OnModuleDestroy {
         cycle: true,
         employeeWarnedCycle: true,
         managerEscalatedCycle: true,
-        responsible: { select: { user: { select: { id: true, name: true, isActive: true } } } },
+        responsible: {
+          select: {
+            managerUserId: true,
+            user: { select: { id: true, name: true, isActive: true } },
+          },
+        },
         property: {
           select: {
             id: true,
@@ -145,10 +150,17 @@ export class FollowUpSchedulerService implements OnModuleInit, OnModuleDestroy {
     });
     if (subjects.length === 0) return;
 
-    const managers = await this.prisma.user.findMany({
-      where: { role: Role.MANAGER, isActive: true },
-      select: { id: true },
-    });
+    const [owners, managers] = await Promise.all([
+      this.prisma.user.findMany({
+        where: { role: Role.OWNER, isActive: true },
+        select: { id: true },
+      }),
+      this.prisma.user.findMany({
+        where: { role: Role.MANAGER, isActive: true },
+        select: { id: true },
+      }),
+    ]);
+    const managerIds = new Set(managers.map((manager) => manager.id));
 
     const drafts: NotificationDraft[] = [];
     const warnFlags: Array<{ id: string; cycle: number }> = [];
@@ -198,9 +210,13 @@ export class FollowUpSchedulerService implements OnModuleInit, OnModuleDestroy {
         warnFlags.push({ id: subject.id, cycle: subject.cycle });
       }
       if (decision.escalateManager) {
-        for (const manager of managers) {
+        const recipientIds = new Set(owners.map((owner) => owner.id));
+        const managerUserId = subject.responsible?.managerUserId;
+        if (managerUserId && managerIds.has(managerUserId))
+          recipientIds.add(managerUserId);
+        for (const userId of recipientIds) {
           drafts.push({
-            userId: manager.id,
+            userId,
             type: 'FOLLOWUP_MANAGER_ESCALATION',
             title: FOLLOWUP_EVENT_TITLES.FOLLOWUP_MANAGER_ESCALATION,
             body: followUpManagerBody({

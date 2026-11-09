@@ -1,13 +1,13 @@
 import { Module } from '@nestjs/common';
 import { EmployeesController } from './employees.controller';
+import { ManagersController } from './managers.controller';
 import { EmployeesService } from './employees.service';
+import { OwnerPromotionService } from './owner-promotion.service';
 
-// The real employee directory: a manager-only HTTP surface over EMPLOYEE-role
-// `User` accounts, their persisted `EmployeeProfile`, and their property
-// statistics linked through `Property.createdByUserId`.
+// OWNER account management + MANAGER read-only team directory.
 @Module({
-  controllers: [EmployeesController],
-  providers: [EmployeesService],
-  exports: [EmployeesService],
+  controllers: [EmployeesController, ManagersController],
+  providers: [EmployeesService, OwnerPromotionService],
+  exports: [EmployeesService, OwnerPromotionService],
 })
 export class EmployeesModule {}

@@ -87,8 +87,58 @@ export interface ClientPropertyInterestDto {
   createdAt: string;
 }
 
+/**
+ * Lightweight row for `GET /clients`. It intentionally carries NO follow-up,
+ * deal or interest collections; those are loaded by `GET /clients/:id` when
+ * the details drawer opens. The scalar summaries below are enough for the
+ * cards, tabs and classifications.
+ */
+export interface ClientListItemDto {
+  id: string;
+  name: string;
+  phone: string;
+  notes: string;
+  source: string;
+  status: string;
+  requestData: string | null;
+  responsibleUserId: string | null;
+  responsibleEmployeeName: string | null;
+  createdByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** Earliest pending follow-up due date (YYYY-MM-DD). */
+  nextFollowUp: string | null;
+  /** Newest logged follow-up, flattened for the card summary. */
+  lastFollowUpAt: string | null;
+  lastFollowUpOutcome: string;
+  lastFollowUpNote: string;
+  lastFollowUpEmployeeName: string | null;
+  /** Deal-linked property count (the card classification uses presence). */
+  propertiesCount: number;
+  /** Recorded `ClientPropertyInterest` count. */
+  propertyInterestsCount: number;
+}
+
 export interface ClientListDto {
-  items: ClientDto[];
+  items: ClientListItemDto[];
+  /** Pass back as `cursor` to fetch the next page; null on the last page. */
+  nextCursor: string | null;
+}
+
+/**
+ * Minimal candidate projection for the employee property-recommendation
+ * matcher. Only clients with a structured request document can participate.
+ * No phone/notes/relations are exposed, and the response is not limited to the
+ * client-list page size.
+ */
+export interface ClientRecommendationCandidateDto {
+  id: string;
+  name: string;
+  requestData: string | null;
+}
+
+export interface ClientRecommendationCandidateListDto {
+  items: ClientRecommendationCandidateDto[];
 }
 
 /**

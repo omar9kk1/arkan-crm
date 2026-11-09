@@ -41,9 +41,7 @@ describeWithDatabase('Unreadable client-name corruption guard', () => {
       name: 'موظف حارس الأسماء',
       role: Role.EMPLOYEE,
     });
-    await ctx.prisma.employeeProfile.create({
-      data: { userId: employee.id },
-    });
+    await ctx.prisma.employeeProfile.upsert({ where: { userId: employee.id }, create: { userId: employee.id }, update: {} });
     managerToken = await login(ctx.app, manager.email);
     employeeToken = await login(ctx.app, employee.email);
   });

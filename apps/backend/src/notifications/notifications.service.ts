@@ -5,6 +5,11 @@ import type { AuthUser } from '@arkan/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { resolveLimit } from '../common/pagination';
 import { propertyVisibilityWhere } from '../properties/property-visibility';
+import {
+  isManagement,
+  reviewNotificationRecipientIds,
+  reviewNotificationRecipientIdsForUser,
+} from '../common/access/access-policy';
 import type { ListNotificationsQueryDto } from './dto/list-notifications.query';
 import {
   PROPERTY_EVENT_TITLES,
@@ -169,10 +174,12 @@ export class NotificationsService {
     tx: Prisma.TransactionClient,
     context: PropertyEventContext,
   ): Promise<void> {
-    const managers = await this.activeUserIds(tx, Role.MANAGER);
+    const recipients = context.creatorId
+      ? await reviewNotificationRecipientIdsForUser(tx, context.creatorId)
+      : [];
     await this.deliver(
       tx,
-      managers.map((userId) =>
+      recipients.map((userId) =>
         this.propertyDraft(userId, context, {
           type: 'PROPERTY_SUBMITTED',
           title: PROPERTY_EVENT_TITLES.SUBMITTED,
@@ -187,7 +194,9 @@ export class NotificationsService {
     tx: Prisma.TransactionClient,
     context: PropertyEventContext,
   ): Promise<void> {
-    const managers = await this.activeUserIds(tx, Role.MANAGER);
+    const recipients = context.creatorId
+      ? await reviewNotificationRecipientIdsForUser(tx, context.creatorId)
+      : [];
     // An EDITED property that was already in the program is announced with the
     // fields that really changed, so the manager can decide with the facts. A
     // property that enters the program for the first time keeps the plain
@@ -195,7 +204,7 @@ export class NotificationsService {
     const isUpdate = context.submissionKind === 'UPDATED';
     await this.deliver(
       tx,
-      managers.map((userId) =>
+      recipients.map((userId) =>
         this.propertyDraft(userId, context, {
           type: 'PROPERTY_RESUBMITTED',
           title: isUpdate
@@ -342,7 +351,9 @@ export class NotificationsService {
       editedAt: Date;
     },
   ): Promise<void> {
-    const managers = await this.activeUserIds(tx, Role.MANAGER);
+    const recipients = context.creatorId
+      ? await reviewNotificationRecipientIdsForUser(tx, context.creatorId)
+      : [];
     const lines = [
       'قام الموظف بتحديث بيانات عقار بانتظار المراجعة. يُرجى الاطلاع على التعديلات.',
       `رقم العقار: ${context.reference}`,
@@ -352,7 +363,7 @@ export class NotificationsService {
     ];
     await this.deliver(
       tx,
-      managers.map((userId) => ({
+      recipients.map((userId) => ({
         userId,
         type: 'SYSTEM',
         title: PROPERTY_EVENT_TITLES.EDITED,
@@ -381,8 +392,10 @@ export class NotificationsService {
     context: PropertyEventContext,
     details: { fingerprint: string; attemptedAt: Date },
   ): Promise<void> {
-    const [managers, actor] = await Promise.all([
-      this.activeUserIds(tx, Role.MANAGER),
+    const [recipients, actor] = await Promise.all([
+      context.creatorId
+        ? reviewNotificationRecipientIdsForUser(tx, context.creatorId)
+        : Promise.resolve([]),
       context.creatorId
         ? tx.user.findUnique({
             where: { id: context.creatorId },
@@ -399,7 +412,7 @@ export class NotificationsService {
     ].join('\n');
     await this.deliver(
       tx,
-      managers.map((userId) => ({
+      recipients.map((userId) => ({
         userId,
         type: 'SYSTEM',
         title: PROPERTY_EVENT_TITLES.DUPLICATE_ATTEMPT,
@@ -515,7 +528,10 @@ export class NotificationsService {
     });
     if (!actorRow) return;
 
-    const managers = await this.activeUserIds(tx, Role.MANAGER);
+    const recipients = await reviewNotificationRecipientIds(tx, {
+      id: actor.id,
+      role: actor.role,
+    });
     // At most one reference column is set by construction; the row id for the
     // event key follows the same choice (see `recordEventKeys`).
     const entityId = record.clientId ?? record.contactId ?? record.followUpId;
@@ -527,7 +543,7 @@ export class NotificationsService {
 
     await this.deliver(
       tx,
-      managers.map((userId) => ({
+      recipients.map((userId) => ({
         userId,
         type: event,
         title: recordEventTitle(event, record.clientIntent),
@@ -570,13 +586,17 @@ export class NotificationsService {
       where: { id: actor.id },
       select: { name: true },
     });
-    const managers = await this.activeUserIds(tx, Role.MANAGER, actor.id);
-    // ONE nonce for the whole business event: every manager receives the same
-    // deduplication key (the unique index is scoped by userId).
+    const recipients = await reviewNotificationRecipientIds(
+      tx,
+      { id: actor.id, role: actor.role },
+      actor.id,
+    );
+    // ONE nonce for the whole business event: every recipient receives the
+    // same deduplication key (the unique index is scoped by userId).
     const nonce = randomUUID();
     await this.deliver(
       tx,
-      managers.map((userId) => ({
+      recipients.map((userId) => ({
         userId,
         type: event,
         title:
@@ -672,7 +692,7 @@ export class NotificationsService {
     // read-only supervision history on /manager/followups.
     const followUpSubjectVisibleFor = (type: (typeof items)[number]['type']) =>
       viewer.role === Role.EMPLOYEE ||
-      (viewer.role === Role.MANAGER &&
+      (isManagement(viewer) &&
         (type === 'FOLLOWUP_CREATED' ||
           type === 'FOLLOWUP_MANAGER_ESCALATION'));
     const duplicateContexts = await this.potentialDuplicateContexts(
@@ -713,7 +733,7 @@ export class NotificationsService {
     rows: { id: string; eventKey: string | null; propertyId: string | null }[],
   ): Promise<Map<string, NotificationDuplicateContextDto>> {
     const result = new Map<string, NotificationDuplicateContextDto>();
-    if (viewer.role !== Role.MANAGER) return result;
+    if (!isManagement(viewer)) return result;
     const duplicateRows = rows.filter(
       (row) =>
         row.eventKey?.startsWith('POTENTIAL_DUPLICATE:') && row.propertyId,

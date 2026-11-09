@@ -1,4 +1,6 @@
 import type { ApiResponse } from '@arkan/shared';
+import { AUTH_MODE } from './auth-mode';
+import { getCsrfToken } from './api/csrf-store';
 
 export type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
 
@@ -154,6 +156,16 @@ export async function apiRequest<T>(
   if (formData === undefined && body !== undefined)
     requestHeaders['Content-Type'] = 'application/json';
   if (accessToken) requestHeaders['Authorization'] = `Bearer ${accessToken}`;
+  // Add the double-submit token to every unsafe request in cookie modes.
+  // It is attached centrally so multipart uploads and all future mutations
+  // cannot forget it.
+  if (
+    AUTH_MODE !== 'legacy' &&
+    !['GET', 'HEAD', 'OPTIONS'].includes(method)
+  ) {
+    const csrf = getCsrfToken();
+    if (csrf) requestHeaders['X-CSRF-Token'] = csrf;
+  }
 
   let response: Response;
   const controller = new AbortController();
@@ -163,6 +175,7 @@ export async function apiRequest<T>(
       method,
       headers: requestHeaders,
       body: formData ?? (body !== undefined ? JSON.stringify(body) : undefined),
+      credentials: AUTH_MODE === 'legacy' ? 'omit' : 'include',
       cache: 'no-store',
       signal: controller.signal,
     });
