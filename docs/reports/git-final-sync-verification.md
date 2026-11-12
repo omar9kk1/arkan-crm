@@ -50,7 +50,7 @@
 | `npm run build` (shared + backend + frontend + CSP) | **نجح** |
 | `node --check` لكل سكربتات load-test | **نجح (0 أخطاء)** |
 | اختبار إعدادات load-test (11 حالة) | **11/11 نجحت** |
-| `git diff --check` | **نجح** |
+| `git diff --check` | لا أخطاء في المصدر/السكربتات؛ تقارير Markdown تحتوي مسافات نهاية سطر مقصودة (hard line breaks). |
 
 ملاحظة شفافية: في تشغيل كامل وسيط فشل اختبار واحد عابر في
 `owner-manager-employee-hierarchy.spec.ts` (login 500)، ثم نجح منفرداً
@@ -111,4 +111,18 @@
 
 **SAFE TO COMMIT AND PUSH** — بعد مراجعة staged paths والتأكد من عدم وجود أسرار.
 
-معرّفات الـcommits وتأكيد `HEAD == origin/main` ستُعاد في الرد النهائي بعد الرفع.
+---
+
+## 6. نتيجة الرفع والتحقق النهائي
+
+| الـCommit | الرسالة |
+|---|---|
+| `a7253ac` | `feat(backend): deals, finance ledger, review ownership, system log and company-wide visibility` |
+| `712fafe` | `feat(frontend): deals, finance, notifications, sold-property visibility and UI fixes` |
+| `9998bde` | `docs: add development, migration, audit and secured load-test tooling` |
+
+- تم الدفع إلى `origin/main` بدون force.
+- بعد الرفع: `HEAD == origin/main` (آخر commit توثيقي).
+- `0` commits متباعدة، وشجرة العمل نظيفة.
+- 26 مجلد ترحيل ظاهر في الريموت، و18 ملفاً في `scripts/load-test/`.
+- ملفات `.env` و`backups/` و`.dev/` بقيت مستثناة ومتجاهلة.
