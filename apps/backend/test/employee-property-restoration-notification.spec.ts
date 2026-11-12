@@ -20,6 +20,7 @@ const image = [{ buffer: pngBytes(), filename: 'photo.png' }];
 
 describeWithDatabase('Employee property restoration notification', () => {
   let ctx: TestContext;
+  let ownerToken: string;
   let managerToken: string;
   let employeeAToken: string;
   let employeeBToken: string;
@@ -89,6 +90,11 @@ describeWithDatabase('Employee property restoration notification', () => {
   beforeAll(async () => {
     ctx = await createTestApp();
     await resetDatabase(ctx.prisma);
+    const owner = await createUser(ctx.prisma, {
+      email: 'restore-owner@test.local',
+      name: 'Restore Owner',
+      role: Role.OWNER,
+    });
     const manager = await createUser(ctx.prisma, {
       email: 'restore-manager@test.local',
       name: 'Restore Manager',
@@ -104,6 +110,7 @@ describeWithDatabase('Employee property restoration notification', () => {
       name: 'Restore B',
       role: Role.EMPLOYEE,
     });
+    ownerToken = await login(ctx.app, owner.email);
     managerToken = await login(ctx.app, manager.email);
     employeeAToken = await login(ctx.app, a.email);
     employeeBToken = await login(ctx.app, b.email);
@@ -119,12 +126,12 @@ describeWithDatabase('Employee property restoration notification', () => {
     });
     await api()
       .post(`/properties/${created.id}/trash`)
-      .set(auth(managerToken))
+      .set(auth(ownerToken))
       .send({ reason: 'اختبار' });
 
     const restored = await api()
       .post(`/properties/${created.id}/restore`)
-      .set(auth(managerToken))
+      .set(auth(ownerToken))
       .send({});
     expect(restored.status).toBe(200);
     expect(restored.body.data.status).toBe('PENDING');
@@ -139,7 +146,7 @@ describeWithDatabase('Employee property restoration notification', () => {
     );
     expect(decision).toBeTruthy();
     expect(decision!.message).toContain(
-      'قام مدير النظام باستعادة عقارك من المحذوفات، وأصبح متاحًا مرة أخرى في قائمة عقاراتك.',
+      'قام مالك النظام باستعادة عقارك من المحذوفات، وأصبح متاحًا مرة أخرى في قائمة عقاراتك.',
     );
     expect(decision!.message).toContain(created.reference);
     expect(decision!.message).toContain('التاريخ:');
@@ -177,11 +184,11 @@ describeWithDatabase('Employee property restoration notification', () => {
 
     await api()
       .post(`/properties/${created.id}/trash`)
-      .set(auth(managerToken))
+      .set(auth(ownerToken))
       .send({ reason: 'اختبار' });
     const restored = await api()
       .post(`/properties/${created.id}/restore`)
-      .set(auth(managerToken))
+      .set(auth(ownerToken))
       .send({});
     expect(restored.status).toBe(200);
     expect(restored.body.data.status).toBe('AVAILABLE');
@@ -203,16 +210,16 @@ describeWithDatabase('Employee property restoration notification', () => {
     });
     await api()
       .post(`/properties/${created.id}/trash`)
-      .set(auth(managerToken))
+      .set(auth(ownerToken))
       .send({});
     const first = await api()
       .post(`/properties/${created.id}/restore`)
-      .set(auth(managerToken))
+      .set(auth(ownerToken))
       .send({});
     expect(first.status).toBe(200);
     const second = await api()
       .post(`/properties/${created.id}/restore`)
-      .set(auth(managerToken))
+      .set(auth(ownerToken))
       .send({});
     expect(second.status).toBe(400);
     expect(await restoreNotifications(employeeAToken, created.id)).toHaveLength(
@@ -227,7 +234,7 @@ describeWithDatabase('Employee property restoration notification', () => {
     });
     const failed = await api()
       .post(`/properties/${active.id}/restore`)
-      .set(auth(managerToken))
+      .set(auth(ownerToken))
       .send({});
     expect(failed.status).toBe(400);
     expect(await restoreNotifications(employeeAToken, active.id)).toHaveLength(
@@ -240,12 +247,12 @@ describeWithDatabase('Employee property restoration notification', () => {
     });
     await api()
       .post(`/properties/${first.id}/trash`)
-      .set(auth(managerToken))
+      .set(auth(ownerToken))
       .send({});
     await createProperty(employeeBToken, { plotNumber: '960105' });
     const conflict = await api()
       .post(`/properties/${first.id}/restore`)
-      .set(auth(managerToken))
+      .set(auth(ownerToken))
       .send({});
     expect(conflict.status).toBe(409);
     expect(await restoreNotifications(employeeAToken, first.id)).toHaveLength(

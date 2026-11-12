@@ -54,8 +54,9 @@ describe('readPropertyParam', () => {
 });
 
 describe('managerTabForStatus', () => {
-  it('sends an AVAILABLE target to the approved program tab', () => {
+  it('sends AVAILABLE and SOLD targets to the published program tab', () => {
     expect(managerTabForStatus('AVAILABLE')).toBe('program');
+    expect(managerTabForStatus('SOLD')).toBe('program');
   });
 
   it('sends PENDING and REJECTED targets to the review tab', () => {
@@ -86,6 +87,12 @@ describe('employeeTabForRow (uses the page real matchesTab rule)', () => {
   it('shows an approved target on the broad inventory tab', () => {
     expect(
       employeeTabForRow(employeeRow({ apiStatus: 'AVAILABLE' }), matches, ordered),
+    ).toBe('all');
+  });
+
+  it('keeps a SOLD target on the broad inventory tab', () => {
+    expect(
+      employeeTabForRow(employeeRow({ apiStatus: 'SOLD' }), matches, ordered),
     ).toBe('all');
   });
 

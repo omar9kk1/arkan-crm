@@ -168,6 +168,36 @@ describeWithDatabase('Follow-up pagination and full coverage', () => {
     await ctx.close();
   });
 
+  const collectEmployeeOptions = async (
+    token: string,
+    baseQuery: Record<string, string | number> = {},
+  ) => {
+    const ids: string[] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const response = await api()
+        .get('/follow-ups/manager/employees')
+        .query({
+          ...baseQuery,
+          limit: 100,
+          ...(cursor ? { cursor } : {}),
+        })
+        .set(auth(token));
+      expect(response.status).toBe(200);
+      const page = response.body.data as {
+        items: Array<{ userId: string }>;
+        nextCursor: string | null;
+      };
+      expect(page.items.length).toBeLessThanOrEqual(100);
+      ids.push(...page.items.map((item) => item.userId));
+      cursor = page.nextCursor;
+      pages += 1;
+      expect(pages).toBeLessThan(100);
+    } while (cursor);
+    return { ids, pages };
+  };
+
   const collectPages = async (
     path: string,
     token: string,
@@ -256,11 +286,19 @@ describeWithDatabase('Follow-up pagination and full coverage', () => {
       .get('/follow-ups/manager/overview')
       .set(auth(ownerToken));
     expect(ownerSupervision.status).toBe(200);
-    expect((ownerSupervision.body.data as PageShape).summary?.total).toBe(
-      TEAM_A + TEAM_B,
-    );
-    const ownerEmployees = (ownerSupervision.body.data as PageShape).employees;
-    expect(ownerEmployees?.map((row) => row.userId).sort()).toEqual(
+    expect((ownerSupervision.body.data as PageShape).summary).toBeUndefined();
+    expect((ownerSupervision.body.data as PageShape).employees).toBeUndefined();
+
+    const ownerSummary = await api()
+      .get('/follow-ups/manager/summary')
+      .set(auth(ownerToken));
+    expect(ownerSummary.status).toBe(200);
+    expect(
+      (ownerSummary.body.data as PageShape['summary'])?.total,
+    ).toBe(TEAM_A + TEAM_B);
+
+    const ownerEmployeeOptions = await collectEmployeeOptions(ownerToken);
+    expect(ownerEmployeeOptions.ids.sort()).toEqual(
       [employeeAId, employeeBId].sort(),
     );
 
@@ -268,6 +306,11 @@ describeWithDatabase('Follow-up pagination and full coverage', () => {
     expect(managerA.ids).toHaveLength(TEAM_A);
     const managerB = await collectPages('/follow-ups/manager/overview', managerBToken);
     expect(managerB.ids).toHaveLength(TEAM_B);
+
+    const managerAOptions = await collectEmployeeOptions(managerAToken);
+    expect(managerAOptions.ids).toEqual([employeeAId]);
+    const managerBOptions = await collectEmployeeOptions(managerBToken);
+    expect(managerBOptions.ids).toEqual([employeeBId]);
 
     const crossTeamSearch = await api()
       .get('/follow-ups/manager/overview')

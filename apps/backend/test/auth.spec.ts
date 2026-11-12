@@ -112,9 +112,33 @@ describe('Auth HTTP flow (Prisma test double)', () => {
       findMany: jest.fn(async () => []),
     },
     auditLog: { create: audit },
-    // The real service serializes refresh/logout of one session lineage with a
-    // transaction-scoped advisory lock.
-    $queryRaw: jest.fn(async () => [{ locked: 1 }]),
+    // Two raw statements exist: the guard's single session+user validity read,
+    // and the transaction-scoped advisory lock used to serialize refresh/
+    // logout of one session lineage.
+    $queryRaw: jest.fn(
+      async (query: { strings?: readonly string[]; values?: unknown[] }) => {
+        const sql = (query?.strings ?? []).join('');
+        if (!sql.includes('"RefreshToken"')) return [{ locked: 1 }];
+        const sessionId = query?.values?.[0];
+        const session = [...sessions.values()].find(
+          (value) => value.id === sessionId,
+        );
+        if (!session) return [];
+        const user = users.get(session.userId);
+        if (!user) return [];
+        return [
+          {
+            userId: session.userId,
+            revokedAt: session.revokedAt,
+            expiresAt: session.expiresAt,
+            lineageId: session.lineageId,
+            role: user.role,
+            isActive: user.isActive,
+            authVersion: user.authVersion,
+          },
+        ];
+      },
+    ),
     $transaction: async (
       work: (tx: unknown) => Promise<unknown>,
     ): Promise<unknown> => work(database),

@@ -1,5 +1,12 @@
 import { Module } from '@nestjs/common';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { PrismaModule } from '../prisma/prisma.module';
+import { FinanceController } from './finance.controller';
+import { FinanceService } from './finance.service';
 
-// Domain boundary only; HTTP endpoints and business rules belong to a later phase.
-@Module({})
+@Module({
+  imports: [PrismaModule, NotificationsModule],
+  controllers: [FinanceController],
+  providers: [FinanceService],
+})
 export class FinanceModule {}

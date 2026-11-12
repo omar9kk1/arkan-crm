@@ -3,9 +3,12 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import {
+  ApprovalStatus,
   ManagerCapabilityType,
+  NotificationType,
   Prisma,
   PropertyStatus,
   Role,
@@ -17,7 +20,6 @@ import { hashPassword } from '../auth/password';
 import {
   assertOwner,
   isManager,
-  isOwner,
 } from '../common/access/access-policy';
 import type {
   EmployeeDto,
@@ -39,6 +41,7 @@ import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { AssignEmployeeManagerDto } from './dto/assign-employee-manager.dto';
 import { ManagerPermissionsDto } from './dto/manager-permissions.dto';
+import { clientReviewOwnershipReady } from '../clients/client-review-schema';
 
 const PROPERTY_LIMIT = 50;
 const DEFAULT_EMPLOYEE_PAGE_SIZE = 50;
@@ -66,10 +69,18 @@ const EMPLOYEE_SELECT = {
   managerCapabilities: {
     select: { capability: true, granted: true },
   },
-  _count: { select: { createdProperties: true } },
 } satisfies Prisma.UserSelect;
 
 type EmployeeRow = Prisma.UserGetPayload<{ select: typeof EMPLOYEE_SELECT }>;
+
+/** Per-row metrics for one page of the directory. */
+interface EmployeePageMetric {
+  propertyCount: number;
+  propertiesByStatus: Record<PropertyStatus, number>;
+  clientsCount: number;
+  assignedCount: number;
+  lateCount: number;
+}
 
 /**
  * OWNER account directory + Manager team management.
@@ -91,11 +102,15 @@ export class EmployeesService {
     viewer: AuthUser,
     query: ListEmployeesQueryDto = {},
   ): Promise<EmployeeListDto> {
-    const baseWhere = this.directoryScope(viewer);
     const limit = Math.min(
       query.limit ?? DEFAULT_EMPLOYEE_PAGE_SIZE,
       MAX_EMPLOYEE_PAGE_SIZE,
     );
+    // Summary is full-scope and independent of the page; start it alongside
+    // the page query instead of serialising two full aggregations.
+    const summaryPromise = query.cursor
+      ? Promise.resolve(undefined)
+      : this.directorySummary(viewer);
     const pageResult = await this.pageEmployeeIds(viewer, query, limit);
     const pageIds = pageResult.rows.map((row) => row.id);
     const users = pageIds.length
@@ -109,29 +124,14 @@ export class EmployeesService {
       .map((id) => byId.get(id))
       .filter((user): user is EmployeeRow => Boolean(user));
     const userIds = page.map((user) => user.id);
-    const profileIds = page
-      .map((user) => user.employee?.id)
-      .filter((id): id is string => Boolean(id));
+    const metrics = await this.pageMetrics(userIds);
 
-    const [propertiesByStatus, clientsByUser, assignedByProfile, lateByProfile] =
-      await Promise.all([
-        this.propertyStatusByUser(userIds),
-        this.clientsCountsByUser(userIds),
-        this.assignedCountsByProfile(profileIds),
-        this.lateCountsByProfile(profileIds),
-      ]);
-
-    const summary = query.cursor
-      ? undefined
-      : await this.directorySummary(baseWhere);
+    const summary = await summaryPromise;
     return {
       items: page.map((user) =>
         this.serializeListItem(
           user,
-          propertiesByStatus.get(user.id) ?? this.emptyStatusCounts(),
-          clientsByUser.get(user.id) ?? 0,
-          assignedByProfile.get(user.employee?.id ?? '') ?? 0,
-          lateByProfile.get(user.employee?.id ?? '') ?? 0,
+          metrics.get(user.id) ?? this.emptyPageMetric(),
         ),
       ),
       nextCursor: pageResult.nextCursor,
@@ -139,40 +139,66 @@ export class EmployeesService {
     };
   }
 
-  /** OWNER: all employees; MANAGER: the current team (NULL never matches). */
-  private directoryScope(viewer: AuthUser): Prisma.UserWhereInput {
-    if (isOwner(viewer)) return { role: Role.EMPLOYEE };
-    if (isManager(viewer)) {
+  /**
+   * Set-based metric CTE. Each canonical table is aggregated once and joined
+   * to the already-scoped employees; no correlated subquery runs per employee.
+   * `UNION` keeps the same distinct-client / distinct-deal semantics.
+   */
+  private employeeMetricCte(sort: EmployeeSortKey): {
+    cte: Prisma.Sql;
+    metric: Prisma.Sql;
+    join: Prisma.Sql;
+  } {
+    if (sort === 'propertiesCount') {
       return {
-        role: Role.EMPLOYEE,
-        employee: { managerUserId: viewer.id },
+        cte: Prisma.sql`property_counts AS (
+          SELECT p."createdByUserId" AS user_id, COUNT(*)::int AS metric
+          FROM "Property" p
+          WHERE p."createdByUserId" IS NOT NULL
+          GROUP BY p."createdByUserId"
+        )`,
+        metric: Prisma.sql`COALESCE(pc.metric, 0)::int`,
+        join: Prisma.sql`LEFT JOIN property_counts pc ON pc.user_id = s.id`,
       };
     }
-    return { id: viewer.id };
-  }
-
-  private employeeMetricSql(sort: EmployeeSortKey): Prisma.Sql {
-    if (sort === 'propertiesCount') {
-      return Prisma.sql`(
-        SELECT COUNT(*)::int
-        FROM "Property" p
-        WHERE p."createdByUserId" = u.id
-      )`;
-    }
     if (sort === 'dealsCount') {
-      return Prisma.sql`(
-        SELECT COUNT(DISTINCT d.id)::int
-        FROM "Deal" d
-        WHERE d."propertyEmployeeId" = e.id
-           OR d."clientEmployeeId" = e.id
-      )`;
+      return {
+        cte: Prisma.sql`
+          deal_pairs AS (
+            SELECT d."propertyEmployeeId" AS profile_id, d.id
+            FROM "Deal" d WHERE d."propertyEmployeeId" IS NOT NULL
+            UNION
+            SELECT d."clientEmployeeId", d.id
+            FROM "Deal" d WHERE d."clientEmployeeId" IS NOT NULL
+          ),
+          deal_counts AS (
+            SELECT s.profile_id, COUNT(*)::int AS metric
+            FROM deal_pairs dp
+            JOIN scoped s ON s.profile_id = dp.profile_id
+            GROUP BY s.profile_id
+          )`,
+        metric: Prisma.sql`COALESCE(dc.metric, 0)::int`,
+        join: Prisma.sql`LEFT JOIN deal_counts dc ON dc.profile_id = s.profile_id`,
+      };
     }
-    return Prisma.sql`(
-      SELECT COUNT(DISTINCT c.id)::int
-      FROM "Client" c
-      WHERE c."createdById" = e.id
-         OR c."responsibleEmployeeId" = e.id
-    )`;
+    return {
+      cte: Prisma.sql`
+        client_pairs AS (
+          SELECT c."createdById" AS profile_id, c.id
+          FROM "Client" c WHERE c."createdById" IS NOT NULL
+          UNION
+          SELECT c."responsibleEmployeeId", c.id
+          FROM "Client" c WHERE c."responsibleEmployeeId" IS NOT NULL
+        ),
+        client_counts AS (
+          SELECT s.profile_id, COUNT(*)::int AS metric
+          FROM client_pairs cp
+          JOIN scoped s ON s.profile_id = cp.profile_id
+          GROUP BY s.profile_id
+        )`,
+      metric: Prisma.sql`COALESCE(cc.metric, 0)::int`,
+      join: Prisma.sql`LEFT JOIN client_counts cc ON cc.profile_id = s.profile_id`,
+    };
   }
 
   /**
@@ -202,13 +228,16 @@ export class EmployeesService {
       cursorMetric = Number(metric);
       cursorId = id ?? null;
     }
-    const metric = this.employeeMetricSql(query.sort ?? 'clientsCount');
+    const metric = this.employeeMetricCte(
+      query.sort ?? 'clientsCount',
+    );
     const rows = await this.prisma.$queryRaw<
       Array<{ id: string; metric: number }>
     >`
-      WITH counted AS (
+      WITH scoped AS (
         SELECT u.id,
-               ${metric} AS metric
+               u."isActive",
+               e.id AS profile_id
         FROM "User" u
         LEFT JOIN "EmployeeProfile" e ON e."userId" = u.id
         WHERE u.role = 'EMPLOYEE'
@@ -219,6 +248,12 @@ export class EmployeesService {
             OR u.name ILIKE '%' || ${escaped} || '%' ESCAPE '\\'
             OR COALESCE(e.phone, '') ILIKE '%' || ${escaped} || '%' ESCAPE '\\'
           )
+      ),
+      ${metric.cte},
+      counted AS (
+        SELECT s.id, ${metric.metric} AS metric
+        FROM scoped s
+        ${metric.join}
       )
       SELECT id, metric
       FROM counted
@@ -246,119 +281,183 @@ export class EmployeesService {
     );
   }
 
-  private async propertyStatusByUser(
-    userIds: string[],
-  ): Promise<Map<string, Record<PropertyStatus, number>>> {
-    const out = new Map<string, Record<PropertyStatus, number>>();
-    if (!userIds.length) return out;
-    const rows = await this.prisma.property.groupBy({
-      by: ['createdByUserId', 'status'],
-      where: { createdByUserId: { in: userIds } },
-      _count: { _all: true },
-    });
-    for (const row of rows) {
-      if (!row.createdByUserId) continue;
-      const counts = out.get(row.createdByUserId) ?? this.emptyStatusCounts();
-      counts[row.status] = row._count._all;
-      out.set(row.createdByUserId, counts);
-    }
-    return out;
+  private emptyPageMetric(): EmployeePageMetric {
+    return {
+      propertyCount: 0,
+      propertiesByStatus: this.emptyStatusCounts(),
+      clientsCount: 0,
+      assignedCount: 0,
+      lateCount: 0,
+    };
   }
 
-  private async clientsCountsByUser(
+  /**
+   * One set-based query for every per-row metric of the page: property counts
+   * by status, clients, assignments and late follow-ups. The four previous
+   * queries (and the `_count.createdProperties` relation count) are merged so
+   * a request acquires one connection instead of five.
+   */
+  private async pageMetrics(
     userIds: string[],
-  ): Promise<Map<string, number>> {
-    const out = new Map<string, number>();
+  ): Promise<Map<string, EmployeePageMetric>> {
+    const out = new Map<string, EmployeePageMetric>();
     if (!userIds.length) return out;
     const list = Prisma.join(
       userIds.map((id) => Prisma.sql`${id}::uuid`),
     );
-    const rows = await this.prisma.$queryRaw<
-      Array<{ userId: string; count: bigint }>
-    >`
-      SELECT p."userId" AS "userId", COUNT(DISTINCT c.id)::bigint AS "count"
-      FROM "EmployeeProfile" p
-      JOIN "Client" c
-        ON c."createdById" = p.id OR c."responsibleEmployeeId" = p.id
-      WHERE p."userId" IN (${list})
-      GROUP BY p."userId"
-    `;
-    for (const row of rows) out.set(row.userId, Number(row.count));
-    return out;
-  }
-
-  private async assignedCountsByProfile(
-    profileIds: string[],
-  ): Promise<Map<string, number>> {
-    const out = new Map<string, number>();
-    if (!profileIds.length) return out;
-    const list = Prisma.join(
-      profileIds.map((id) => Prisma.sql`${id}::uuid`),
-    );
-    const rows = await this.prisma.$queryRaw<
-      Array<{ employeeId: string; count: bigint }>
-    >`
-      SELECT a."employeeId" AS "employeeId",
-             COUNT(DISTINCT a."propertyId")::bigint AS "count"
-      FROM "PropertyAssignment" a
-      WHERE a."employeeId" IN (${list})
-      GROUP BY a."employeeId"
-    `;
-    for (const row of rows) out.set(row.employeeId, Number(row.count));
-    return out;
-  }
-
-  private async lateCountsByProfile(
-    profileIds: string[],
-  ): Promise<Map<string, number>> {
-    const out = new Map<string, number>();
-    if (!profileIds.length) return out;
     const key = kuwaitDayKey(new Date());
     const start = new Date(
       Date.parse(`${key}T00:00:00.000Z`) - 3 * HOUR_MS,
     );
-    const rows = await this.prisma.followUpSubject.groupBy({
-      by: ['responsibleId'],
-      where: {
-        responsibleId: { in: profileIds },
-        active: true,
-        nextDueAt: { lt: start },
-      },
-      _count: { _all: true },
-    });
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        userId: string;
+        propertyCount: number;
+        available: number;
+        pending: number;
+        sold: number;
+        rented: number;
+        rejected: number;
+        archived: number;
+        clientsCount: number;
+        assignedCount: number;
+        lateCount: number;
+      }>
+    >`
+      WITH ids AS (
+        SELECT unnest(ARRAY[${list}]::uuid[]) AS id
+      ),
+      props AS (
+        SELECT p."createdByUserId" AS uid,
+               COUNT(*)::int AS property_count,
+               COUNT(*) FILTER (WHERE p.status = 'AVAILABLE')::int AS available,
+               COUNT(*) FILTER (WHERE p.status = 'PENDING')::int AS pending,
+               COUNT(*) FILTER (WHERE p.status = 'SOLD')::int AS sold,
+               COUNT(*) FILTER (WHERE p.status = 'RENTED')::int AS rented,
+               COUNT(*) FILTER (WHERE p.status = 'REJECTED')::int AS rejected,
+               COUNT(*) FILTER (WHERE p.status = 'ARCHIVED')::int AS archived
+        FROM "Property" p
+        JOIN ids ON ids.id = p."createdByUserId"
+        GROUP BY 1
+      ),
+      client_counts AS (
+        SELECT pr."userId" AS uid, COUNT(DISTINCT c.id)::int AS cnt
+        FROM "EmployeeProfile" pr
+        JOIN ids ON ids.id = pr."userId"
+        JOIN "Client" c
+          ON c."createdById" = pr.id OR c."responsibleEmployeeId" = pr.id
+        GROUP BY 1
+      ),
+      assigned_counts AS (
+        SELECT pr."userId" AS uid, COUNT(DISTINCT a."propertyId")::int AS cnt
+        FROM "EmployeeProfile" pr
+        JOIN ids ON ids.id = pr."userId"
+        JOIN "PropertyAssignment" a ON a."employeeId" = pr.id
+        GROUP BY 1
+      ),
+      late_counts AS (
+        SELECT pr."userId" AS uid, COUNT(f.id)::int AS cnt
+        FROM "EmployeeProfile" pr
+        JOIN ids ON ids.id = pr."userId"
+        JOIN "FollowUpSubject" f ON f."responsibleId" = pr.id
+        WHERE f.active AND f."nextDueAt" < ${start}::timestamptz
+        GROUP BY 1
+      )
+      SELECT ids.id AS "userId",
+             COALESCE(pr.property_count, 0)::int AS "propertyCount",
+             COALESCE(pr.available, 0)::int AS available,
+             COALESCE(pr.pending, 0)::int AS pending,
+             COALESCE(pr.sold, 0)::int AS sold,
+             COALESCE(pr.rented, 0)::int AS rented,
+             COALESCE(pr.rejected, 0)::int AS rejected,
+             COALESCE(pr.archived, 0)::int AS archived,
+             COALESCE(cc.cnt, 0)::int AS "clientsCount",
+             COALESCE(ac.cnt, 0)::int AS "assignedCount",
+             COALESCE(lc.cnt, 0)::int AS "lateCount"
+      FROM ids
+      LEFT JOIN props pr ON pr.uid = ids.id
+      LEFT JOIN client_counts cc ON cc.uid = ids.id
+      LEFT JOIN assigned_counts ac ON ac.uid = ids.id
+      LEFT JOIN late_counts lc ON lc.uid = ids.id
+    `;
     for (const row of rows) {
-      if (row.responsibleId) out.set(row.responsibleId, row._count._all);
+      out.set(row.userId, {
+        propertyCount: row.propertyCount,
+        propertiesByStatus: {
+          [PropertyStatus.AVAILABLE]: row.available,
+          [PropertyStatus.PENDING]: row.pending,
+          [PropertyStatus.SOLD]: row.sold,
+          [PropertyStatus.RENTED]: row.rented,
+          [PropertyStatus.REJECTED]: row.rejected,
+          [PropertyStatus.ARCHIVED]: row.archived,
+        },
+        clientsCount: row.clientsCount,
+        assignedCount: row.assignedCount,
+        lateCount: row.lateCount,
+      });
     }
     return out;
   }
 
   private async directorySummary(
-    baseWhere: Prisma.UserWhereInput,
+    viewer: AuthUser,
   ): Promise<EmployeeSummaryDto> {
-    const users = await this.prisma.user.findMany({
-      where: baseWhere,
-      select: { id: true, isActive: true },
-    });
-    const userIds = users.map((user) => user.id);
-    const profiles = await this.prisma.employeeProfile.findMany({
-      where: { userId: { in: userIds } },
-      select: { id: true },
-    });
-    const [clientsByUser, lateByProfile] = await Promise.all([
-      this.clientsCountsByUser(userIds),
-      this.lateCountsByProfile(profiles.map((profile) => profile.id)),
-    ]);
+    const managerId = isManager(viewer) ? viewer.id : null;
+    const key = kuwaitDayKey(new Date());
+    const start = new Date(
+      Date.parse(`${key}T00:00:00.000Z`) - 3 * HOUR_MS,
+    );
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        total: number;
+        active: number;
+        clients_total: number;
+        late_total: number;
+      }>
+    >`
+      WITH scoped AS (
+        SELECT u.id,
+               u."isActive",
+               e.id AS profile_id
+        FROM "User" u
+        LEFT JOIN "EmployeeProfile" e ON e."userId" = u.id
+        WHERE u.role = 'EMPLOYEE'
+          AND (${managerId}::uuid IS NULL OR e."managerUserId" = ${managerId}::uuid)
+      ),
+      client_pairs AS (
+        SELECT c."createdById" AS profile_id, c.id
+        FROM "Client" c WHERE c."createdById" IS NOT NULL
+        UNION
+        SELECT c."responsibleEmployeeId", c.id
+        FROM "Client" c WHERE c."responsibleEmployeeId" IS NOT NULL
+      ),
+      client_counts AS (
+        SELECT s.profile_id, COUNT(*)::int AS cnt
+        FROM client_pairs cp
+        JOIN scoped s ON s.profile_id = cp.profile_id
+        GROUP BY s.profile_id
+      ),
+      late_counts AS (
+        SELECT s.profile_id, COUNT(f.id)::int AS cnt
+        FROM "FollowUpSubject" f
+        JOIN scoped s ON s.profile_id = f."responsibleId"
+        WHERE f.active AND f."nextDueAt" < ${start}::timestamptz
+        GROUP BY s.profile_id
+      )
+      SELECT COUNT(*)::int AS total,
+             COUNT(*) FILTER (WHERE s."isActive")::int AS active,
+             COALESCE(SUM(cc.cnt), 0)::int AS clients_total,
+             COALESCE(SUM(lc.cnt), 0)::int AS late_total
+      FROM scoped s
+      LEFT JOIN client_counts cc ON cc.profile_id = s.profile_id
+      LEFT JOIN late_counts lc ON lc.profile_id = s.profile_id
+    `;
+    const row = rows[0];
     return {
-      total: users.length,
-      active: users.filter((user) => user.isActive).length,
-      clientsTotal: [...clientsByUser.values()].reduce(
-        (sum, value) => sum + value,
-        0,
-      ),
-      lateTotal: [...lateByProfile.values()].reduce(
-        (sum, value) => sum + value,
-        0,
-      ),
+      total: Number(row?.total ?? 0),
+      active: Number(row?.active ?? 0),
+      clientsTotal: Number(row?.clients_total ?? 0),
+      lateTotal: Number(row?.late_total ?? 0),
     };
   }
 
@@ -645,10 +744,18 @@ export class EmployeesService {
   }
 
   /**
-   * `PATCH /employees/:id/manager` — OWNER assigns or transfers an EMPLOYEE.
-   * Only the current manager link changes; the account, creator ids and every
-   * historical row stay untouched. `null` leaves the employee unassigned
-   * (visible to OWNER only).
+   * `PATCH /employees/:id/manager` — OWNER transfers an EMPLOYEE.
+   *
+   * Atomic and idempotent:
+   * - the direct supervisor changes;
+   * - every genuinely PENDING client review moves to the new supervisor;
+   * - pending property approval rounds are counted in the transfer audit (their
+   *   live reviewer scope moves with the employee automatically);
+   * - one audit event records previous/new supervisor + affected ids/count;
+   * - the new reviewer gets one deduplicated notification when work moved.
+   *
+   * APPROVED/REJECTED/CHANGES_REQUESTED rows keep their historical reviewer.
+   * `null` means direct OWNER supervision.
    */
   async assignManager(
     viewer: AuthUser,
@@ -656,35 +763,119 @@ export class EmployeesService {
     dto: AssignEmployeeManagerDto,
   ): Promise<EmployeeDto> {
     assertOwner(viewer);
-    const target = await this.prisma.user.findFirst({
-      where: { id, role: Role.EMPLOYEE },
-      select: {
-        id: true,
-        employee: { select: { managerUserId: true } },
-      },
-    });
-    if (!target) throw new NotFoundException('employee not found');
+    if (!(await clientReviewOwnershipReady(this.prisma)))
+      throw new ServiceUnavailableException(
+        'ترحيل ملكية مراجعات العملاء غير مطبّق على قاعدة البيانات هذه بعد. لم يتم تفعيل نقل طلبات المراجعة؛ يلزم تطبيق الترحيل المعتمد أولًا.',
+      );
 
     if (dto.managerUserId)
       await this.assertAssignableManager(dto.managerUserId);
 
     await this.prisma.$transaction(async (tx) => {
+      // Serialize concurrent transfers of the same employee. The second
+      // transaction waits, then observes the committed destination and
+      // becomes a no-op instead of splitting pending rows or double-auditing.
+      await tx.$executeRaw(
+        Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${id})::bigint)`,
+      );
+
+      const target = await tx.user.findFirst({
+        where: { id, role: Role.EMPLOYEE },
+        select: {
+          id: true,
+          name: true,
+          employee: { select: { managerUserId: true } },
+        },
+      });
+      if (!target) throw new NotFoundException('employee not found');
+
+      if (dto.managerUserId)
+        await this.assertAssignableManager(dto.managerUserId, tx);
+
+      const previousManagerUserId =
+        target.employee?.managerUserId ?? null;
+      const nextManagerUserId = dto.managerUserId ?? null;
+      if (previousManagerUserId === nextManagerUserId) return;
+
+      const pendingClientReviews = await tx.clientReviewRequest.findMany({
+        where: { requestedById: id, status: ApprovalStatus.PENDING },
+        select: { id: true },
+      });
+      const pendingPropertyRequests =
+        await tx.propertyApprovalRequest.findMany({
+          where: {
+            requestedById: id,
+            status: ApprovalStatus.PENDING,
+            property: {
+              status: PropertyStatus.PENDING,
+              deletedAt: null,
+            },
+          },
+          select: { id: true },
+        });
+
       await tx.employeeProfile.upsert({
         where: { userId: id },
-        create: { userId: id, managerUserId: dto.managerUserId ?? null },
-        update: { managerUserId: dto.managerUserId ?? null },
+        create: { userId: id, managerUserId: nextManagerUserId },
+        update: { managerUserId: nextManagerUserId },
       });
-      await tx.auditLog.create({
+
+      if (pendingClientReviews.length) {
+        await tx.clientReviewRequest.updateMany({
+          where: {
+            id: { in: pendingClientReviews.map((row) => row.id) },
+          },
+          data: { assignedReviewerId: nextManagerUserId },
+        });
+      }
+
+      const affectedPendingReviewIds = [
+        ...pendingClientReviews.map((row) => row.id),
+        ...pendingPropertyRequests.map((row) => row.id),
+      ];
+      const audit = await tx.auditLog.create({
         data: {
           actorId: viewer.id,
           action: 'EMPLOYEE_ASSIGN_MANAGER',
           entityType: 'User',
           entityId: id,
-          before: {
-            managerUserId: target.employee?.managerUserId ?? null,
+          before: { managerUserId: previousManagerUserId },
+          after: {
+            managerUserId: nextManagerUserId,
+            affectedPendingReviewIds,
+            affectedPendingReviewCount: affectedPendingReviewIds.length,
+            affectedPendingClientReviewCount: pendingClientReviews.length,
+            affectedPendingPropertyReviewCount: pendingPropertyRequests.length,
           },
-          after: { managerUserId: dto.managerUserId ?? null },
         },
+        select: { id: true },
+      });
+
+      if (!affectedPendingReviewIds.length) return;
+
+      const recipients = nextManagerUserId
+        ? [nextManagerUserId]
+        : (
+            await tx.user.findMany({
+              where: { role: Role.OWNER, isActive: true },
+              select: { id: true },
+            })
+          ).map((owner) => owner.id);
+      if (!recipients.length) return;
+
+      const countLabel =
+        affectedPendingReviewIds.length === 1
+          ? 'طلب مراجعة معلّق واحد'
+          : `${affectedPendingReviewIds.length} طلبات مراجعة معلّقة`;
+      await tx.notification.createMany({
+        data: recipients.map((userId) => ({
+          userId,
+          type: NotificationType.SYSTEM,
+          title: 'طلبات مراجعة منقولة إليك',
+          body: `تم نقل ${countLabel} للموظف ${target.name} إليك بعد تحديث المشرف المباشر.`,
+          eventKey: `REVIEW_TRANSFER:${audit.id}`,
+        })),
+        skipDuplicates: true,
       });
     });
     return this.readOne(id);
@@ -785,8 +976,11 @@ export class EmployeesService {
     };
   }
 
-  private async assertAssignableManager(managerUserId: string): Promise<void> {
-    const manager = await this.prisma.user.findFirst({
+  private async assertAssignableManager(
+    managerUserId: string,
+    db: PrismaService | Prisma.TransactionClient = this.prisma,
+  ): Promise<void> {
+    const manager = await db.user.findFirst({
       where: {
         id: managerUserId,
         role: Role.MANAGER,
@@ -796,7 +990,7 @@ export class EmployeesService {
     });
     if (!manager)
       throw new BadRequestException(
-        'managerUserId must reference an active MANAGER account',
+        'المدير المحدد غير موجود أو غير نشط. اختر مديراً نشطاً.',
       );
   }
 
@@ -805,35 +999,23 @@ export class EmployeesService {
       where: { id },
       select: EMPLOYEE_SELECT,
     });
-    const profileId = user.employee?.id ?? null;
-    const [statusByUser, properties, clientsByUser, assignedByProfile, lateByProfile] =
-      await Promise.all([
-        this.propertyStatusByUser([id]),
-        this.prisma.property.findMany({
-          where: { createdByUserId: id },
-          orderBy: { createdAt: 'desc' },
-          take: PROPERTY_LIMIT,
-          select: {
-            id: true,
-            reference: true,
-            title: true,
-            status: true,
-          },
-        }),
-        this.clientsCountsByUser([id]),
-        profileId
-          ? this.assignedCountsByProfile([profileId])
-          : Promise.resolve(new Map<string, number>()),
-        profileId
-          ? this.lateCountsByProfile([profileId])
-          : Promise.resolve(new Map<string, number>()),
-      ]);
+    const [metrics, properties] = await Promise.all([
+      this.pageMetrics([id]),
+      this.prisma.property.findMany({
+        where: { createdByUserId: id },
+        orderBy: { createdAt: 'desc' },
+        take: PROPERTY_LIMIT,
+        select: {
+          id: true,
+          reference: true,
+          title: true,
+          status: true,
+        },
+      }),
+    ]);
     const base = this.serializeListItem(
       user,
-      statusByUser.get(id) ?? this.emptyStatusCounts(),
-      clientsByUser.get(id) ?? 0,
-      profileId ? (assignedByProfile.get(profileId) ?? 0) : 0,
-      profileId ? (lateByProfile.get(profileId) ?? 0) : 0,
+      metrics.get(id) ?? this.emptyPageMetric(),
     );
     return {
       ...base,
@@ -864,10 +1046,7 @@ export class EmployeesService {
 
   private serializeListItem(
     user: EmployeeRow,
-    propertiesByStatus: Record<PropertyStatus, number>,
-    clientsCount: number,
-    assignedCount: number,
-    lateCount: number,
+    metric: EmployeePageMetric,
   ): EmployeeListItemDto {
     return {
       id: user.id,
@@ -888,11 +1067,11 @@ export class EmployeesService {
         user.role === Role.MANAGER
           ? this.capabilitiesFromRows(user.managerCapabilities)
           : null,
-      propertyCount: user._count.createdProperties,
-      propertiesByStatus,
-      clientsCount,
-      assignedCount,
-      lateCount,
+      propertyCount: metric.propertyCount,
+      propertiesByStatus: metric.propertiesByStatus,
+      clientsCount: metric.clientsCount,
+      assignedCount: metric.assignedCount,
+      lateCount: metric.lateCount,
     };
   }
 }

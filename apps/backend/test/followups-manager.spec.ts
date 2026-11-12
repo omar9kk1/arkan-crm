@@ -114,12 +114,12 @@ describeWithDatabase('Manager follow-ups (own queue, supervision, reminders)', (
     await ctx.close();
   });
 
-  const approveProperty = async (id: string) => {
-    // A Manager-created property now enters review; the OWNER makes the
-    // decision (a Manager may not self-approve).
+  const approveProperty = async (id: string, token = ownerToken) => {
+    // A Manager-created property enters review and the OWNER decides it.
+    // An employee property is decided by that employee's direct Manager.
     const approved = await api()
       .post(`/properties/${id}/approve`)
-      .set(auth(ownerToken))
+      .set(auth(token))
       .send({});
     expect([200, 201, 409]).toContain(approved.status);
     if (approved.status !== 409) return;
@@ -139,7 +139,7 @@ describeWithDatabase('Manager follow-ups (own queue, supervision, reminders)', (
     );
     expect(created.status).toBe(201);
     const property = created.body.data as { id: string };
-    await approveProperty(property.id);
+    await approveProperty(property.id, managerToken);
     return property;
   };
 

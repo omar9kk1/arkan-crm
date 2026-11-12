@@ -48,7 +48,9 @@ import type {
   FollowUpStatusQuery,
   FollowUpTabQuery,
   ListFollowUpsQueryDto,
+  ListSupervisionEmployeesQueryDto,
   ListSupervisionFollowUpsQueryDto,
+  SupervisionSummaryQueryDto,
 } from './dto/list-follow-ups.query';
 
 /** How many subjects one list response may carry (the scope is one employee). */
@@ -103,6 +105,20 @@ const SUBJECT_SELECT = {
 type SubjectRow = Prisma.FollowUpSubjectGetPayload<{
   select: typeof SUBJECT_SELECT;
 }>;
+
+/** The single row of the raw sync-fingerprint aggregate. */
+interface RawFingerprintRow {
+  property_count: number;
+  property_max: Date | null;
+  assignment_count: number;
+  assignment_max: Date | null;
+  client_count: number;
+  client_max: Date | null;
+  interest_count: number;
+  interest_max: Date | null;
+  user_count: number;
+  user_max: Date | null;
+}
 
 /** Terminal property states: no further owner/inquiry follow-up is owed. */
 const TERMINAL_PROPERTY_STATES: readonly PropertyStatus[] = [
@@ -203,10 +219,17 @@ export interface FollowUpPageDto {
   summary?: FollowUpSummaryDto;
 }
 
-export interface FollowUpSupervisionPageDto extends FollowUpPageDto {
+export interface FollowUpSupervisionPageDto {
   items: FollowUpSupervisionSubjectDto[];
-  /** All responsible employees in the full scope (for the filter), first page only. */
-  employees?: FollowUpResponsibleDto[];
+  nextCursor: string | null;
+  /** Backward-compatible alias for `nextCursor !== null`. */
+  truncated: boolean;
+  generatedAt: string;
+}
+
+export interface FollowUpResponsiblePageDto {
+  items: FollowUpResponsibleDto[];
+  nextCursor: string | null;
 }
 
 export interface FollowUpSupervisionSubjectDto extends FollowUpSubjectDto {
@@ -259,6 +282,13 @@ export class FollowUpsService {
   private readonly logger = new Logger(FollowUpsService.name);
   private readonly schedule: FollowUpSchedule = resolveSchedule();
   private schemaReady = false;
+  /**
+   * First-page synchronization used to rerun the full canonical scan on every
+   * request. Keep a cheap fingerprint of the canonical inputs and share an
+   * in-flight pass per scope; an unchanged dataset is a no-op.
+   */
+  private readonly syncFingerprints = new Map<string, string>();
+  private readonly syncInFlight = new Map<string, Promise<void>>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -299,24 +329,216 @@ export class FollowUpsService {
    * company pass would).
    */
   async sync(viewer: AuthUser | null): Promise<void> {
-    const now = new Date();
-    const propertyScope: Prisma.PropertyWhereInput | null =
-      !viewer || viewer.role === Role.MANAGER
-        ? null
-        : {
-            OR: [
-              { createdByUserId: viewer.id },
-              { createdBy: { userId: viewer.id } },
-              { assignments: { some: { employee: { userId: viewer.id } } } },
-            ],
-          };
-    const clientScope: Prisma.ClientWhereInput | null =
-      !viewer || viewer.role === Role.MANAGER
-        ? null
-        : clientOwnershipWhere(viewer);
+    const key =
+      viewer && viewer.role === Role.EMPLOYEE
+        ? `employee:${viewer.id}`
+        : 'company';
+    const fingerprint = await this.syncFingerprint(viewer);
+    if (this.syncFingerprints.get(key) === fingerprint) return;
 
+    const running = this.syncInFlight.get(key);
+    if (running) return running;
+
+    const task = this.runSync(viewer, key, fingerprint).finally(() => {
+      this.syncInFlight.delete(key);
+    });
+    this.syncInFlight.set(key, task);
+    return task;
+  }
+
+  private syncScopes(viewer: AuthUser | null): {
+    propertyScope: Prisma.PropertyWhereInput | null;
+    clientScope: Prisma.ClientWhereInput | null;
+  } {
+    return {
+      propertyScope:
+        !viewer || viewer.role === Role.MANAGER
+          ? null
+          : {
+              OR: [
+                { createdByUserId: viewer.id },
+                { createdBy: { userId: viewer.id } },
+                {
+                  assignments: {
+                    some: { employee: { userId: viewer.id } },
+                  },
+                },
+              ],
+            },
+      clientScope:
+        !viewer || viewer.role === Role.MANAGER
+          ? null
+          : clientOwnershipWhere(viewer),
+    };
+  }
+
+  /**
+   * Cheap change detector for the canonical inputs of subject materialization.
+   * Counts detect additions/removals; max timestamps detect edits/status
+   * changes. Assignments and interests are included because creating them does
+   * not necessarily bump the parent Property/Client row.
+   */
+  private async syncFingerprint(viewer: AuthUser | null): Promise<string> {
+    const { propertyScope, clientScope } = this.syncScopes(viewer);
+    const formatRaw = (row: RawFingerprintRow | undefined) => {
+      const iso = (value: Date | null | undefined) =>
+        value?.toISOString() ?? '';
+      return JSON.stringify([
+        row?.property_count ?? 0,
+        iso(row?.property_max),
+        row?.assignment_count ?? 0,
+        iso(row?.assignment_max),
+        row?.client_count ?? 0,
+        iso(row?.client_max),
+        row?.interest_count ?? 0,
+        iso(row?.interest_max),
+        row?.user_count ?? 0,
+        iso(row?.user_max),
+      ]);
+    };
+    if (viewer && viewer.role === Role.EMPLOYEE) {
+      // Employee scope: ONE parameterized aggregate reproduces the previous
+      // five Prisma aggregates (same predicates, same count/max fields).
+      // "Me" = this employee's profile; ownership is resolved through stable
+      // ids exactly like syncScopes(): creator user id, creator profile,
+      // assigned employee profile, client creator/responsible profile.
+      const rows = await this.prisma.$queryRaw<RawFingerprintRow[]>(
+        Prisma.sql`
+          WITH me AS (
+            SELECT id FROM "EmployeeProfile" WHERE "userId" = ${viewer.id}::uuid
+          ),
+          scoped_properties AS (
+            SELECT p.id, p."updatedAt"
+            FROM "Property" p
+            WHERE p."createdByUserId" = ${viewer.id}::uuid
+               OR p."createdById" IN (SELECT id FROM me)
+               OR EXISTS (
+                 SELECT 1 FROM "PropertyAssignment" a
+                 WHERE a."propertyId" = p.id
+                   AND a."employeeId" IN (SELECT id FROM me)
+               )
+          ),
+          scoped_clients AS (
+            SELECT c.id, c."updatedAt"
+            FROM "Client" c
+            WHERE c."createdById" IN (SELECT id FROM me)
+               OR c."responsibleEmployeeId" IN (SELECT id FROM me)
+          ),
+          property_stats AS (
+            SELECT COUNT(*)::int AS cnt, MAX("updatedAt") AS max
+            FROM scoped_properties
+          ),
+          assignment_stats AS (
+            SELECT COUNT(*)::int AS cnt, MAX(a."createdAt") AS max
+            FROM "PropertyAssignment" a
+            WHERE a."propertyId" IN (SELECT id FROM scoped_properties)
+          ),
+          client_stats AS (
+            SELECT COUNT(*)::int AS cnt, MAX("updatedAt") AS max
+            FROM scoped_clients
+          ),
+          interest_stats AS (
+            SELECT COUNT(*)::int AS cnt, MAX(i."updatedAt") AS max
+            FROM "ClientPropertyInterest" i
+            WHERE i."clientId" IN (SELECT id FROM scoped_clients)
+          ),
+          user_stats AS (
+            SELECT COUNT(*)::int AS cnt, MAX("updatedAt") AS max FROM "User"
+          )
+          SELECT ps.cnt AS property_count, ps.max AS property_max,
+                 asg.cnt AS assignment_count, asg.max AS assignment_max,
+                 cs.cnt AS client_count, cs.max AS client_max,
+                 ist.cnt AS interest_count, ist.max AS interest_max,
+                 us.cnt AS user_count, us.max AS user_max
+          FROM property_stats ps
+          CROSS JOIN assignment_stats asg
+          CROSS JOIN client_stats cs
+          CROSS JOIN interest_stats ist
+          CROSS JOIN user_stats us
+        `,
+      );
+      return formatRaw(rows[0]);
+    }
+    if (!propertyScope && !clientScope) {
+      // Company scope (MANAGER personal list and the scheduler): one
+      // round trip computes all five count/max pairs.
+      const rows = await this.prisma.$queryRaw<RawFingerprintRow[]>(
+        Prisma.sql`
+          SELECT p.cnt AS property_count, p.max AS property_max,
+                 a.cnt AS assignment_count, a.max AS assignment_max,
+                 c.cnt AS client_count, c.max AS client_max,
+                 i.cnt AS interest_count, i.max AS interest_max,
+                 u.cnt AS user_count, u.max AS user_max
+          FROM (SELECT COUNT(*)::int AS cnt, MAX("updatedAt") AS max FROM "Property") p
+          CROSS JOIN (
+            SELECT COUNT(*)::int AS cnt, MAX("createdAt") AS max
+            FROM "PropertyAssignment"
+          ) a
+          CROSS JOIN (
+            SELECT COUNT(*)::int AS cnt, MAX("updatedAt") AS max FROM "Client"
+          ) c
+          CROSS JOIN (
+            SELECT COUNT(*)::int AS cnt, MAX("updatedAt") AS max
+            FROM "ClientPropertyInterest"
+          ) i
+          CROSS JOIN (
+            SELECT COUNT(*)::int AS cnt, MAX("updatedAt") AS max FROM "User"
+          ) u
+        `,
+      );
+      return formatRaw(rows[0]);
+    }
+    const [properties, assignments, clients, interests, users] =
+      await Promise.all([
+        this.prisma.property.aggregate({
+          where: propertyScope ?? {},
+          _count: { _all: true },
+          _max: { updatedAt: true },
+        }),
+        this.prisma.propertyAssignment.aggregate({
+          where: propertyScope ? { property: propertyScope } : {},
+          _count: { _all: true },
+          _max: { createdAt: true },
+        }),
+        this.prisma.client.aggregate({
+          where: clientScope ?? {},
+          _count: { _all: true },
+          _max: { updatedAt: true },
+        }),
+        this.prisma.clientPropertyInterest.aggregate({
+          where: clientScope ? { client: clientScope } : {},
+          _count: { _all: true },
+          _max: { updatedAt: true },
+        }),
+        this.prisma.user.aggregate({
+          _count: { _all: true },
+          _max: { updatedAt: true },
+        }),
+      ]);
+    return JSON.stringify([
+      properties._count._all,
+      properties._max.updatedAt?.toISOString() ?? '',
+      assignments._count._all,
+      assignments._max.createdAt?.toISOString() ?? '',
+      clients._count._all,
+      clients._max.updatedAt?.toISOString() ?? '',
+      interests._count._all,
+      interests._max.updatedAt?.toISOString() ?? '',
+      users._count._all,
+      users._max.updatedAt?.toISOString() ?? '',
+    ]);
+  }
+
+  private async runSync(
+    viewer: AuthUser | null,
+    key: string,
+    fingerprint: string,
+  ): Promise<void> {
+    const now = new Date();
+    const { propertyScope, clientScope } = this.syncScopes(viewer);
     await this.syncProperties(now, propertyScope);
     await this.syncClients(now, clientScope);
+    this.syncFingerprints.set(key, fingerprint);
   }
 
   /**
@@ -626,10 +848,10 @@ export class FollowUpsService {
         ? { responsible: { userId: viewer.id } }
         : { responsibleUserId: viewer.id };
 
-    const page = await this.queryPage(scope, query, now, false);
+    const page = await this.queryPersonalPage(scope, query, now);
     const summary = query.cursor
       ? undefined
-      : await this.buildSummary(scope, now);
+      : await this.buildListSummary(viewer, now);
     return {
       items: page.rows.map((row) => this.toSubjectDto(row, now)),
       nextCursor: page.nextCursor,
@@ -762,6 +984,208 @@ export class FollowUpsService {
     };
   }
 
+  /** Full-scope counters used by the manager supervision summary. */
+  /**
+   * Personal-list page: the scoped/ordered/cursor query selects ONLY the
+   * subject ids (Prisma keeps the exact filters and cursor semantics), then a
+   * single parameterized query loads every card field for those ids. This
+   * replaces the separate relation loads (property/owner/contact/client/
+   * responsible/latest entry/count) with one round trip while leaving the
+   * supervision page on its existing path.
+   */
+  private async queryPersonalPage(
+    scope: Prisma.FollowUpSubjectWhereInput,
+    query: ListFollowUpsQueryDto,
+    now: Date,
+  ): Promise<{
+    rows: SubjectRow[];
+    nextCursor: string | null;
+    truncated: boolean;
+  }> {
+    const limit = Math.min(
+      query.limit ?? DEFAULT_FOLLOWUP_PAGE_SIZE,
+      MAX_FOLLOWUP_PAGE_SIZE,
+    );
+    const ids = await this.prisma.followUpSubject.findMany({
+      where: this.composeWhere(scope, query, now, false),
+      orderBy: [{ nextDueAt: 'asc' }, { id: 'asc' }],
+      take: limit + 1,
+      ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
+      select: { id: true },
+    });
+    const truncated = ids.length > limit;
+    const page = truncated ? ids.slice(0, limit) : ids;
+    const pageIds = page.map((row) => row.id);
+    const rows = await this.subjectCards(pageIds);
+    return {
+      rows,
+      nextCursor: truncated ? (pageIds[pageIds.length - 1] ?? null) : null,
+      truncated,
+    };
+  }
+
+  /** One query for every card field of the given (already authorized) ids. */
+  private async subjectCards(ids: string[]): Promise<SubjectRow[]> {
+    if (ids.length === 0) return [];
+    const list = Prisma.join(ids.map((id) => Prisma.sql`${id}::uuid`));
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        kind: SubjectRow['kind'];
+        targetKey: string;
+        nextDueAt: Date;
+        lastSavedAt: Date | null;
+        responsibleUserId: string | null;
+        propertyId: string | null;
+        reference: string | null;
+        title: string | null;
+        area: string | null;
+        listingType: NonNullable<SubjectRow['property']>['listingType'] | null;
+        ownerId: string | null;
+        ownerName: string | null;
+        ownerPhone: string | null;
+        contactId: string | null;
+        contactName: string | null;
+        contactPhone: string | null;
+        clientId: string | null;
+        clientName: string | null;
+        clientPhone: string | null;
+        responsibleUserRowId: string | null;
+        responsibleUserName: string | null;
+        responsibleEmployeeUserId: string | null;
+        responsibleEmployeeName: string | null;
+        entryNote: string | null;
+        entryCreatedAt: Date | null;
+        entryAuthorEmployeeName: string | null;
+        entryAuthorUserName: string | null;
+        entryCount: number;
+      }>
+    >(Prisma.sql`
+      SELECT
+        s.id,
+        s.kind AS kind,
+        s."targetKey" AS "targetKey",
+        s."nextDueAt" AS "nextDueAt",
+        s."lastSavedAt" AS "lastSavedAt",
+        s."responsibleUserId" AS "responsibleUserId",
+        p.id AS "propertyId",
+        p.reference AS reference,
+        p.title AS title,
+        p.area AS area,
+        p."listingType" AS "listingType",
+        po.id AS "ownerId",
+        po.name AS "ownerName",
+        po.phone AS "ownerPhone",
+        pc.id AS "contactId",
+        pc.name AS "contactName",
+        pc.phone AS "contactPhone",
+        c.id AS "clientId",
+        c.name AS "clientName",
+        c.phone AS "clientPhone",
+        ru.id AS "responsibleUserRowId",
+        ru.name AS "responsibleUserName",
+        eu.id AS "responsibleEmployeeUserId",
+        eu.name AS "responsibleEmployeeName",
+        le.note AS "entryNote",
+        le."createdAt" AS "entryCreatedAt",
+        aeu.name AS "entryAuthorEmployeeName",
+        auu.name AS "entryAuthorUserName",
+        (
+          SELECT COUNT(*)::int FROM "FollowUpEntry" ec
+          WHERE ec."subjectId" = s.id
+        ) AS "entryCount"
+      FROM "FollowUpSubject" s
+      LEFT JOIN "Property" p ON p.id = s."propertyId"
+      LEFT JOIN "Owner" po ON po.id = p."ownerId"
+      LEFT JOIN "Contact" pc ON pc.id = p."contactId"
+      LEFT JOIN "Client" c ON c.id = s."clientId"
+      LEFT JOIN "User" ru ON ru.id = s."responsibleUserId"
+      LEFT JOIN "EmployeeProfile" re ON re.id = s."responsibleId"
+      LEFT JOIN "User" eu ON eu.id = re."userId"
+      LEFT JOIN LATERAL (
+        SELECT e.note, e."createdAt", e."authorId", e."authorUserId"
+        FROM "FollowUpEntry" e
+        WHERE e."subjectId" = s.id
+        ORDER BY e."createdAt" DESC, e.id DESC
+        LIMIT 1
+      ) le ON TRUE
+      LEFT JOIN "EmployeeProfile" ae ON ae.id = le."authorId"
+      LEFT JOIN "User" aeu ON aeu.id = ae."userId"
+      LEFT JOIN "User" auu ON auu.id = le."authorUserId"
+      WHERE s.id IN (${list})
+      ORDER BY array_position(ARRAY[${list}]::uuid[], s.id)
+    `);
+    return rows.map(
+      (row): SubjectRow => ({
+        id: row.id,
+        kind: row.kind,
+        targetKey: row.targetKey,
+        nextDueAt: row.nextDueAt,
+        lastSavedAt: row.lastSavedAt,
+        responsibleUserId: row.responsibleUserId,
+        property: row.propertyId
+          ? {
+              id: row.propertyId,
+              reference: row.reference ?? '',
+              title: row.title ?? '',
+              area: row.area ?? '',
+              listingType: row.listingType as NonNullable<
+                SubjectRow['property']
+              >['listingType'],
+              owner: row.ownerId
+                ? {
+                    id: row.ownerId,
+                    name: row.ownerName ?? '',
+                    phone: row.ownerPhone ?? '',
+                  }
+                : null,
+              contact: row.contactId
+                ? {
+                    id: row.contactId,
+                    name: row.contactName ?? '',
+                    phone: row.contactPhone ?? '',
+                  }
+                : null,
+            }
+          : null,
+        client: row.clientId
+          ? {
+              id: row.clientId,
+              name: row.clientName ?? '',
+              phone: row.clientPhone ?? '',
+            }
+          : null,
+        responsible: row.responsibleEmployeeName
+          ? {
+              user: {
+                id: row.responsibleEmployeeUserId ?? '',
+                name: row.responsibleEmployeeName,
+              },
+            }
+          : null,
+        responsibleUser: row.responsibleUserName
+          ? { id: row.responsibleUserRowId ?? '', name: row.responsibleUserName }
+          : null,
+        entries:
+          row.entryNote !== null && row.entryCreatedAt
+            ? [
+                {
+                  note: row.entryNote,
+                  createdAt: row.entryCreatedAt,
+                  author: row.entryAuthorEmployeeName
+                    ? { user: { name: row.entryAuthorEmployeeName } }
+                    : null,
+                  authorUser: row.entryAuthorUserName
+                    ? { name: row.entryAuthorUserName }
+                    : null,
+                },
+              ]
+            : [],
+        _count: { entries: row.entryCount },
+      }),
+    );
+  }
+
   private async buildSummary(
     scope: Prisma.FollowUpSubjectWhereInput,
     now: Date,
@@ -812,6 +1236,90 @@ export class FollowUpsService {
         lessors,
         inquiries,
         exchanges,
+      },
+    };
+  }
+
+  /**
+   * Personal-list summary. All counters are mutually-independent predicates
+   * over the same scoped subject set, so one scan with FILTER clauses replaces
+   * the previous twelve `count()` round trips (12 queries -> 1).
+   */
+  private async buildListSummary(
+    viewer: AuthUser,
+    now: Date,
+  ): Promise<FollowUpSummaryDto> {
+    const { start, end } = this.kuwaitBounds(now);
+    const scope =
+      viewer.role === Role.EMPLOYEE
+        ? Prisma.sql`EXISTS (
+            SELECT 1 FROM "EmployeeProfile" e
+            WHERE e.id = s."responsibleId" AND e."userId" = ${viewer.id}::uuid
+          )`
+        : Prisma.sql`s."responsibleUserId" = ${viewer.id}::uuid`;
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        total: number;
+        overdue: number;
+        today: number;
+        upcoming: number;
+        never: number;
+        owners: number;
+        buyers: number;
+        sellers: number;
+        renters: number;
+        lessors: number;
+        inquiries: number;
+        exchanges: number;
+      }>
+    >(Prisma.sql`
+      SELECT
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE s."nextDueAt" < ${start}::timestamptz)::int AS overdue,
+        COUNT(*) FILTER (
+          WHERE s."nextDueAt" >= ${start}::timestamptz
+            AND s."nextDueAt" < ${end}::timestamptz
+        )::int AS today,
+        COUNT(*) FILTER (WHERE s."nextDueAt" >= ${end}::timestamptz)::int AS upcoming,
+        COUNT(*) FILTER (WHERE s."lastSavedAt" IS NULL)::int AS never,
+        COUNT(*) FILTER (WHERE s.kind = 'PROPERTY_OWNER')::int AS owners,
+        COUNT(*) FILTER (
+          WHERE s.kind = 'CLIENT_REQUEST' AND s."targetKey" LIKE '%:BUYER'
+        )::int AS buyers,
+        COUNT(*) FILTER (
+          WHERE s.kind = 'PROPERTY_OWNER' AND p."listingType" = 'SALE'
+        )::int AS sellers,
+        COUNT(*) FILTER (
+          WHERE s.kind = 'CLIENT_REQUEST' AND s."targetKey" LIKE '%:RENTER'
+        )::int AS renters,
+        COUNT(*) FILTER (
+          WHERE s.kind = 'PROPERTY_OWNER' AND p."listingType" = 'RENT'
+        )::int AS lessors,
+        COUNT(*) FILTER (WHERE s.kind = 'INQUIRY')::int AS inquiries,
+        COUNT(*) FILTER (
+          WHERE s.kind = 'CLIENT_REQUEST' AND s."targetKey" LIKE '%:EXCHANGER'
+        )::int AS exchanges
+      FROM "FollowUpSubject" s
+      LEFT JOIN "Property" p ON p.id = s."propertyId"
+      WHERE ${scope}
+    `);
+    const row = rows[0];
+    const total = row?.total ?? 0;
+    return {
+      total,
+      overdue: row?.overdue ?? 0,
+      today: row?.today ?? 0,
+      upcoming: row?.upcoming ?? 0,
+      never: row?.never ?? 0,
+      tabs: {
+        all: total,
+        owners: row?.owners ?? 0,
+        buyers: row?.buyers ?? 0,
+        sellers: row?.sellers ?? 0,
+        renters: row?.renters ?? 0,
+        lessors: row?.lessors ?? 0,
+        inquiries: row?.inquiries ?? 0,
+        exchanges: row?.exchanges ?? 0,
       },
     };
   }
@@ -977,10 +1485,23 @@ export class FollowUpsService {
   }> {
     await this.ensureSchema();
     const now = new Date();
+    // Same visibility rules as the authorized follow-up feeds:
+    // - OWNER: company-wide.
+    // - MANAGER: own manager-owned subjects + current team's employee subjects.
+    // - EMPLOYEE: own responsible subjects only.
+    // The scope is part of the database predicate, so a foreign id is
+    // indistinguishable from a missing one (404), including after reassignment.
     const scope: Prisma.FollowUpSubjectWhereInput =
-      viewer.role === Role.MANAGER
+      viewer.role === Role.OWNER
         ? {}
-        : { responsible: { userId: viewer.id } };
+        : viewer.role === Role.MANAGER
+          ? {
+              OR: [
+                { responsibleUserId: viewer.id },
+                { responsible: { managerUserId: viewer.id } },
+              ],
+            }
+          : { responsible: { userId: viewer.id } };
     const row = await this.prisma.followUpSubject.findFirst({
       where: { id: subjectId, ...scope },
       select: {
@@ -1361,24 +1882,7 @@ export class FollowUpsService {
   ): Promise<FollowUpSupervisionPageDto> {
     await this.ensureSupervisionSchema();
     const now = new Date();
-    // Employee-owned rows only: `responsibleId` is set exactly for them.
-    // A Manager supervises ONLY their current team; OWNER supervises all.
-    const baseWithoutEmployee: Prisma.FollowUpSubjectWhereInput = {
-      active: true,
-      responsibleId: { not: null },
-      ...(isManager(viewer)
-        ? { responsible: { managerUserId: viewer.id } }
-        : {}),
-    };
-    const baseScope: Prisma.FollowUpSubjectWhereInput = query.employeeUserId
-      ? {
-          AND: [
-            baseWithoutEmployee,
-            { responsible: { userId: query.employeeUserId } },
-          ],
-        }
-      : baseWithoutEmployee;
-
+    const baseScope = this.supervisionScope(viewer, query.employeeUserId);
     const page = await this.queryPage(baseScope, query, now, true);
     const reminders = await this.lastReminderMap(
       page.rows.map((row) => row.id),
@@ -1393,48 +1897,110 @@ export class FollowUpsService {
         lastReminderAt: reminders.get(row.id) ?? null,
       };
     });
-    const summary = query.cursor
-      ? undefined
-      : await this.buildSummary(baseScope, now);
-    const employees = query.cursor
-      ? undefined
-      : await this.supervisionEmployees(baseWithoutEmployee);
+    // The page is intentionally page-only: full-scope summary and employee
+    // filter options live on dedicated endpoints so ordinary page requests do
+    // not scan the whole team or serialise thousands of options.
     return {
       items,
       nextCursor: page.nextCursor,
       truncated: page.truncated,
       generatedAt: now.toISOString(),
-      ...(summary ? { summary } : {}),
-      ...(employees ? { employees } : {}),
     };
   }
 
-  /** All responsible employees in the full supervision scope (filter options). */
-  private async supervisionEmployees(
-    scope: Prisma.FollowUpSubjectWhereInput,
-  ): Promise<FollowUpResponsibleDto[]> {
-    const rows = await this.prisma.followUpSubject.findMany({
-      where: scope,
-      select: {
-        responsibleId: true,
-        responsible: {
-          select: {
-            userId: true,
-            user: { select: { name: true } },
-          },
+  /** Full-scope counters for the current employee filter. */
+  async supervisionSummary(
+    viewer: AuthUser,
+    query: SupervisionSummaryQueryDto = {},
+  ): Promise<FollowUpSummaryDto> {
+    await this.ensureSupervisionSchema();
+    return this.buildSummary(
+      this.supervisionScope(viewer, query.employeeUserId),
+      new Date(),
+    );
+  }
+
+  /** Searchable, stable, paginated employee filter options. */
+  async listSupervisionEmployees(
+    viewer: AuthUser,
+    query: ListSupervisionEmployeesQueryDto = {},
+  ): Promise<FollowUpResponsiblePageDto> {
+    await this.ensureSupervisionSchema();
+    const managerId = isManager(viewer) ? viewer.id : null;
+    const limit = Math.min(
+      query.limit ?? MAX_FOLLOWUP_PAGE_SIZE,
+      MAX_FOLLOWUP_PAGE_SIZE,
+    );
+    const search = query.search?.trim() || null;
+    const escaped = search
+      ? search.replace(/[\\%_]/g, (char) => `\\${char}`)
+      : null;
+    let cursorName: string | null = null;
+    let cursorId: string | null = null;
+    if (query.cursor) {
+      const cursor = await this.prisma.employeeProfile.findFirst({
+        where: {
+          userId: query.cursor,
+          ...(managerId ? { managerUserId: managerId } : {}),
+          followUpSubjects: { some: { active: true } },
         },
-      },
-      distinct: ['responsibleId'],
-    });
-    const employees = new Map<string, string>();
-    for (const row of rows) {
-      if (row.responsible) {
-        employees.set(row.responsible.userId, row.responsible.user.name);
-      }
+        select: { user: { select: { name: true } } },
+      });
+      if (!cursor) return { items: [], nextCursor: null };
+      cursorName = cursor.user.name;
+      cursorId = query.cursor;
     }
-    return [...employees.entries()]
-      .map(([userId, name]) => ({ userId, name }))
-      .sort((a, b) => a.name.localeCompare(b.name, 'ar'));
+    const rows = await this.prisma.$queryRaw<
+      Array<{ userId: string; name: string }>
+    >`
+      SELECT u.id AS "userId", u.name
+      FROM "FollowUpSubject" s
+      JOIN "EmployeeProfile" p ON p.id = s."responsibleId"
+      JOIN "User" u ON u.id = p."userId"
+      WHERE s.active = true
+        AND s."responsibleId" IS NOT NULL
+        AND (${managerId}::uuid IS NULL OR p."managerUserId" = ${managerId}::uuid)
+        AND (
+          ${escaped}::text IS NULL
+          OR u.name ILIKE '%' || ${escaped} || '%' ESCAPE '\\'
+        )
+        AND (
+          ${cursorName}::text IS NULL
+          OR (u.name, u.id) > (${cursorName}::text, ${cursorId}::uuid)
+        )
+      GROUP BY u.id, u.name
+      ORDER BY u.name ASC, u.id ASC
+      LIMIT ${limit + 1}
+    `;
+    const truncated = rows.length > limit;
+    const page = truncated ? rows.slice(0, limit) : rows;
+    return {
+      items: page.map((row) => ({ userId: row.userId, name: row.name })),
+      nextCursor: truncated
+        ? (page[page.length - 1]?.userId ?? null)
+        : null,
+    };
+  }
+
+  private supervisionScope(
+    viewer: AuthUser,
+    employeeUserId?: string,
+  ): Prisma.FollowUpSubjectWhereInput {
+    const base: Prisma.FollowUpSubjectWhereInput = {
+      active: true,
+      responsibleId: { not: null },
+      ...(isManager(viewer)
+        ? { responsible: { managerUserId: viewer.id } }
+        : {}),
+    };
+    return employeeUserId
+      ? {
+          AND: [
+            base,
+            { responsible: { userId: employeeUserId } },
+          ],
+        }
+      : base;
   }
 
   /** The latest manual reminder instant per subject id. */

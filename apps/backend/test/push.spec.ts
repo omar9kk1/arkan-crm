@@ -151,7 +151,23 @@ describeWithDatabase('Web Push (manager devices)', () => {
       data: { role: 'EMPLOYEE' },
     });
     await ctx.prisma.notification.deleteMany({});
+    await ctx.prisma.clientReviewRequest.deleteMany({});
     await ctx.prisma.pushSubscription.deleteMany({});
+    // Restore the routing fixture: the employee reports to the primary manager.
+    const managerAccount = await ctx.prisma.user.findUnique({
+      where: { email: managerEmail },
+      select: { id: true },
+    });
+    const employeeAccount = await ctx.prisma.user.findUnique({
+      where: { email: employeeEmail },
+      select: { id: true },
+    });
+    if (managerAccount && employeeAccount) {
+      await ctx.prisma.employeeProfile.updateMany({
+        where: { userId: employeeAccount.id },
+        data: { managerUserId: managerAccount.id },
+      });
+    }
   });
 
   it('pushes to a desktop AND a mobile session of the same manager at once', async () => {
@@ -281,6 +297,16 @@ describeWithDatabase('Web Push (manager devices)', () => {
       where: { id: manager?.id as string },
       data: { role: 'EMPLOYEE' },
     });
+    // The employee's reviewer must stay a real manager; route this review to
+    // the OWNER pool so the demoted account is not a valid recipient.
+    const routedEmployee = await ctx.prisma.user.findUniqueOrThrow({
+      where: { email: employeeEmail },
+      select: { id: true },
+    });
+    await ctx.prisma.employeeProfile.updateMany({
+      where: { userId: routedEmployee.id },
+      data: { managerUserId: null },
+    });
     const employee = await loginAs(employeeEmail);
     await stageReview(employee.accessToken);
     await dispatch();
@@ -319,14 +345,14 @@ describeWithDatabase('Web Push (manager devices)', () => {
     });
     expect(rows[0]?.userId).toBe(other?.id);
 
-    // The event is delivered ONCE to the shared endpoint (not once per
-    // account that ever used it).
+    // The event must NOT be delivered to an endpoint now owned by another
+    // account: review routing addresses the assigned reviewer only.
     const employee = await loginAs(employeeEmail);
     await stageReview(employee.accessToken);
     await dispatch();
     expect(
       pushedEndpoints().filter((endpoint) => endpoint === SHARED_ENDPOINT),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
   });
 
   it('delivers nothing to a subscription that was switched off', async () => {

@@ -26,7 +26,7 @@ export interface ManagerDashboardDto {
     rented: number;
     rejected: number;
     archived: number;
-    /** Soft-deleted rows only (Manager Trash). */
+    /** Soft-deleted rows only (OWNER Trash). */
     trash: number;
   };
   clients: {

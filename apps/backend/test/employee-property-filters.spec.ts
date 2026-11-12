@@ -89,20 +89,25 @@ const all: Property[] = [
 const ids = (items: Property[]) => items.map((item) => item.id).sort();
 
 describe('employee property tab filters', () => {
-  it('shows ONLY AVAILABLE properties under «كل العقارات»', () => {
+  it('shows the published inventory (AVAILABLE + SOLD) under «كل العقارات»', () => {
     expect(ids(filterProperties(all, 'all', ''))).toEqual([
       'available-other',
       'available-own',
+      'sold-own',
     ]);
     // Pending / rejected / changes-requested rows are excluded.
     expect(filterProperties(all, 'all', '').map((p) => p.apiStatus)).toEqual([
       'AVAILABLE',
       'AVAILABLE',
+      'SOLD',
     ]);
   });
 
-  it('shows only the viewer’s own AVAILABLE properties under «عقاراتي»', () => {
-    expect(ids(filterProperties(all, 'mine', ''))).toEqual(['available-own']);
+  it('shows the viewer’s own published properties under «عقاراتي»', () => {
+    expect(ids(filterProperties(all, 'mine', ''))).toEqual([
+      'available-own',
+      'sold-own',
+    ]);
     // Another employee's AVAILABLE row must not be "mine".
     expect(ids(filterProperties(all, 'mine', ''))).not.toContain(
       'available-other',

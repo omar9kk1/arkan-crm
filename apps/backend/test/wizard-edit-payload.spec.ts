@@ -23,6 +23,7 @@ const client = (over: Partial<EmployeeClient> = {}): EmployeeClient => ({
   budget: '—',
   notes: 'ملاحظات قديمة يجب ألا تُفقد',
   next: '',
+  lastFollowUp: '',
   history: [],
   properties: [],
   propertyInterests: [

@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ClientReviewKind, ApprovalStatus, Prisma, PropertyStatus } from '@prisma/client';
 import { Role, type AuthUser } from '@arkan/shared';
@@ -11,17 +12,32 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { propertyVisibilityWhere } from '../properties/property-visibility';
 import { clientOwnershipWhere, ensureEmployeeProfile } from './client-policy';
-import { isManagement } from '../common/access/access-policy';
+import { assertOwner, isManagement } from '../common/access/access-policy';
+import { clientReviewOwnershipReady } from './client-review-schema';
 
-/** OWNER all reviews; MANAGER their team's submissions; EMPLOYEE own. */
+/**
+ * Direct-supervisor review queue scope.
+ *
+ * - EMPLOYEE: own submissions.
+ * - MANAGER: rows whose persisted `assignedReviewerId` is that Manager.
+ * - OWNER: the NULL OWNER pool plus rows this OWNER personally decided.
+ *
+ * Pending assignments move only through an authorized employee transfer.
+ * Completed rows keep their historical reviewer. A managed employee's request
+ * must never appear as an actionable OWNER queue item; OWNER can still inspect
+ * it read-only through the System Log endpoint.
+ */
 function reviewScopeWhere(
   viewer: AuthUser,
 ): Prisma.ClientReviewRequestWhereInput {
-  if (viewer.role === Role.OWNER) return {};
-  if (viewer.role === Role.MANAGER)
+  if (viewer.role === Role.OWNER)
     return {
-      requestedBy: { employee: { managerUserId: viewer.id } },
+      // NULL is the OWNER pool; viewer.id preserves reviews this OWNER
+      // personally decided before a role change or another transfer.
+      OR: [{ assignedReviewerId: null }, { assignedReviewerId: viewer.id }],
     };
+  if (viewer.role === Role.MANAGER)
+    return { assignedReviewerId: viewer.id };
   return { requestedById: viewer.id };
 }
 import { clientRequestChangeSummary } from './client-request-data';
@@ -70,6 +86,46 @@ export class ClientReviewsService {
     private readonly notifications: NotificationsService,
   ) {}
 
+  private async requireOwnershipSchema(): Promise<void> {
+    if (!(await clientReviewOwnershipReady(this.prisma)))
+      throw new ServiceUnavailableException(
+        'ترحيل ملكية مراجعات العملاء غير مطبّق على قاعدة البيانات هذه بعد. لم يتم تفعيل نظام المراجعة الجديد؛ يلزم تطبيق الترحيل المعتمد أولًا.',
+      );
+  }
+
+  /**
+   * Resolve the persisted reviewer for a submission/resubmission.
+   * - Employee with an active Manager -> that Manager.
+   * - Employee directly under OWNER -> NULL (OWNER pool).
+   * - Assigned Manager inactive/invalid -> explicit Arabic validation error;
+   *   never a silent OWNER fallback.
+   */
+  private async assignedReviewerFor(
+    tx: Prisma.TransactionClient,
+    requesterId: string,
+  ): Promise<string | null> {
+    const requester = await tx.user.findUnique({
+      where: { id: requesterId },
+      select: {
+        role: true,
+        employee: { select: { managerUserId: true } },
+      },
+    });
+    if (!requester) throw new NotFoundException('مقدم الطلب غير موجود.');
+    if (requester.role !== Role.EMPLOYEE) return null;
+    const managerUserId = requester.employee?.managerUserId ?? null;
+    if (!managerUserId) return null;
+    const manager = await tx.user.findFirst({
+      where: { id: managerUserId, role: Role.MANAGER, isActive: true },
+      select: { id: true },
+    });
+    if (!manager)
+      throw new BadRequestException(
+        'لا يمكن إرسال طلب المراجعة: المشرف المباشر غير نشط أو غير متاح. يلزم على مالك النظام إعادة تعيين مدير نشط أولًا.',
+      );
+    return manager.id;
+  }
+
   // ---------------------------------------------------------------------------
   // Submission (employees only — managers keep writing directly, no review)
   // ---------------------------------------------------------------------------
@@ -84,6 +140,7 @@ export class ClientReviewsService {
     viewer: AuthUser,
     dto: SubmitClientReviewDto,
   ): Promise<ClientReviewSummaryDto> {
+    await this.requireOwnershipSchema();
     if (viewer.role !== Role.EMPLOYEE)
       throw new ForbiddenException(
         'إضافات المدير تعتمد مباشرة — احفظ العميل من الأدوات الاعتيادية بدون مراجعة.',
@@ -127,6 +184,7 @@ export class ClientReviewsService {
       await this.assertInterestValid(viewer, interest.propertyId);
 
     const created = await this.prisma.$transaction(async (tx) => {
+      const assignedReviewerId = await this.assignedReviewerFor(tx, viewer.id);
       let base: ClientReviewBaseV1 | null = null;
       if (normalized.kind === 'EDIT') {
         // The approved state this proposal was built on top of — compared
@@ -143,6 +201,7 @@ export class ClientReviewsService {
           base: base ? asJson(base) : Prisma.DbNull,
           idempotencyKey: dto.idempotencyKey ?? null,
           requestedById: viewer.id,
+          assignedReviewerId,
         },
         include: { requestedBy: { select: { id: true, name: true } } },
       });
@@ -200,6 +259,7 @@ export class ClientReviewsService {
     id: string,
     dto: SubmitClientReviewDto,
   ): Promise<ClientReviewSummaryDto> {
+    await this.requireOwnershipSchema();
     const review = await this.findOwnedOr404(viewer, id);
     const wasPending = review.status === ApprovalStatus.PENDING;
     if (!wasPending && review.status !== ApprovalStatus.CHANGES_REQUESTED)
@@ -254,6 +314,10 @@ export class ClientReviewsService {
         // The atomic claim: exactly ONE concurrent correction wins; every
         // duplicate/concurrent loser 409s here BEFORE any write, audit row
         // or notification.
+        const assignedReviewerId = await this.assignedReviewerFor(
+          tx,
+          review.requestedById,
+        );
         const claimed = await tx.clientReviewRequest.updateMany({
           where: {
             id,
@@ -261,6 +325,7 @@ export class ClientReviewsService {
           },
           data: {
             status: ApprovalStatus.PENDING,
+            assignedReviewerId,
             reviewedById: null,
             reviewNotes: null,
             reviewedAt: null,
@@ -317,11 +382,12 @@ export class ClientReviewsService {
   }
 
   // ---------------------------------------------------------------------------
-  // Reading (manager: everything — employee: own rows only, 404 otherwise)
+  // Reading (direct supervisor queue; employee: own rows only, 404 otherwise)
   // ---------------------------------------------------------------------------
 
   /** `GET /client-reviews` — scoped cards, newest first. */
   async list(viewer: AuthUser): Promise<ClientReviewListDto> {
+    await this.requireOwnershipSchema();
     const rows = await this.prisma.clientReviewRequest.findMany({
       where: reviewScopeWhere(viewer),
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -360,11 +426,13 @@ export class ClientReviewsService {
    * awaiting a Manager decision (`PENDING`; CHANGES_REQUESTED awaits the
    * requester, decided rows are history). An exact `count` query, never the
    * length of any list window. Row-level scoping set INSIDE the query, the
-   * same contract as `list`: a manager counts the whole company, an employee
-   * ONLY their own submissions (another employee's rows are never counted)
-   * — privacy is enforced here, not by any frontend filter.
+   * same persisted-assignment contract as `list`: a manager counts only rows
+   * assigned to them, OWNER counts the owner pool plus own decisions, and an
+   * employee ONLY their own submissions — privacy is enforced here, not by any
+   * frontend filter.
    */
   async countPending(viewer: AuthUser): Promise<ClientReviewCountDto> {
+    await this.requireOwnershipSchema();
     const pending = await this.prisma.clientReviewRequest.count({
       where: {
         status: ApprovalStatus.PENDING,
@@ -376,10 +444,37 @@ export class ClientReviewsService {
 
   /**
    * `GET /client-reviews/:id` — the full proposal, the EDIT's current approved
-   * state, and the privacy-safe diff. Requester or manager; 404 otherwise.
+   * state, and the privacy-safe diff. Follows the same direct-supervisor scope
+   * as the queue; 404 otherwise.
    */
   async findOne(viewer: AuthUser, id: string): Promise<ClientReviewDetailDto> {
-    const review = await this.findOwnedOr404(viewer, id);
+    await this.requireOwnershipSchema();
+    return this.toDetail(viewer, await this.findOwnedOr404(viewer, id));
+  }
+
+  /**
+   * OWNER-only read-through for the System Log drawer. It deliberately bypasses
+   * the OWNER review-queue scope (which excludes managed employees) while
+   * remaining read-only: no decision endpoint uses this path.
+   */
+  async findOneForOwner(
+    viewer: AuthUser,
+    id: string,
+  ): Promise<ClientReviewDetailDto> {
+    await this.requireOwnershipSchema();
+    assertOwner(viewer);
+    const review = await this.prisma.clientReviewRequest.findUnique({
+      where: { id },
+      include: { requestedBy: { select: { id: true, name: true } } },
+    });
+    if (!review) throw new NotFoundException('طلب المراجعة غير موجود.');
+    return this.toDetail(viewer, review);
+  }
+
+  private async toDetail(
+    viewer: AuthUser,
+    review: ReviewRow,
+  ): Promise<ClientReviewDetailDto> {
     const payload = this.decode(review.payload, review.id);
     const addInterests = await this.resolveInterestRefs(payload.addInterests);
     const removeInterests = this.removalRefs(review, payload, addInterests);
@@ -450,6 +545,7 @@ export class ClientReviewsService {
     action: ReviewDecision,
     reviewNotes: string | null,
   ): Promise<ClientReviewSummaryDto> {
+    await this.requireOwnershipSchema();
     if (!isManagement(viewer))
       throw new ForbiddenException(
         'This decision is reserved for the OWNER or a Manager',

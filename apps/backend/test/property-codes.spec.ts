@@ -29,6 +29,7 @@ const image = [{ buffer: pngBytes(), filename: 'photo.png' }];
 describeWithDatabase('P/A property numbering', () => {
   let ctx: TestContext;
   let managerToken: string;
+  let ownerToken: string;
   let employeeAToken: string;
   let employeeBToken: string;
   let seq = 0;
@@ -87,6 +88,11 @@ describeWithDatabase('P/A property numbering', () => {
       name: 'Manager PA',
       role: Role.MANAGER,
     });
+    const owner = await createUser(ctx.prisma, {
+      email: 'owner@pa.local',
+      name: 'Owner PA',
+      role: Role.OWNER,
+    });
     const a = await createUser(ctx.prisma, {
       email: 'employee-a@pa.local',
       name: 'Employee A',
@@ -98,6 +104,7 @@ describeWithDatabase('P/A property numbering', () => {
       role: Role.EMPLOYEE,
     });
     managerToken = await login(ctx.app, manager.email);
+    ownerToken = await login(ctx.app, owner.email);
     employeeAToken = await login(ctx.app, a.email);
     employeeBToken = await login(ctx.app, b.email);
   });
@@ -284,14 +291,14 @@ describeWithDatabase('P/A property numbering', () => {
 
     const trashed = await api()
       .post(`/properties/${pending.id}/trash`)
-      .set(auth(managerToken))
+      .set(auth(ownerToken))
       .send({ reason: 'اختبار' });
     expect(trashed.status).toBe(200);
     expect(trashed.body.data.reference).toBe(aCode);
 
     const restored = await api()
       .post(`/properties/${pending.id}/restore`)
-      .set(auth(managerToken))
+      .set(auth(ownerToken))
       .send({});
     expect(restored.status).toBe(200);
     expect(restored.body.data.reference).toBe(aCode);

@@ -125,23 +125,22 @@ describeWithDatabase('Record-activity notifications (reviewed era)', () => {
     await ctx.prisma.notification.deleteMany({});
   });
 
-  /** Rows of one event type as seen by the first manager. */
+  /** Rows of one event type as seen by the direct Manager. */
   const managersRows = async (type: string): Promise<NotificationItem[]> => {
     const rows = (await inbox(managerToken)).filter(
       (item) => item.type === type,
     );
-    // Both active managers receive the SAME payload (row ids differ per
-    // recipient by design) and raw output never carries a recipient id.
-    const twinRows = (await inbox(manager2Token)).filter(
+    // The direct Manager is the sole recipient; the OWNER receives no copy
+    // of the same review request.
+    const ownerRows = (await inbox(manager2Token)).filter(
       (item) => item.type === type,
     );
-    const strip = (item: NotificationItem) => ({ ...item, id: '' });
-    expect(twinRows.map(strip)).toEqual(rows.map(strip));
+    expect(ownerRows).toHaveLength(0);
     expect(JSON.stringify(rows)).not.toContain('userId');
     return rows;
   };
 
-  it('reports CLIENT_REVIEW_SUBMITTED to every ACTIVE manager only, privacy-safe', async () => {
+  it('reports CLIENT_REVIEW_SUBMITTED to the direct Manager only, privacy-safe', async () => {
     const ownerPhone = '65001111';
     const ownerName = 'زبون الأنشطة القحطاني';
     const review = await api()
@@ -171,7 +170,7 @@ describeWithDatabase('Record-activity notifications (reviewed era)', () => {
     expect(rows[0]?.message).toContain('موظف الأنشطة');
     // A pending CREATION carries no clientId deep link (nothing approved yet).
 
-    // The recipient set: active managers only — nobody else.
+    // The recipient set: the direct Manager only — nobody else.
     expect(
       await ctx.prisma.notification.count({ where: { userId: inactiveManagerId } }),
     ).toBe(0);

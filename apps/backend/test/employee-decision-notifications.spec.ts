@@ -21,6 +21,7 @@ const image = [{ buffer: pngBytes(), filename: 'photo.png' }];
 describeWithDatabase('Employee property decision notifications', () => {
   let ctx: TestContext;
   let employeeAId: string;
+  let ownerToken: string;
   let managerToken: string;
   let employeeAToken: string;
   let employeeBToken: string;
@@ -81,6 +82,11 @@ describeWithDatabase('Employee property decision notifications', () => {
   beforeAll(async () => {
     ctx = await createTestApp();
     await resetDatabase(ctx.prisma);
+    const owner = await createUser(ctx.prisma, {
+      email: 'decision-owner@test.local',
+      name: 'Decision Owner',
+      role: Role.OWNER,
+    });
     const manager = await createUser(ctx.prisma, {
       email: 'decision-manager@test.local',
       name: 'Decision Manager',
@@ -97,6 +103,7 @@ describeWithDatabase('Employee property decision notifications', () => {
       role: Role.EMPLOYEE,
     });
     employeeAId = a.id;
+    ownerToken = await login(ctx.app, owner.email);
     managerToken = await login(ctx.app, manager.email);
     employeeAToken = await login(ctx.app, a.email);
     employeeBToken = await login(ctx.app, b.email);
@@ -147,11 +154,22 @@ describeWithDatabase('Employee property decision notifications', () => {
     expect(denied.status).toBe(404);
   });
 
-  it('soft delete with a duplicate reason flags «عقار مشابه» and keeps creator-only history', async () => {
+  it('OWNER soft delete with a duplicate reason flags «عقار مشابه» and keeps creator-only history', async () => {
     const { id, code } = await createProperty({ plotNumber: '7102' });
-    const trashed = await api()
+
+    // MANAGER must never delete, even with a valid review capability.
+    const managerAttempt = await api()
       .post(`/properties/${id}/trash`)
       .set(auth(managerToken))
+      .send({ reason: 'محاولة مدير' });
+    expect(managerAttempt.status).toBe(403);
+    expect(
+      (await ctx.prisma.property.findUnique({ where: { id } }))?.deletedAt,
+    ).toBeNull();
+
+    const trashed = await api()
+      .post(`/properties/${id}/trash`)
+      .set(auth(ownerToken))
       .send({ reason: 'عقار مشابه لعقار مسجل' });
     expect(trashed.status).toBe(200);
 
@@ -159,7 +177,7 @@ describeWithDatabase('Employee property decision notifications', () => {
     const decision = items.find(
       (item) =>
         item.propertyId === id &&
-        item.title === 'تم حذف العقار بقرار المدير',
+        item.title === 'تم حذف العقار بقرار مالك النظام',
     );
     expect(decision).toBeTruthy();
     expect(decision!.message).toContain(
@@ -190,13 +208,13 @@ describeWithDatabase('Employee property decision notifications', () => {
     const { id } = await createProperty({ plotNumber: '7103' });
     await api()
       .post(`/properties/${id}/trash`)
-      .set(auth(managerToken))
+      .set(auth(ownerToken))
       .send({ reason: 'طلب المالك' });
     const items = await notifications(employeeAToken);
     const decision = items.find(
       (item) =>
         item.propertyId === id &&
-        item.title === 'تم حذف العقار بقرار المدير',
+        item.title === 'تم حذف العقار بقرار مالك النظام',
     );
     expect(decision).toBeTruthy();
     expect(decision!.message).toContain('سبب الحذف: طلب المالك');
@@ -227,12 +245,22 @@ describeWithDatabase('Employee property decision notifications', () => {
     const { id, code } = await createProperty({ plotNumber: '7105' });
     await api()
       .post(`/properties/${id}/trash`)
-      .set(auth(managerToken))
+      .set(auth(ownerToken))
       .send({ reason: 'عقار مشابه لعقار مسجل' });
+
+    // MANAGER cannot perform the permanent deletion.
+    const managerDelete = await api()
+      .delete(`/properties/${id}/permanent`)
+      .set(auth(managerToken))
+      .send({ confirmationCode: code });
+    expect(managerDelete.status).toBe(403);
+    expect(
+      await ctx.prisma.property.findUnique({ where: { id } }),
+    ).toBeTruthy();
 
     const deleted = await api()
       .delete(`/properties/${id}/permanent`)
-      .set(auth(managerToken))
+      .set(auth(ownerToken))
       .send({ confirmationCode: code });
     expect(deleted.status).toBe(200);
 

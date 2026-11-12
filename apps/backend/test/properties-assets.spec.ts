@@ -347,6 +347,14 @@ describeWithDatabase('Property images + EXCHANGE (storage, validation, mapping)'
       // Defense-in-depth session revocation: authVersion + refresh-token
       // revocation triggers for any role change or deactivation.
       '20261108090200_auth_revocation_triggers',
+      // Query-performance indexes for the hot list/read paths.
+      '20261109120000_query_performance_indexes',
+      // Deals: exact KWD precision + notes on the deal/commission tables.
+      '20261110120000_deal_kwd_precision_and_notes',
+      // Finance ledger precision + commission payout state.
+      '20261110130000_finance_ledger_precision_payouts',
+      // Review ownership: the persisted assigned reviewer on review requests.
+      '20261111120000_client_review_assigned_reviewer',
     ]);
   });
 });

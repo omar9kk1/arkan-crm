@@ -1,15 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { ContactType, PropertyStatus, Role } from '@prisma/client';
+import { ContactType, Prisma, PropertyStatus, Role } from '@prisma/client';
 import type { AuthUser } from '@arkan/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { clientOwnershipWhere } from '../clients/client-policy';
 import { contactOwnershipWhere } from '../contacts/contact-policy';
 import { propertyVisibilityWhere } from '../properties/property-visibility';
-import {
-  isManager,
-  teamEmployeeProfileIds,
-  teamEmployeeUserIds,
-} from '../common/access/access-policy';
+import { isManager } from '../common/access/access-policy';
 import type {
   ManagerDashboardDto,
   ManagerDashboardPeriod,
@@ -122,11 +118,6 @@ export function periodWindow(
   }
 }
 
-/** Kuwait calendar day index (1-based) of a UTC instant. */
-function kuwaitDayOfMonth(date: Date): number {
-  return new Date(date.getTime() + KUWAIT_OFFSET_MS).getUTCDate();
-}
-
 /** Kuwait hour of day (0–23) of a UTC instant. */
 export function kuwaitHourOfDay(date: Date): number {
   return new Date(date.getTime() + KUWAIT_OFFSET_MS).getUTCHours();
@@ -151,25 +142,28 @@ function decimalString(value: unknown): string {
   return String(value);
 }
 
-function topEntry(
-  counts: Map<string, number>,
-  nameFor: (key: string) => string | null,
-): { name: string | null; count: number } {
-  const entries = [...counts.entries()]
-    .map(([key, count]) => ({ name: nameFor(key), count }))
-    .filter(
-      (entry): entry is { name: string; count: number } => !!entry.name,
-    )
-    // Stable tie-break by display name so two equal leaders never flip
-    // between refreshes.
-    .sort(
-      (a, b) =>
-        b.count - a.count || a.name.localeCompare(b.name, 'ar'),
-    );
-  return {
-    name: entries[0]?.name ?? null,
-    count: entries[0]?.count ?? 0,
-  };
+/**
+ * Exact decimal(15,3) (KWD fils) helpers. PostgreSQL returns the deal sums as
+ * exact numeric text; accumulating them as integer fils avoids the
+ * floating-point drift of summing `Number(price)` row by row. Values from an
+ * older decimal(14,2) column still parse correctly (e.g. "1.50" = 1.500).
+ */
+function decimalToFils(value: string): bigint {
+  const negative = value.startsWith('-');
+  const [whole, fraction = ''] = (negative ? value.slice(1) : value).split('.');
+  const fils =
+    BigInt(whole || '0') * 1000n + BigInt((fraction + '000').slice(0, 3));
+  return negative ? -fils : fils;
+}
+
+function filsToDecimalString(fils: bigint): string {
+  const negative = fils < 0n;
+  const absolute = negative ? -fils : fils;
+  const fraction = (absolute % 1000n)
+    .toString()
+    .padStart(3, '0')
+    .replace(/0+$/, '');
+  return `${negative ? '-' : ''}${absolute / 1000n}${fraction ? `.${fraction}` : ''}`;
 }
 
 @Injectable()
@@ -187,24 +181,42 @@ export class DashboardService {
     const now = new Date();
     const window = periodWindow(period, now);
     const periodRange = rangeFilter(window);
+    const periodStart = periodRange?.gte ?? null;
+    const periodEnd = periodRange?.lt ?? null;
+    const managerId = isManager(viewer) ? viewer.id : null;
 
     // OWNER is company-wide. MANAGER metrics are restricted to the employees
     // currently assigned to that Manager (plus the Manager's own activity).
     const managerScoped = isManager(viewer);
-    const scopedUserIds = managerScoped
-      ? await teamEmployeeUserIds(this.prisma, viewer)
-      : null;
-    const scopedProfileIds = managerScoped
-      ? await teamEmployeeProfileIds(this.prisma, viewer)
-      : null;
+    // Express the current team as relation predicates. Loading the full team
+    // user/profile arrays on every dashboard request was pure overhead:
+    // PostgreSQL can use the same indexes directly and the arrays are not
+    // needed by any response field.
+    const employeeScope: Prisma.UserWhereInput = managerScoped
+      ? { employee: { managerUserId: viewer.id } }
+      : {};
     const propertyScope = propertyVisibilityWhere(viewer);
     const clientScope = clientOwnershipWhere(viewer);
     const contactScope = contactOwnershipWhere(viewer);
-    const employeeScope: { id?: { in: string[] } } =
-      managerScoped && scopedUserIds
-        ? { id: { in: scopedUserIds } }
-        : {};
-    const profileFilter = scopedProfileIds ?? undefined;
+
+    // Chart bucket expression evaluated in PostgreSQL with the same fixed
+    // UTC+3 Kuwait offset the response has always used. The expression is
+    // selected from a closed set, never from user input.
+    const dealBucket: Prisma.Sql =
+      window.bucket === 'hour'
+        ? Prisma.sql`EXTRACT(hour FROM d."closedAt" + interval '3 hours')::int`
+        : window.bucket === 'month'
+          ? Prisma.sql`(EXTRACT(year FROM d."closedAt" + interval '3 hours')::int * 12 + EXTRACT(month FROM d."closedAt" + interval '3 hours')::int - 1)`
+          : period === 'week' && window.start
+            ? Prisma.sql`FLOOR(EXTRACT(epoch FROM (d."closedAt" - ${window.start}::timestamp)) / 86400)::int`
+            : Prisma.sql`(EXTRACT(day FROM d."closedAt" + interval '3 hours')::int - 1)`;
+    const dealManagerScope = managerScoped
+      ? Prisma.sql`
+          AND (
+            d."propertyEmployeeId" IN (SELECT id FROM "EmployeeProfile" WHERE "managerUserId" = ${viewer.id}::uuid)
+            OR d."clientEmployeeId" IN (SELECT id FROM "EmployeeProfile" WHERE "managerUserId" = ${viewer.id}::uuid)
+          )`
+      : Prisma.empty;
 
     const [
       propertyStatusRows,
@@ -218,10 +230,10 @@ export class DashboardService {
       lateFollowUps,
       completedFollowUps,
       duplicateAttempts,
-      deals,
-      employees,
-      clientGroups,
-      propertyGroups,
+      dealBuckets,
+      clientLeaderRows,
+      propertyLeaderRows,
+      dealLeaderRows,
       recentActivity,
     ] = await Promise.all([
       this.prisma.property.groupBy({
@@ -278,9 +290,7 @@ export class DashboardService {
           ...(managerScoped
             ? {
                 OR: [
-                  ...(profileFilter
-                    ? [{ responsibleId: { in: profileFilter } }]
-                    : []),
+                  { responsible: { managerUserId: viewer.id } },
                   { responsibleUserId: viewer.id },
                 ],
               }
@@ -293,9 +303,7 @@ export class DashboardService {
           ...(managerScoped
             ? {
                 OR: [
-                  ...(profileFilter
-                    ? [{ authorId: { in: profileFilter } }]
-                    : []),
+                  { author: { managerUserId: viewer.id } },
                   { authorUserId: viewer.id },
                 ],
               }
@@ -309,61 +317,90 @@ export class DashboardService {
           ...(periodRange ? { createdAt: periodRange } : {}),
         },
       }),
-      this.prisma.deal.findMany({
-        where: {
-          ...(periodRange ? { closedAt: periodRange } : {}),
-          ...(profileFilter
-            ? {
-                OR: [
-                  { propertyEmployeeId: { in: profileFilter } },
-                  { clientEmployeeId: { in: profileFilter } },
-                ],
-              }
-            : {}),
-        },
-        select: {
-          price: true,
-          companyCommission: true,
-          closedAt: true,
-          propertyEmployeeId: true,
-          clientEmployeeId: true,
-        },
-      }),
-      this.prisma.user.findMany({
-        where: { role: Role.EMPLOYEE, isActive: true, ...employeeScope },
-        select: {
-          id: true,
-          name: true,
-          employee: { select: { id: true } },
-        },
-      }),
-      this.prisma.client.groupBy({
-        by: ['responsibleEmployeeId'],
-        where: {
-          responsibleEmployeeId: profileFilter
-            ? { in: profileFilter }
-            : { not: null },
-          ...(periodRange ? { createdAt: periodRange } : {}),
-        },
-        _count: { _all: true },
-      }),
-      this.prisma.property.groupBy({
-        by: ['createdByUserId'],
-        where: {
-          deletedAt: null,
-          ...(scopedUserIds
-            ? { createdByUserId: { in: scopedUserIds } }
-            : { createdByUserId: { not: null } }),
-          ...(periodRange ? { createdAt: periodRange } : {}),
-        },
-        _count: { _all: true },
-      }),
+      // Deal totals + chart buckets are aggregated in PostgreSQL. The old
+      // implementation transferred every matching deal (5,000 rows all-time)
+      // and summed them in JavaScript.
+      this.prisma.$queryRaw<
+        Array<{
+          bucket: number;
+          count: number;
+          value: string;
+          commission: string;
+        }>
+      >(Prisma.sql`
+        SELECT ${dealBucket} AS bucket,
+               COUNT(*)::int AS "count",
+               SUM(d.price)::text AS value,
+               SUM(d."companyCommission")::text AS commission
+        FROM "Deal" d
+        WHERE TRUE
+          ${
+            periodRange
+              ? Prisma.sql`AND d."closedAt" >= ${periodRange.gte}::timestamp AND d."closedAt" < ${periodRange.lt}::timestamp`
+              : Prisma.empty
+          }
+          ${dealManagerScope}
+        GROUP BY 1
+        ORDER BY 1
+      `),
+      this.prisma.$queryRaw<Array<{ name: string; count: number }>>`
+        SELECT u.name, COUNT(*)::int AS count
+        FROM "Client" c
+        JOIN "EmployeeProfile" e ON e.id = c."responsibleEmployeeId"
+        JOIN "User" u ON u.id = e."userId"
+        WHERE c."responsibleEmployeeId" IS NOT NULL
+          AND u.role = 'EMPLOYEE'
+          AND u."isActive" = true
+          AND (${managerId}::uuid IS NULL OR e."managerUserId" = ${managerId}::uuid)
+          AND (${periodStart}::timestamptz IS NULL OR c."createdAt" >= ${periodStart}::timestamptz)
+          AND (${periodEnd}::timestamptz IS NULL OR c."createdAt" < ${periodEnd}::timestamptz)
+        GROUP BY u.id, u.name
+        ORDER BY count DESC, u.name ASC
+        LIMIT 1
+      `,
+      this.prisma.$queryRaw<Array<{ name: string; count: number }>>`
+        SELECT u.name, COUNT(*)::int AS count
+        FROM "Property" p
+        JOIN "User" u ON u.id = p."createdByUserId"
+        JOIN "EmployeeProfile" e ON e."userId" = u.id
+        WHERE p."deletedAt" IS NULL
+          AND p."createdByUserId" IS NOT NULL
+          AND u.role = 'EMPLOYEE'
+          AND u."isActive" = true
+          AND (${managerId}::uuid IS NULL OR e."managerUserId" = ${managerId}::uuid)
+          AND (${periodStart}::timestamptz IS NULL OR p."createdAt" >= ${periodStart}::timestamptz)
+          AND (${periodEnd}::timestamptz IS NULL OR p."createdAt" < ${periodEnd}::timestamptz)
+        GROUP BY u.id, u.name
+        ORDER BY count DESC, u.name ASC
+        LIMIT 1
+      `,
+      this.prisma.$queryRaw<Array<{ name: string; count: number }>>`
+        SELECT u.name, COUNT(*)::int AS count
+        FROM "Deal" d
+        JOIN "EmployeeProfile" e
+          ON e.id = COALESCE(d."propertyEmployeeId", d."clientEmployeeId")
+        JOIN "User" u ON u.id = e."userId"
+        WHERE (d."propertyEmployeeId" IS NOT NULL OR d."clientEmployeeId" IS NOT NULL)
+          AND u.role = 'EMPLOYEE'
+          AND u."isActive" = true
+          AND (${managerId}::uuid IS NULL OR e."managerUserId" = ${managerId}::uuid)
+          AND (${periodStart}::timestamptz IS NULL OR d."closedAt" >= ${periodStart}::timestamptz)
+          AND (${periodEnd}::timestamptz IS NULL OR d."closedAt" < ${periodEnd}::timestamptz)
+        GROUP BY u.id, u.name
+        ORDER BY count DESC, u.name ASC
+        LIMIT 1
+      `,
       this.prisma.auditLog.findMany({
         where: {
           action: { in: Object.keys(ACTION_LABELS) },
           ...(periodRange ? { createdAt: periodRange } : {}),
-          ...(managerScoped && scopedUserIds
-            ? { actorId: { in: [...scopedUserIds, viewer.id] } }
+          ...(managerScoped
+            ? {
+                OR: [
+                  { actor: { employee: { managerUserId: viewer.id } } },
+                  { actorId: viewer.id },
+                ],
+              }
             : {}),
         },
         orderBy: { createdAt: 'desc' },
@@ -383,84 +420,53 @@ export class DashboardService {
       0,
     );
 
-    let totalDealValue = 0;
-    let totalCommission = 0;
-    const dealLeaderCounts = new Map<string, number>();
-    for (const deal of deals) {
-      totalDealValue += Number(deal.price);
-      totalCommission += Number(deal.companyCommission);
-      const employeeProfileId =
-        deal.propertyEmployeeId ?? deal.clientEmployeeId;
-      if (employeeProfileId) {
-        dealLeaderCounts.set(
-          employeeProfileId,
-          (dealLeaderCounts.get(employeeProfileId) ?? 0) + 1,
-        );
-      }
+    let dealCount = 0;
+    let totalDealValueFils = 0n;
+    let totalCommissionFils = 0n;
+    for (const bucket of dealBuckets) {
+      dealCount += bucket.count;
+      totalDealValueFils += decimalToFils(bucket.value);
+      totalCommissionFils += decimalToFils(bucket.commission);
     }
+    const totalDealValue = filsToDecimalString(totalDealValueFils);
+    const totalCommission = filsToDecimalString(totalCommissionFils);
 
     // Chart buckets follow the selected period: hours for Today, days for
     // Week/Month/Last Month, and real calendar months for All Time.
     let dailyCounts: number[] = [];
     if (window.bucket === 'month' && !window.start) {
-      if (deals.length > 0) {
+      if (dealBuckets.length > 0) {
         const currentMonth = kuwaitMonthIndex(now);
-        const indices = deals.map((deal) => kuwaitMonthIndex(deal.closedAt));
-        const firstMonth = Math.min(...indices, currentMonth);
-        const lastMonth = Math.max(...indices, currentMonth);
+        const firstBucket = dealBuckets[0]?.bucket ?? currentMonth;
+        const lastBucket =
+          dealBuckets[dealBuckets.length - 1]?.bucket ?? currentMonth;
+        const firstMonth = Math.min(firstBucket, currentMonth);
+        const lastMonth = Math.max(lastBucket, currentMonth);
         dailyCounts = Array.from(
           { length: lastMonth - firstMonth + 1 },
           () => 0,
         );
-        for (const deal of deals) {
-          const index = kuwaitMonthIndex(deal.closedAt) - firstMonth;
+        for (const bucket of dealBuckets) {
+          const index = bucket.bucket - firstMonth;
           if (index >= 0 && index < dailyCounts.length) {
-            dailyCounts[index] = (dailyCounts[index] ?? 0) + 1;
+            dailyCounts[index] = (dailyCounts[index] ?? 0) + bucket.count;
           }
         }
       }
     } else {
       dailyCounts = Array.from({ length: window.bucketCount }, () => 0);
-      for (const deal of deals) {
-        const index =
-          window.bucket === 'hour'
-            ? kuwaitHourOfDay(deal.closedAt)
-            : period === 'week' && window.start
-              ? Math.floor(
-                  (deal.closedAt.getTime() - window.start.getTime()) /
-                    (24 * HOUR_MS),
-                )
-              : kuwaitDayOfMonth(deal.closedAt) - 1;
+      for (const bucket of dealBuckets) {
+        const index = bucket.bucket;
         if (index >= 0 && index < dailyCounts.length) {
-          dailyCounts[index] = (dailyCounts[index] ?? 0) + 1;
+          dailyCounts[index] = (dailyCounts[index] ?? 0) + bucket.count;
         }
       }
     }
 
-    const employeeIds = new Set(employees.map((employee) => employee.id));
-    const profileToName = new Map<string, string>();
-    const userIdToName = new Map<string, string>();
-    for (const employee of employees) {
-      userIdToName.set(employee.id, employee.name);
-      if (employee.employee?.id) {
-        profileToName.set(employee.employee.id, employee.name);
-      }
-    }
-
-    const clientLeaderCounts = new Map<string, number>();
-    for (const group of clientGroups) {
-      if (!group.responsibleEmployeeId) continue;
-      clientLeaderCounts.set(
-        group.responsibleEmployeeId,
-        group._count._all,
-      );
-    }
-    const propertyLeaderCounts = new Map<string, number>();
-    for (const group of propertyGroups) {
-      if (!group.createdByUserId) continue;
-      if (!employeeIds.has(group.createdByUserId)) continue;
-      propertyLeaderCounts.set(group.createdByUserId, group._count._all);
-    }
+    const leader = (rows: Array<{ name: string; count: number }>) => ({
+      name: rows[0]?.name ?? null,
+      count: Number(rows[0]?.count ?? 0),
+    });
 
     const activity = recentActivity.length
       ? recentActivity.map((row) => ({
@@ -500,12 +506,12 @@ export class DashboardService {
         active: activeEmployees,
       },
       deals: {
-        countInPeriod: deals.length,
-        totalValueInPeriod: decimalString(totalDealValue),
+        countInPeriod: dealCount,
+        totalValueInPeriod: totalDealValue,
         averageValueInPeriod: decimalString(
-          deals.length ? totalDealValue / deals.length : 0,
+          dealCount ? Number(totalDealValue) / dealCount : 0,
         ),
-        totalCommissionInPeriod: decimalString(totalCommission),
+        totalCommissionInPeriod: totalCommission,
         dailyCounts,
       },
       followUps: {
@@ -513,18 +519,9 @@ export class DashboardService {
         completedInPeriod: completedFollowUps,
       },
       leaders: {
-        clients: topEntry(
-          clientLeaderCounts,
-          (profileId) => profileToName.get(profileId) ?? null,
-        ),
-        properties: topEntry(
-          propertyLeaderCounts,
-          (userId) => userIdToName.get(userId) ?? null,
-        ),
-        deals: topEntry(
-          dealLeaderCounts,
-          (profileId) => profileToName.get(profileId) ?? null,
-        ),
+        clients: leader(clientLeaderRows),
+        properties: leader(propertyLeaderRows),
+        deals: leader(dealLeaderRows),
       },
       alerts: {
         lateFollowUps,

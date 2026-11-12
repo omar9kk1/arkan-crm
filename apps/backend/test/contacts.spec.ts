@@ -407,7 +407,8 @@ describeWithDatabase('Contacts API (real authorization, isolated DB)', () => {
         .send({ type: 'OWNER', name: 'A Linked Owner', phone: '61000003' });
       const contactId = contact.body.data.id as string;
 
-      // Visible to employee A: every AVAILABLE property, plus their own PENDING.
+      // Visible to employee A: every published property (AVAILABLE + SOLD) plus
+      // their own PENDING. Another employee's PENDING stays private.
       await seedLinkedProperty({
         reference: 'CNT-A-1',
         contactId,
@@ -420,13 +421,13 @@ describeWithDatabase('Contacts API (real authorization, isolated DB)', () => {
         status: PropertyStatus.PENDING,
         createdByUserId: employeeAId,
       });
-      // Not visible to employee A: another employee's PENDING, and a SOLD row.
       await seedLinkedProperty({
         reference: 'CNT-A-3',
         contactId,
         status: PropertyStatus.PENDING,
         createdByUserId: employeeBId,
       });
+      // SOLD is part of the company-wide published catalog.
       await seedLinkedProperty({
         reference: 'CNT-A-4',
         contactId,
@@ -442,7 +443,7 @@ describeWithDatabase('Contacts API (real authorization, isolated DB)', () => {
         read.body.data.properties
           .map((p: { reference: string }) => p.reference)
           .sort(),
-      ).toEqual(['CNT-A-1', 'CNT-A-2']);
+      ).toEqual(['CNT-A-1', 'CNT-A-2', 'CNT-A-4']);
 
       const list = await api().get('/contacts').set(auth(employeeAToken));
       const item = list.body.data.items.find(
@@ -452,7 +453,7 @@ describeWithDatabase('Contacts API (real authorization, isolated DB)', () => {
         item.properties
           .map((p: { reference: string }) => p.reference)
           .sort(),
-      ).toEqual(['CNT-A-1', 'CNT-A-2']);
+      ).toEqual(['CNT-A-1', 'CNT-A-2', 'CNT-A-4']);
 
       // Another employee cannot even read the contact, so no count leaks.
       const otherEmployee = await api()

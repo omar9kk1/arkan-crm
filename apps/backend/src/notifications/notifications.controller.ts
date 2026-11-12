@@ -8,8 +8,11 @@ import {
   Query,
   Req,
 } from '@nestjs/common';
+import { Role } from '@prisma/client';
 import type { AuthUser } from '@arkan/shared';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { NotificationsService } from './notifications.service';
+import { SystemLogService } from './system-log.service';
 import { ListNotificationsQueryDto } from './dto/list-notifications.query';
 
 /**
@@ -22,7 +25,10 @@ import { ListNotificationsQueryDto } from './dto/list-notifications.query';
  */
 @Controller('notifications')
 export class NotificationsController {
-  constructor(private readonly notifications: NotificationsService) {}
+  constructor(
+    private readonly notifications: NotificationsService,
+    private readonly systemLog: SystemLogService,
+  ) {}
 
   @Get()
   list(
@@ -30,6 +36,16 @@ export class NotificationsController {
     @Query() query: ListNotificationsQueryDto,
   ) {
     return this.notifications.list(request.user, query);
+  }
+
+  /** OWNER-only real activity log, rendered inside the Notifications page. */
+  @Roles(Role.OWNER)
+  @Get('system-log')
+  systemLogPage(
+    @Req() request: { user: AuthUser },
+    @Query() query: ListNotificationsQueryDto,
+  ) {
+    return this.systemLog.list(request.user, query);
   }
 
   @Get('unread-count')

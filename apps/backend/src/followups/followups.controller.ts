@@ -14,7 +14,9 @@ import { FollowUpsService } from './followups.service';
 import { SaveFollowUpBatchDto } from './dto/save-follow-up-batch.dto';
 import {
   ListFollowUpsQueryDto,
+  ListSupervisionEmployeesQueryDto,
   ListSupervisionFollowUpsQueryDto,
+  SupervisionSummaryQueryDto,
 } from './dto/list-follow-ups.query';
 
 /**
@@ -51,6 +53,24 @@ export class FollowupsController {
 
   /** ONE subject's permanent history, newest first (§6). */
   /** Today's saved follow-up entries authored by the caller (achievements). */
+  @Get('manager/employees')
+  @Roles(Role.OWNER, Role.MANAGER)
+  supervisionEmployees(
+    @Req() request: { user: AuthUser },
+    @Query() query: ListSupervisionEmployeesQueryDto,
+  ) {
+    return this.followUps.listSupervisionEmployees(request.user, query);
+  }
+
+  @Get('manager/summary')
+  @Roles(Role.OWNER, Role.MANAGER)
+  supervisionSummary(
+    @Req() request: { user: AuthUser },
+    @Query() query: SupervisionSummaryQueryDto,
+  ) {
+    return this.followUps.supervisionSummary(request.user, query);
+  }
+
   @Get('achievements/today')
   achievementsToday(@Req() request: { user: AuthUser }) {
     return this.followUps.achievementsToday(request.user);

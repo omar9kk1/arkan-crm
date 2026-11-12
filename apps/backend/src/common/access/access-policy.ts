@@ -35,9 +35,9 @@ export function assertOwner(viewer: AuthUser): void {
  * Property visibility.
  *
  * - OWNER: every non-deleted property.
- * - MANAGER: approved properties (the existing company-wide listing), the
- *   Manager's own rows, and PENDING/REJECTED rows created by currently
- *   assigned team employees. Another team's private rows are invisible.
+ * - MANAGER: every published company listing (AVAILABLE or SOLD), the Manager's own
+ *   rows, and PENDING/REJECTED rows created by currently assigned team
+ *   employees. Another team's private review rows are invisible.
  * - EMPLOYEE: unchanged (all AVAILABLE + own PENDING/REJECTED).
  *
  * Soft-deleted rows stay invisible to every normal read path.
@@ -47,12 +47,13 @@ export function propertyVisibilityWhere(
 ): Prisma.PropertyWhereInput {
   if (isOwner(viewer)) return { deletedAt: null };
   if (isManager(viewer)) {
-    // No cross-team approved-property sharing in this MVP: a Manager sees
-    // only their own rows and rows created by currently assigned employees.
-    // The future configurable sharing feature will widen this deliberately.
+    // Published inventory is company-wide: AVAILABLE stays available, and a
+    // SOLD row remains in the catalog (read-only) as sold history. Private
+    // review work remains scoped to the Manager's own rows/current team.
     return {
       deletedAt: null,
       OR: [
+        { status: { in: [PropertyStatus.AVAILABLE, PropertyStatus.SOLD] } },
         { createdByUserId: viewer.id },
         { createdByUser: { employee: { managerUserId: viewer.id } } },
       ],
@@ -61,7 +62,7 @@ export function propertyVisibilityWhere(
   return {
     deletedAt: null,
     OR: [
-      { status: PropertyStatus.AVAILABLE },
+      { status: { in: [PropertyStatus.AVAILABLE, PropertyStatus.SOLD] } },
       {
         createdByUserId: viewer.id,
         status: {
@@ -217,11 +218,32 @@ export async function assertPropertyReviewPermission(
   property: { createdByUserId: string | null },
   action: PropertyReviewAction,
 ): Promise<void> {
-  if (isOwner(viewer)) return;
+  const creatorId = property.createdByUserId;
+
+  if (isOwner(viewer)) {
+    // OWNER reviews direct reports and manager/owner-submitted rows only. An
+    // employee with a live manager assignment belongs to that Manager's review
+    // authority; OWNER cannot bypass it through the normal decision API.
+    if (!creatorId) return;
+    const creator = await db.user.findUnique({
+      where: { id: creatorId },
+      select: {
+        role: true,
+        employee: { select: { managerUserId: true } },
+      },
+    });
+    if (
+      creator?.role === Role.EMPLOYEE &&
+      creator.employee?.managerUserId
+    )
+      throw new ForbiddenException(
+        'This property review is assigned to the employee direct manager',
+      );
+    return;
+  }
   if (!isManager(viewer))
     throw new ForbiddenException('Property review is not allowed');
 
-  const creatorId = property.createdByUserId;
   if (!creatorId || creatorId === viewer.id)
     throw new ForbiddenException(
       'A Manager cannot review their own submission',
@@ -248,26 +270,37 @@ export async function assertPropertyReviewPermission(
 }
 
 /**
- * Recipients of an employee-submitted event: active OWENRs plus the employee's
- * current Manager. A Manager actor's event goes to active OWNERs only (never
- * to unrelated Managers).
+ * Recipients of a review/submission event: the DIRECT supervisor only.
+ *
+ * - Employee assigned to an active Manager -> that Manager only.
+ * - Employee assigned directly to the OWNER (`managerUserId = null`) ->
+ *   active OWNERs only.
+ * - Employee assigned to an INACTIVE/missing Manager -> NOBODY. The review is
+ *   intentionally left pending for the OWNER to resolve through the existing
+ *   staff workflows; it is never silently redirected to an OWNER or another
+ *   Manager.
+ * - Manager/OWNER actor -> active OWNERs (management events are never sent to
+ *   an unrelated Manager).
+ *
+ * The groups are deliberately exclusive: an employee's review request can never
+ * reach the Manager and an OWNER at the same time.
  */
 export async function reviewNotificationRecipientIds(
   db: DbClient,
   actor: { id: string; role: Role },
   excludeUserId?: string,
 ): Promise<string[]> {
-  const owners = await db.user.findMany({
-    where: { role: Role.OWNER, isActive: true },
-    select: { id: true },
-  });
-  const recipients = new Set(owners.map((owner) => owner.id));
+  const withoutExcluded = (ids: string[]): string[] =>
+    excludeUserId ? ids.filter((id) => id !== excludeUserId) : ids;
 
   if (actor.role === Role.EMPLOYEE) {
     const profile = await db.employeeProfile.findUnique({
       where: { userId: actor.id },
       select: { managerUserId: true },
     });
+    // A Manager assignment exists: this employee's review authority is that
+    // Manager and nobody else. If the assigned Manager is inactive/missing,
+    // returning [] preserves the request pending without rerouting it.
     if (profile?.managerUserId) {
       const manager = await db.user.findFirst({
         where: {
@@ -277,12 +310,16 @@ export async function reviewNotificationRecipientIds(
         },
         select: { id: true },
       });
-      if (manager) recipients.add(manager.id);
+      return manager ? withoutExcluded([manager.id]) : [];
     }
+    // No Manager assignment: the employee reports directly to the OWNER.
   }
 
-  if (excludeUserId) recipients.delete(excludeUserId);
-  return [...recipients];
+  const owners = await db.user.findMany({
+    where: { role: Role.OWNER, isActive: true },
+    select: { id: true },
+  });
+  return withoutExcluded(owners.map((owner) => owner.id));
 }
 
 /** Same as above when only the actor id is known (notification contexts). */

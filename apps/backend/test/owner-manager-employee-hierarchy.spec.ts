@@ -272,7 +272,7 @@ describeWithDatabase('OWNER / MANAGER / EMPLOYEE hierarchy', () => {
       (await inbox(ownerToken)).some(
         (row) => row.type === 'PROPERTY_SUBMITTED',
       ),
-    ).toBe(true);
+    ).toBe(false);
 
     // Contacts and follow-up supervision obey the same team boundary.
     const contactB = await api()
@@ -499,7 +499,7 @@ describeWithDatabase('OWNER / MANAGER / EMPLOYEE hierarchy', () => {
       ).status,
     ).toBe(403);
 
-    // OWNER can always approve/reject.
+    // OWNER cannot bypass the direct Manager's review authority.
     expect(
       (
         await api()
@@ -507,7 +507,7 @@ describeWithDatabase('OWNER / MANAGER / EMPLOYEE hierarchy', () => {
           .set(auth(ownerToken))
           .send({})
       ).status,
-    ).toBe(200);
+    ).toBe(403);
     const ownerRejectTarget = await createPending(employeeA2Token, {
       plotNumber: '890205',
       block: 'A-4',
@@ -519,7 +519,7 @@ describeWithDatabase('OWNER / MANAGER / EMPLOYEE hierarchy', () => {
           .set(auth(ownerToken))
           .send({ reason: 'OWNER decision' })
       ).status,
-    ).toBe(200);
+    ).toBe(403);
   });
 
   it('transfer changes future team visibility without deleting history', async () => {
@@ -580,9 +580,23 @@ describeWithDatabase('OWNER / MANAGER / EMPLOYEE hierarchy', () => {
     );
     expect(duplicate.status).toBe(409);
 
+    // OWNER cannot approve a managed employee's property; restore the direct
+    // Manager's capability and let that Manager decide.
+    await api()
+      .patch(`/managers/${managerAId}/permissions`)
+      .set(auth(ownerToken))
+      .send({ canApprove: true, canReject: true });
+    expect(
+      (
+        await api()
+          .post(`/properties/${first.id}/approve`)
+          .set(auth(ownerToken))
+          .send({})
+      ).status,
+    ).toBe(403);
     const approved = await api()
       .post(`/properties/${first.id}/approve`)
-      .set(auth(ownerToken))
+      .set(auth(managerAToken))
       .send({});
     expect(approved.status).toBe(200);
     expect(approved.body.data.status).toBe('AVAILABLE');

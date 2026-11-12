@@ -143,8 +143,8 @@ describeWithDatabase('Manager review notification — real changes', () => {
     // Never a private contact, a phone number or an internal note.
     expect(alerts[0]?.message).not.toContain('66661111');
     expect(alerts[0]?.message).not.toContain('وسيط خاص');
-    // The other manager receives the same event (same recipients as before).
-    expect(await reviewAlerts(otherManagerToken)).toHaveLength(1);
+    // The OWNER does not receive the direct Manager's review alert.
+    expect(await reviewAlerts(otherManagerToken)).toHaveLength(0);
     // The employee is not told about their own edit.
     expect(await reviewAlerts(employeeToken)).toHaveLength(0);
   });
@@ -226,7 +226,7 @@ describeWithDatabase('Manager review notification — real changes', () => {
     expect(alerts[0]?.message).toContain('199,000');
   });
 
-  it('keeps ONE notification per review round (no duplicates) and one per manager', async () => {
+  it('keeps ONE notification per review round for the direct Manager only', async () => {
     const created = await createProperty();
     expect((await approve(created.id)).status).toBe(200);
     const approved = await ctx.prisma.property.findUnique({
@@ -245,12 +245,12 @@ describeWithDatabase('Manager review notification — real changes', () => {
     expect(stale.status).toBe(409);
 
     expect(await reviewAlerts(managerToken)).toHaveLength(1);
-    expect(await reviewAlerts(otherManagerToken)).toHaveLength(1);
+    expect(await reviewAlerts(otherManagerToken)).toHaveLength(0);
     expect(
       await ctx.prisma.notification.count({
         where: { type: 'PROPERTY_RESUBMITTED' },
       }),
-    ).toBe(2); // one per active manager
+    ).toBe(1); // the direct Manager only
   });
 
   it('keeps the NEW-property submission wording untouched', async () => {

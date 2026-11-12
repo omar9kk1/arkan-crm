@@ -450,6 +450,7 @@ export class PropertiesService {
     idempotencyKey?: string,
   ): Promise<PropertyViewDto> {
     this.validateCreateShape(payload);
+    await this.assertActiveReviewSupervisor(viewer);
     const detected = this.files.assertValidImage(file);
     const sanitized = await this.files.sanitizeImage(file!.buffer, detected);
     const key = await this.files.persistBytes(sanitized.buffer, sanitized);
@@ -1346,6 +1347,7 @@ export class PropertiesService {
       throw new ForbiddenException(
         'Only the property creator can edit this property',
       );
+    await this.assertActiveReviewSupervisor(viewer);
     if (
       existing.status !== PropertyStatus.PENDING &&
       existing.status !== PropertyStatus.REJECTED &&
@@ -1871,6 +1873,7 @@ export class PropertiesService {
       throw new ForbiddenException(
         'Only the property creator can resubmit this property',
       );
+    await this.assertActiveReviewSupervisor(viewer);
     // Two allowed source states:
     //   A) REJECTED                           → back to PENDING;
     //   B) PENDING with a CHANGES_REQUESTED latest review → back to review.
@@ -1972,6 +1975,29 @@ export class PropertiesService {
   // Trash (OWNER-only)
   // ---------------------------------------------------------------------------
 
+  /**
+   * Employee submissions/edits must have an active direct supervisor, or be
+   * explicitly assigned to the OWNER (`managerUserId = null`). A stale/inactive
+   * manager assignment never falls back to the OWNER.
+   */
+  private async assertActiveReviewSupervisor(viewer: AuthUser): Promise<void> {
+    if (viewer.role !== Role.EMPLOYEE) return;
+    const profile = await this.prisma.employeeProfile.findUnique({
+      where: { userId: viewer.id },
+      select: { managerUserId: true },
+    });
+    const managerUserId = profile?.managerUserId ?? null;
+    if (!managerUserId) return;
+    const manager = await this.prisma.user.findFirst({
+      where: { id: managerUserId, role: Role.MANAGER, isActive: true },
+      select: { id: true },
+    });
+    if (!manager)
+      throw new BadRequestException(
+        'لا يمكن إرسال العقار للمراجعة: المشرف المباشر غير نشط أو غير متاح. يلزم على مالك النظام إعادة تعيين مدير نشط أولًا.',
+      );
+  }
+
   private assertTrashAccess(viewer: AuthUser): void {
     if (!isOwner(viewer))
       throw new ForbiddenException(
@@ -2017,7 +2043,7 @@ export class PropertiesService {
     return serializeProperty(property, viewer);
   }
 
-  /** Manager-only list of soft-deleted properties (Trash). */
+  /** OWNER-only list of soft-deleted properties (Trash). */
   async listTrash(viewer: AuthUser): Promise<PropertyPageDto> {
     this.assertTrashAccess(viewer);
     const rows = await this.prisma.property.findMany({

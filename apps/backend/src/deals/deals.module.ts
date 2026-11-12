@@ -1,5 +1,11 @@
 import { Module } from '@nestjs/common';
+import { PrismaModule } from '../prisma/prisma.module';
+import { DealsController } from './deals.controller';
+import { DealsService } from './deals.service';
 
-// Domain boundary only; HTTP endpoints and business rules belong to a later phase.
-@Module({})
+@Module({
+  imports: [PrismaModule],
+  controllers: [DealsController],
+  providers: [DealsService],
+})
 export class DealsModule {}

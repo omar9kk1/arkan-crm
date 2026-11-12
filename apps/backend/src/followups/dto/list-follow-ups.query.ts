@@ -68,3 +68,29 @@ export class ListSupervisionFollowUpsQueryDto extends ListFollowUpsQueryDto {
   @IsUUID()
   employeeUserId?: string;
 }
+
+/** Searchable/paginated responsible-employee options for supervision. */
+export class ListSupervisionEmployeesQueryDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  search?: string;
+
+  @IsOptional()
+  @IsUUID()
+  cursor?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
+}
+
+/** Full-scope statistics endpoint; the employee filter is the only dimension. */
+export class SupervisionSummaryQueryDto {
+  @IsOptional()
+  @IsUUID()
+  employeeUserId?: string;
+}

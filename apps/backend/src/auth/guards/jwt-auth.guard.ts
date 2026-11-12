@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
+import { Prisma } from '@prisma/client';
 import { Role, AuthUser } from '@arkan/shared';
 import type { Request } from 'express';
 import { IS_PUBLIC } from '../decorators/public.decorator';
@@ -54,21 +55,32 @@ export class JwtAuthGuard implements CanActivate {
           payload.role !== Role.EMPLOYEE)
       )
         throw new Error('Invalid claims');
-      const session = await this.prisma.refreshToken.findUnique({
-        where: { id: payload.sid as string },
-        // Only the session-validity columns: the guard must never depend on
-        // unrelated user fields (a pending migration must not turn every
-        // authenticated request into a 401).
-        include: {
-          user: {
-            select: {
-              role: true,
-              isActive: true,
-              authVersion: true,
-            },
-          },
-        },
-      });
+      // ONE read-only statement returns exactly the validity columns the guard
+      // checks. The session row and the live user row are read in the same
+      // database snapshot, so revocation/role/activation/authVersion checks
+      // stay database-backed and current (no caching).
+      const [session] = await this.prisma.$queryRaw<
+        Array<{
+          userId: string;
+          revokedAt: Date | null;
+          expiresAt: Date;
+          lineageId: string | null;
+          role: Role;
+          isActive: boolean;
+          authVersion: number;
+        }>
+      >(Prisma.sql`
+        SELECT rt."userId" AS "userId",
+               rt."revokedAt" AS "revokedAt",
+               rt."expiresAt" AS "expiresAt",
+               rt."lineageId" AS "lineageId",
+               u.role AS role,
+               u."isActive" AS "isActive",
+               u."authVersion" AS "authVersion"
+        FROM "RefreshToken" rt
+        JOIN "User" u ON u.id = rt."userId"
+        WHERE rt.id = ${payload.sid}::uuid
+      `);
       // Old tokens carry no `av`; they are version 0, matching every account
       // that has never had a role/security change. A bumped user version
       // invalidates them permanently.
@@ -79,14 +91,14 @@ export class JwtAuthGuard implements CanActivate {
         session.userId !== payload.sub ||
         session.revokedAt ||
         session.expiresAt <= new Date() ||
-        !session.user.isActive ||
-        session.user.role !== payload.role ||
-        tokenAuthVersion !== session.user.authVersion
+        !session.isActive ||
+        session.role !== payload.role ||
+        tokenAuthVersion !== session.authVersion
       )
         throw new Error('Inactive session');
       request.user = {
         id: session.userId,
-        role: session.user.role,
+        role: session.role,
         // The lineage of the LIVE session row: the server-side identity of this
         // device's login family. It is never taken from the request body.
         sessionLineageId: session.lineageId,

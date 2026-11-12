@@ -16,6 +16,8 @@ import { ClientsModule } from '../../src/clients/clients.module';
 import { ContactsModule } from '../../src/contacts/contacts.module';
 import { EmployeesModule } from '../../src/employees/employees.module';
 import { PropertiesModule } from '../../src/properties/properties.module';
+import { DealsModule } from '../../src/deals/deals.module';
+import { FinanceModule } from '../../src/finance/finance.module';
 import { NotificationsModule } from '../../src/notifications/notifications.module';
 import { FollowupsModule } from '../../src/followups/followups.module';
 import { DashboardModule } from '../../src/dashboard/dashboard.module';
@@ -39,7 +41,7 @@ export const TEST_DATABASE_HELP = [
   'Point it ONLY at the dedicated test database — never at arkan_crm or any',
   'shared/production database — then re-run. PowerShell example:',
   '',
-  '  $env:TEST_DATABASE_URL="postgresql://postgres:postgres@localhost:5433/arkan_crm_api_test?schema=public"',
+  '  $env:TEST_DATABASE_URL="postgresql://USER:PASSWORD@localhost:5433/arkan_crm_api_test?schema=public"',
   '  npm run test -w @arkan/backend',
 ].join('\n');
 
@@ -117,6 +119,8 @@ export async function createTestApp(options?: {
       ContactsModule,
       EmployeesModule,
       PropertiesModule,
+      DealsModule,
+      FinanceModule,
       NotificationsModule,
       FollowupsModule,
       DashboardModule,

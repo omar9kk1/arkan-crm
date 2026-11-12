@@ -188,8 +188,8 @@ describeWithDatabase('Employee PENDING property edits', () => {
     const editRows = rows.filter(
       (row) => row.title === 'تم تعديل عقار تحت المراجعة',
     );
-    // OWNER + the assigned Manager are the management recipients.
-    expect(editRows).toHaveLength(2);
+    // The assigned Manager is the sole direct-supervisor recipient.
+    expect(editRows).toHaveLength(1);
     const notification = editRows.find((row) => row.userId === managerId)!;
     expect(notification).toBeTruthy();
     expect(notification.userId).toBe(managerId);

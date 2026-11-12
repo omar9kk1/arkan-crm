@@ -72,7 +72,7 @@ export const PROPERTY_EVENT_TITLES = {
   SUBMITTED: 'عقار جديد بانتظار المراجعة',
   CHANGES_REQUESTED: 'مطلوب تعديل بيانات العقار',
   REJECTED: 'تم رفض تسجيل العقار',
-  TRASHED: 'تم حذف العقار بقرار المدير',
+  TRASHED: 'تم حذف العقار بقرار مالك النظام',
   RESTORED: 'تم استعادة العقار',
   RESUBMITTED: 'تمت إعادة إرسال عقار للمراجعة',
   RESUBMITTED_UPDATED: 'عقار مُعدّل بانتظار موافقتك',

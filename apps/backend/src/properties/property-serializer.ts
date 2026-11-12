@@ -229,11 +229,15 @@ function proposedOwnerDto(
 /**
  * Builds the authorized view for a caller.
  *
- * Private contact data is attached ONLY when:
- *   - the caller is a MANAGER; or
- *   - the caller is the property creator AND the linked contact is owned by them.
- * Ambiguous/unverified ownership defaults to denial, so an employee can never read a
- * contact they do not own — not through the property relation, names or phone match.
+ * Private contact/review data is attached ONLY when:
+ *   - the caller is the OWNER;
+ *   - the caller is the property creator; or
+ *   - the caller is a MANAGER for the creator's current team (or an OWNER-created
+ *     row).
+ * An unrelated MANAGER can still open the approved public listing after
+ * company-wide visibility, but receives the public projection only: no contact,
+ * contact id, provisional owner, review notes or duplicate metadata. Ambiguous
+ * ownership defaults to denial.
  */
 export function serializeProperty(
   source: PropertySerializationSource,
@@ -243,18 +247,19 @@ export function serializeProperty(
   const isOwner = viewer.role === Role.OWNER;
   const isManager = viewer.role === Role.MANAGER;
   const isCreator = source.createdByUserId === viewer.id;
-  if (!isOwner && !isManager && !isCreator) return base;
 
-  const contact = source.contact;
-  const ownsContact =
-    contact !== null && contact.responsibleUserId === viewer.id;
-  // A Manager only sees private contact data for rows in their own team scope.
-  // Another team's approved property remains visible, but never its contact.
+  // Another team's approved property is publicly visible, but its private
+  // contact, review notes, provisional owner and duplicate metadata are not.
   const managerTeamScope =
     isManager &&
     (isCreator ||
       source.createdByUser?.employee?.managerUserId === viewer.id ||
       source.createdByUser?.role === Role.OWNER);
+  if (!isOwner && !isCreator && !managerTeamScope) return base;
+
+  const contact = source.contact;
+  const ownsContact =
+    contact !== null && contact.responsibleUserId === viewer.id;
   const canSeeContact =
     isOwner || managerTeamScope || (isCreator && ownsContact);
 

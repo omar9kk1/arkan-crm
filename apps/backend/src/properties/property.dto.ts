@@ -83,7 +83,7 @@ export interface PublicPropertyDto {
   isMine: boolean;
   /** Public within the sales team: name of the current priority holder, if any. */
   priorityHolderName: string | null;
-  /** Soft-delete markers (null on active rows). Manager Trash only. */
+  /** Soft-delete markers (null on active rows). OWNER Trash only. */
   deletedAt: string | null;
   deletedByName: string | null;
   deletionReason: string | null;

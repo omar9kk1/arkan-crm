@@ -210,7 +210,7 @@ describeWithDatabase('Employee client edit + manager notifications', () => {
     expect(await reviewRows(managerToken)).toHaveLength(before.length);
   });
 
-  it('notifies every active manager once per real submission, with a privacy-safe body', async () => {
+  it('notifies the direct Manager once per real submission, with a privacy-safe body', async () => {
     const created = await postClient(employeeAId, {
       name: 'سعيد الطوالبة',
       phone: '66700006',

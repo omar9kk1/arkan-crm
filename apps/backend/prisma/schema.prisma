@@ -172,7 +172,8 @@ model User {
   requestedApprovals      PropertyApprovalRequest[] @relation("ApprovalRequester")
   reviewedApprovals       PropertyApprovalRequest[] @relation("ApprovalReviewer")
   uploadedFiles           FileAsset[]
-  createdCommissions      Commission[]
+  createdCommissions      Commission[]              @relation("CommissionCreator")
+  confirmedCommissions    Commission[]              @relation("CommissionPaidBy")
   createdPayrollEntries   PayrollEntry[]
   createdFinanceMovements FinanceMovement[]
   createdManualExpenses   ManualExpense[]
@@ -186,6 +187,7 @@ model User {
   requestedRevisions      PropertyRevision[]        @relation("RevisionRequester")
   reviewedRevisions       PropertyRevision[]        @relation("RevisionReviewer")
   requestedClientReviews  ClientReviewRequest[]     @relation("ClientReviewRequester")
+  assignedClientReviews   ClientReviewRequest[]     @relation("ClientReviewAssignee")
   reviewedClientReviews   ClientReviewRequest[]     @relation("ClientReviewReviewer")
   /// Manager-registered clients with NO responsible employee (the manager is
   /// the follow-up's responsible user himself, see FollowUpSubject).
@@ -599,6 +601,11 @@ model ClientReviewRequest {
   idempotencyKey String?        @db.Uuid
   requestedById  String         @db.Uuid
   requestedBy    User           @relation("ClientReviewRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  /// Persisted queue owner. NULL = the OWNER review pool (direct supervision).
+  /// Pending reviews move on employee transfer; completed rows keep the
+  /// reviewer who actually decided them.
+  assignedReviewerId String?   @db.Uuid
+  assignedReviewer   User?     @relation("ClientReviewAssignee", fields: [assignedReviewerId], references: [id], onDelete: Restrict)
   reviewedById   String?        @db.Uuid
   reviewedBy     User?          @relation("ClientReviewReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
   reviewNotes    String?
@@ -610,6 +617,7 @@ model ClientReviewRequest {
   @@index([status, createdAt])
   @@index([requestedById])
   @@index([clientId])
+  @@index([assignedReviewerId, status])
 }
 
 /// The two review kinds: a proposed new client, or a proposed edit.
@@ -875,11 +883,14 @@ model Deal {
   propertyEmployee   EmployeeProfile?  @relation("PropertyEmployee", fields: [propertyEmployeeId], references: [id], onDelete: Restrict)
   clientEmployeeId   String?           @db.Uuid
   clientEmployee     EmployeeProfile?  @relation("ClientEmployee", fields: [clientEmployeeId], references: [id], onDelete: Restrict)
-  price              Decimal           @db.Decimal(14, 2)
-  companyCommission  Decimal           @db.Decimal(14, 2)
+  /// KWD amounts use THREE decimal places (fils) exactly.
+  price              Decimal           @db.Decimal(15, 3)
+  companyCommission  Decimal           @db.Decimal(15, 3)
   currency           String            @db.Char(3)
   closedAt           DateTime
   createdAt          DateTime          @default(now())
+  /// Deal-level notes (previously temporarily stored in the DEAL_CREATE audit).
+  notes              String?
   commissions        Commission[]
   financeMovements   FinanceMovement[]
   notifications      Notification[]
@@ -899,18 +910,23 @@ model Commission {
   employee         EmployeeProfile   @relation(fields: [employeeId], references: [id], onDelete: Restrict)
   commissionRole   CommissionRole
   createdById      String            @db.Uuid
-  createdBy        User              @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  createdBy        User              @relation("CommissionCreator", fields: [createdById], references: [id], onDelete: Restrict)
   notes            String?
-  amount           Decimal           @db.Decimal(14, 2)
+  /// KWD amounts use THREE decimal places (fils) exactly.
+  amount           Decimal           @db.Decimal(15, 3)
   currency         String            @db.Char(3)
   calculationNotes String?
   status           PaymentStatus     @default(PENDING)
   paidAt           DateTime?
+  /// OWNER who confirmed the payout; NULL while the commission is pending.
+  paidById         String?           @db.Uuid
+  paidBy           User?             @relation("CommissionPaidBy", fields: [paidById], references: [id], onDelete: Restrict)
   createdAt        DateTime          @default(now())
   financeMovements FinanceMovement[]
 
   @@index([employeeId, status])
   @@index([dealId])
+  @@index([paidById])
 }
 
 model PayrollEntry {
@@ -921,10 +937,11 @@ model PayrollEntry {
   createdBy        User              @relation(fields: [createdById], references: [id], onDelete: Restrict)
   notes            String?
   period           DateTime          @db.Date
-  baseSalary       Decimal           @db.Decimal(14, 2)
-  deductions       Decimal           @default(0) @db.Decimal(14, 2)
-  bonus            Decimal           @default(0) @db.Decimal(14, 2)
-  netAmount        Decimal           @db.Decimal(14, 2)
+  /// KWD amounts use THREE decimal places (fils) exactly.
+  baseSalary       Decimal           @db.Decimal(15, 3)
+  deductions       Decimal           @default(0) @db.Decimal(15, 3)
+  bonus            Decimal           @default(0) @db.Decimal(15, 3)
+  netAmount        Decimal           @db.Decimal(15, 3)
   currency         String            @db.Char(3)
   status           PaymentStatus     @default(PENDING)
   paidAt           DateTime?
@@ -939,7 +956,8 @@ model ManualExpense {
   id               String            @id @default(uuid()) @db.Uuid
   reference        String            @unique
   type             String
-  amount           Decimal           @db.Decimal(14, 2)
+  /// KWD amounts use THREE decimal places (fils) exactly.
+  amount           Decimal           @db.Decimal(15, 3)
   currency         String            @db.Char(3)
   description      String
   propertyId       String?           @db.Uuid
@@ -970,7 +988,8 @@ model FinanceMovement {
   manualExpense    ManualExpense?    @relation(fields: [manualExpenseId], references: [id], onDelete: Restrict)
   createdById      String            @db.Uuid
   createdBy        User              @relation(fields: [createdById], references: [id], onDelete: Restrict)
-  amount           Decimal           @db.Decimal(14, 2)
+  /// KWD amounts use THREE decimal places (fils) exactly.
+  amount           Decimal           @db.Decimal(15, 3)
   currency         String            @db.Char(3)
   counterparty     String
   calculationNotes String?
@@ -978,7 +997,10 @@ model FinanceMovement {
   occurredAt       DateTime
   createdAt        DateTime          @default(now())
 
-  @@index([sourceType, sourceId])
+  /// One ledger movement per business source. This is the database-level
+  /// retry/concurrency guard that keeps a deal/commission/expense from being
+  /// recorded twice.
+  @@unique([sourceType, sourceId])
   @@index([manualExpenseId])
   @@index([occurredAt, direction])
 }

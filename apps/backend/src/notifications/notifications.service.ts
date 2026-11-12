@@ -169,7 +169,7 @@ export class NotificationsService {
     };
   }
 
-  /** 1. Employee submitted a property → every active manager. */
+  /** 1. Employee submitted a property → the direct supervisor only. */
   async notifyPropertySubmitted(
     tx: Prisma.TransactionClient,
     context: PropertyEventContext,
@@ -189,7 +189,7 @@ export class NotificationsService {
     );
   }
 
-  /** 4. Employee resubmitted a corrected property → every active manager. */
+  /** 4. Employee resubmitted a corrected property → the direct supervisor only. */
   async notifyPropertyResubmitted(
     tx: Prisma.TransactionClient,
     context: PropertyEventContext,
@@ -320,7 +320,7 @@ export class NotificationsService {
         type: 'SYSTEM',
         title: PROPERTY_EVENT_TITLES.RESTORED,
         body: [
-          'قام مدير النظام باستعادة عقارك من المحذوفات، وأصبح متاحًا مرة أخرى في قائمة عقاراتك.',
+          'قام مالك النظام باستعادة عقارك من المحذوفات، وأصبح متاحًا مرة أخرى في قائمة عقاراتك.',
           `رقم العقار: ${context.reference}`,
           `التاريخ: ${formatDecisionDate(details.restoredAt)}`,
         ].join('\n'),
@@ -503,7 +503,7 @@ export class NotificationsService {
 
   /**
    * 7. An employee saved or changed a company record (client, follow-up,
-   * payment-free contact card, property interest) → every ACTIVE manager,
+   * payment-free contact card, property interest) → the direct supervisor,
    * exactly once per committed save.
    *
    * The writer runs INSIDE the caller's transaction, so a notification row can
@@ -569,7 +569,7 @@ export class NotificationsService {
 
   /**
    * An employee submitted (or explicitly re-submitted) a client review forward
-   * to every ACTIVE manager — exactly once per real submission.
+   * to the direct supervisor — exactly once per real submission.
    *
    * `changeSummary`, when present, is the privacy-consistent review diff built
    * by the caller (safe identity values only, never a phone/note/message).

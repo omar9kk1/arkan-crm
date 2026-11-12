@@ -19,8 +19,10 @@ import {
 /**
  * The staged client-change review endpoints.
  *
- * `GET` answers both roles with row-level scoping set INSIDE the service
- * (an employee reads only their own submissions; a manager reads all).
+ * `GET` answers both roles with persisted row-level reviewer scoping set
+ * INSIDE the service (an employee reads only their own submissions; a manager
+ * reads only rows assigned to them; OWNER reads the owner pool plus rows they
+ * personally decided).
  * The decision routes are manager-only; POST/PATCH are employee-only by the
  * same in-service checks (a manager saves clients directly — no review).
  * Unauthorised ids answer 404, so an employee can never discover another
@@ -47,6 +49,16 @@ export class ClientReviewsController {
   @Get()
   list(@Req() request: { user: AuthUser }) {
     return this.reviews.list(request.user);
+  }
+
+  /** OWNER-only read-through used by the System Log read-only drawer. */
+  @Roles(Role.OWNER)
+  @Get(':id/owner-detail')
+  findOneForOwner(
+    @Req() request: { user: AuthUser },
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.reviews.findOneForOwner(request.user, id);
   }
 
   @Get(':id')

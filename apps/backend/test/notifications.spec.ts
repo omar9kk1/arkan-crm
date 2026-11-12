@@ -190,20 +190,20 @@ describeWithDatabase('In-app notifications', () => {
   // ---------------------------------------------------------------------------
   // Event 1 — employee submission
   // ---------------------------------------------------------------------------
-  it('notifies every ACTIVE manager when an employee submits a property, and nobody else', async () => {
+  it('notifies only the direct Manager when an employee submits a property', async () => {
     const created = await createProperty(employeeAToken);
     expect(created.status).toBe('PENDING');
 
-    for (const token of [managerToken, manager2Token]) {
-      const items = await inbox(token);
-      expect(items).toHaveLength(1);
-      expect(items[0]).toMatchObject({
-        type: 'PROPERTY_SUBMITTED',
-        title: 'عقار جديد بانتظار المراجعة',
-        propertyId: created.id,
-        read: false,
-      });
-    }
+    const items = await inbox(managerToken);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      type: 'PROPERTY_SUBMITTED',
+      title: 'عقار جديد بانتظار المراجعة',
+      propertyId: created.id,
+      read: false,
+    });
+    // The OWNER does not receive the same review request alongside the Manager.
+    expect(await inbox(manager2Token)).toHaveLength(0);
 
     // The inactive manager is skipped.
     expect(
@@ -305,12 +305,12 @@ describeWithDatabase('In-app notifications', () => {
       await ctx.prisma.notification.count({
         where: { title: 'تم تعديل عقار تحت المراجعة' },
       }),
-    ).toBe(2); // one per active manager
+    ).toBe(1); // one for the direct Manager only
 
     const response = await resubmit(employeeAToken, created.id);
     expect(response.status).toBe(200);
-    for (const token of [managerToken, manager2Token]) {
-      const items = (await inbox(token)).filter(
+    {
+      const items = (await inbox(managerToken)).filter(
         (item) => item.type === 'PROPERTY_RESUBMITTED',
       );
       expect(items).toHaveLength(1);
@@ -401,7 +401,7 @@ describeWithDatabase('In-app notifications', () => {
     expect((await resubmit(employeeAToken, second.id)).status).toBe(409);
     expect(
       await ctx.prisma.notification.count({ where: { type: 'PROPERTY_RESUBMITTED' } }),
-    ).toBe(2); // one per active manager, from the single successful resubmission
+    ).toBe(1); // one for the direct Manager, from the single successful resubmission
 
     // Reading twice is idempotent and does not duplicate anything.
     const target = (await inbox(managerToken))[0] as NotificationItem;
@@ -415,7 +415,7 @@ describeWithDatabase('In-app notifications', () => {
   it('creates no notification for unrelated read operations', async () => {
     const created = await createProperty(employeeAToken);
     const before = await ctx.prisma.notification.count();
-    expect(before).toBe(2); // both active managers
+    expect(before).toBe(1); // the direct Manager only
 
     await api().get('/properties?limit=100').set(auth(managerToken));
     await api().get(`/properties/${created.id}`).set(auth(managerToken));
@@ -633,6 +633,6 @@ describeWithDatabase('In-app notifications', () => {
     expect(await unreadCount(secondToken)).toBe(0);
 
     // And the recipient ids are never shared across managers.
-    expect(await ctx.prisma.notification.count({ where: { userId: manager2Id } })).toBe(1);
+    expect(await ctx.prisma.notification.count({ where: { userId: manager2Id } })).toBe(0);
   });
 });
