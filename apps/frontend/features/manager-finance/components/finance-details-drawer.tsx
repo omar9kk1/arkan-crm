@@ -51,7 +51,7 @@ export function FinanceDetailsDrawer({
       <h3>ملاحظات</h3>
       <p>{movement.notes || 'لا توجد ملاحظات.'}</p>
       <p className={styles.muted}>
-        تفاصيل تجريبية فقط، وليست سجلًا ماليًا محفوظًا.
+        حركة محفوظة في السجل المالي. لا تُعدّل الصفقات أو العمولات من هنا.
       </p>
     </PropertyOverlay>
   );

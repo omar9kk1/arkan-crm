@@ -32,7 +32,7 @@ export function readPropertyParam(
 }
 
 /**
- * Manager tabs: `program` is the APPROVED inventory (AVAILABLE rows only);
+ * Manager tabs: `program` is the published inventory (AVAILABLE + SOLD rows);
  * `approval` gathers every authorized unapproved row (PENDING or REJECTED).
  * Returns the tab that makes a row of `apiStatus` visible, or `null` when the
  * row belongs to neither (e.g. a status the manager surface does not list).
@@ -40,7 +40,7 @@ export function readPropertyParam(
 export function managerTabForStatus(
   apiStatus: string | undefined,
 ): 'program' | 'approval' | null {
-  if (apiStatus === 'AVAILABLE') return 'program';
+  if (apiStatus === 'AVAILABLE' || apiStatus === 'SOLD') return 'program';
   if (apiStatus === 'PENDING' || apiStatus === 'REJECTED') return 'approval';
   return null;
 }

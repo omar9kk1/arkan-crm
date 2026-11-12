@@ -232,6 +232,8 @@ export function ClientReviewDetailsDrawer({
   isManager,
   canDecide,
   canResubmit,
+  readOnly = false,
+  error,
   decisionNote,
   onDecisionNoteChange,
   onDecide,
@@ -249,6 +251,10 @@ export function ClientReviewDetailsDrawer({
    *  employee row). PENDING is read-only — the backend 409s a blind resend
    *  without any write or notification. */
   canResubmit: boolean;
+  /** System Log mode: show the exact same review content with NO actions. */
+  readOnly?: boolean;
+  /** Read failure message shown inside the open drawer. */
+  error?: string;
   decisionNote: string;
   onDecisionNoteChange: (value: string) => void;
   onDecide: (action: ReviewDecision) => void;
@@ -303,7 +309,14 @@ export function ClientReviewDetailsDrawer({
          body), so decision buttons never cover the content. */
       footer={
         detail ? (
-          canResubmit ? (
+          readOnly ? (
+            <div className={styles.footerActions}>
+              <p className={styles.footerNote}>
+                عرض للقراءة فقط من سجل النظام — لا توجد إجراءات متاحة. الحالة
+                المعروضة هي الحالة الحالية للطلب وقد تختلف عن لحظة الحدث.
+              </p>
+            </div>
+          ) : canResubmit ? (
             /* The ONE authorized resubmission round: the manager asked for
                corrections (CHANGES_REQUESTED). Enabled again exactly when
                that round exists; the backend 409s any further click. */
@@ -413,6 +426,7 @@ export function ClientReviewDetailsDrawer({
           جارٍ تحميل تفاصيل الطلب…
         </p>
       )}
+      {!loading && error && <p role="alert">{error}</p>}
       {!loading && detail && (
         <>
           {/* A. بيانات العميل — proposed values, current ones as a muted

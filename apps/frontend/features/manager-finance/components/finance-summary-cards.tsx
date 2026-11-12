@@ -1,29 +1,32 @@
 import { StatCard } from '../../../components/ui/stat-card';
-import { totalMoney, type FinanceMovement } from '../finance-model';
+import {
+  summaryMoney,
+  type FinanceSummary,
+} from '../finance-model';
 import styles from './finance.module.css';
 export function FinanceSummaryCards({
-  movements,
+  summaries,
 }: {
-  movements: readonly FinanceMovement[];
+  summaries: readonly FinanceSummary[];
 }) {
   return (
     <div className={styles.stats}>
       {[
         {
           title: 'عمولات داخلة',
-          value: totalMoney(movements, (totals) => totals.income),
+          value: summaryMoney(summaries, (totals) => totals.income),
         },
         {
           title: 'عمولات موظفين خارجة',
-          value: totalMoney(movements, (totals) => totals.commission),
+          value: summaryMoney(summaries, (totals) => totals.commission),
         },
         {
           title: 'مرتبات خارجة',
-          value: totalMoney(movements, (totals) => totals.payroll),
+          value: summaryMoney(summaries, (totals) => totals.payroll),
         },
         {
           title: 'صافي الحركة المالية',
-          value: totalMoney(movements, (totals) => totals.net),
+          value: summaryMoney(summaries, (totals) => totals.net),
         },
       ].map((item) => (
         <StatCard

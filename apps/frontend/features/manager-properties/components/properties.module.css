@@ -191,6 +191,14 @@
   font-weight: 600;
   line-height: 1.6;
 }
+/* SOLD stays in the catalog with a translucent green status capsule. */
+.cardStatusSold.cardStatusSold {
+  background: color-mix(in srgb, var(--success, #15803d) 88%, transparent);
+  border-color: transparent;
+  color: #fff;
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
 .badge {
   display: inline-flex;
   align-items: center;
@@ -241,6 +249,43 @@
   flex-wrap: wrap;
   gap: var(--space-2);
   margin-top: var(--space-4);
+}
+/* SOLD drawer actions: quiet delete with a red bin, optional deal capsule. */
+.trashButton.trashButton {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 0;
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--radius-pill);
+  border: 1px solid color-mix(in srgb, var(--danger, #b42318) 45%, transparent);
+  background: color-mix(in srgb, var(--danger, #b42318) 10%, transparent);
+  color: var(--danger, #b42318);
+  font-size: var(--text-small);
+  font-weight: 700;
+  box-shadow: none;
+}
+.trashButton.trashButton:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger, #b42318) 18%, transparent);
+}
+.trashIcon {
+  color: currentColor;
+  flex: 0 0 auto;
+}
+.dealDetailsButton.dealDetailsButton {
+  margin-inline-start: auto;
+  min-height: 0;
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--radius-pill);
+  border: 1px solid rgba(128, 98, 56, 0.35);
+  background: var(--accent);
+  color: var(--ink);
+  font-size: var(--text-small);
+  font-weight: 700;
+  box-shadow: 0 4px 10px rgba(128, 98, 56, 0.25);
+}
+.dealDetailsButton.dealDetailsButton:hover:not(:disabled) {
+  background: var(--accent-hover);
 }
 .overlay {
   position: fixed;
@@ -784,8 +829,20 @@
 .trashCardActions {
   display: flex;
   flex-wrap: wrap;
+  justify-content: space-between;
   gap: var(--space-2);
   margin-top: var(--space-1);
+}
+/* Compact capsules for the existing restore / permanent-delete actions. */
+.trashPill.trashPill {
+  min-height: 0;
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-small);
+  font-weight: 600;
+  line-height: 1.5;
+  box-shadow: none;
+  flex: 0 0 auto;
 }
 .trashDialogText {
   margin: 0 0 var(--space-2);

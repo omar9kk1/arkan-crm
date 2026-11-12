@@ -1,13 +1,26 @@
 import { Card } from '../../../components/ui/card';
 import { Button } from '../../../components/ui/button';
 import { CommissionBreakdown } from './commission-breakdown';
-import { money, type MockDeal } from '../mock-data';
+import {
+  COMMISSION_STATUS_LABEL,
+  money,
+  type Deal,
+  type DealCommission,
+} from '../deal-model';
 import styles from './deals.module.css';
+
+const statusClass = (status: DealCommission['status']) =>
+  status === 'PAID'
+    ? styles.statusPaid
+    : status === 'PENDING'
+      ? styles.statusPending
+      : '';
+
 export function DealCard({
   deal,
   onOpen,
 }: {
-  deal: MockDeal;
+  deal: Deal;
   onOpen: () => void;
 }) {
   return (
@@ -20,17 +33,32 @@ export function DealCard({
         <strong>
           {deal.type} {deal.property.title} · {deal.propertyId}
         </strong>
-        <span>تفاصيل الصفقة ←</span>
+        <span>عرض التفاصيل ←</span>
       </Button>
       <div className={styles.row}>
         <span>العميل: {deal.client.name}</span>
-        <span className={styles.badge}>{deal.property.status}</span>
+        <span className={styles.badge}>{deal.property.statusLabel}</span>
       </div>
       <div className={styles.row}>
         <strong>{money(deal.price)}</strong>
         <time dateTime={deal.date}>{deal.date}</time>
       </div>
-      <CommissionBreakdown deal={deal} />
+      <CommissionBreakdown
+        deal={deal}
+        renderEmployeeAction={(role) => {
+          const commission = deal.commissions.find(
+            (row) => row.role === role,
+          );
+          if (!commission) return null;
+          return (
+            <span
+              className={`${styles.badge} ${statusClass(commission.status)}`}
+            >
+              {COMMISSION_STATUS_LABEL[commission.status]}
+            </span>
+          );
+        }}
+      />
     </Card>
   );
 }

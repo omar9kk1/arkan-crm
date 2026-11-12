@@ -133,7 +133,7 @@ export function statusLabel(property: {
  */
 export function displayStatus(dto: PropertyViewDto): string {
   if ((dto as { deletedAt?: string | null }).deletedAt) {
-    return 'محذوف بقرار المدير';
+    return 'محذوف بقرار مالك النظام';
   }
   return statusLabel({
     apiStatus: dto.status,

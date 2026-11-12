@@ -24,6 +24,8 @@ import {
 import {
   followUpApiMessage,
   getFollowUpHistory,
+  getSupervisionSummary,
+  listSupervisionEmployees,
   listSupervisionFollowUps,
 } from '../../../lib/api/followups-api';
 import type {
@@ -72,6 +74,17 @@ export function SupervisionSection({
   const [summary, setSummary] = useState<FollowUpSummaryApiDto | null>(null);
   const [employees, setEmployees] = useState<FollowUpResponsibleDto[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [employeeNextCursor, setEmployeeNextCursor] = useState<string | null>(
+    null,
+  );
+  const [employeeLoading, setEmployeeLoading] = useState(false);
+  const [employeeError, setEmployeeError] = useState<string | null>(null);
+  const [employeeQuery, setEmployeeQuery] = useState('');
+  const debouncedEmployeeQuery = useDebouncedValue(employeeQuery, 300);
+  const employeeCursorRef = useRef<string | null>(null);
+  const employeeRequestRef = useRef(0);
+  const employeeBusyRef = useRef(false);
+  const selectedEmployeeRef = useRef<FollowUpResponsibleDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -120,17 +133,19 @@ export function SupervisionSection({
     setNextCursor(null);
     cursorRef.current = null;
     try {
-      const data = await listSupervisionFollowUps({
-        search: debouncedQuery.trim() || undefined,
-        tab,
-        status,
-        employeeUserId: employeeUserId || undefined,
-        limit: 50,
-      });
+      const [data, summaryData] = await Promise.all([
+        listSupervisionFollowUps({
+          search: debouncedQuery.trim() || undefined,
+          tab,
+          status,
+          employeeUserId: employeeUserId || undefined,
+          limit: 50,
+        }),
+        getSupervisionSummary(employeeUserId || undefined),
+      ]);
       if (requestId !== requestIdRef.current) return;
       setRows(data.items);
-      setSummary(data.summary ?? null);
-      if (data.employees) setEmployees(data.employees);
+      setSummary(summaryData);
       setNextCursor(data.nextCursor);
       cursorRef.current = data.nextCursor;
     } catch (cause) {
@@ -190,6 +205,63 @@ export function SupervisionSection({
   }, []);
 
   // Host-shell refresh counter → reload the feed.
+  const loadEmployeeOptions = useCallback(
+    async (append = false) => {
+      if (append && (employeeBusyRef.current || !employeeCursorRef.current)) {
+        return;
+      }
+      const requestId = ++employeeRequestRef.current;
+      const cursor = append ? employeeCursorRef.current : null;
+      if (!append) {
+        employeeCursorRef.current = null;
+        setEmployeeNextCursor(null);
+      }
+      employeeBusyRef.current = true;
+      setEmployeeLoading(true);
+      setEmployeeError(null);
+      try {
+        const data = await listSupervisionEmployees({
+          search: debouncedEmployeeQuery.trim() || undefined,
+          cursor: cursor ?? undefined,
+          limit: 100,
+        });
+        if (requestId !== employeeRequestRef.current) return;
+        setEmployees((previous) => {
+          const base = append ? previous : [];
+          const seen = new Set(base.map((option) => option.userId));
+          const merged = [
+            ...base,
+            ...data.items.filter((option) => !seen.has(option.userId)),
+          ];
+          const selected = selectedEmployeeRef.current;
+          if (selected && !merged.some((o) => o.userId === selected.userId)) {
+            merged.unshift(selected);
+          }
+          return merged;
+        });
+        employeeCursorRef.current = data.nextCursor;
+        setEmployeeNextCursor(data.nextCursor);
+      } catch (cause) {
+        if (requestId !== employeeRequestRef.current) return;
+        setEmployeeError(
+          followUpApiMessage(cause, 'تعذّر تحميل قائمة الموظفين.'),
+        );
+      } finally {
+        if (requestId === employeeRequestRef.current) {
+          setEmployeeLoading(false);
+          employeeBusyRef.current = false;
+        }
+      }
+    },
+    [debouncedEmployeeQuery],
+  );
+
+  // Employee options are independent of the feed page; search reloads only
+  // this bounded list.
+  useEffect(() => {
+    void loadEmployeeOptions(false);
+  }, [loadEmployeeOptions]);
+
   const firstRefreshSignal = useRef(refreshSignal);
   useEffect(() => {
     if (firstRefreshSignal.current !== refreshSignal) {
@@ -210,7 +282,12 @@ export function SupervisionSection({
 
   // The EMPLOYEE filter FIRST — the stats and the tab counts are computed
   // over employee-filtered subjects (the requirements' exact accounting).
-  const employeeOptions = employees;
+  const employeeOptions = useMemo(() => {
+    const selected = selectedEmployeeRef.current;
+    return selected && !employees.some((o) => o.userId === selected.userId)
+      ? [selected, ...employees]
+      : employees;
+  }, [employees, employeeUserId]);
 
   const tabItems = useMemo(
     () =>
@@ -394,7 +471,14 @@ export function SupervisionSection({
               الموظف المسؤول
               <GlassSelect
                 value={employeeUserId}
-                onChange={(event) => setEmployeeUserId(event.target.value)}
+                onChange={(event) => {
+                  const userId = event.target.value;
+                  setEmployeeUserId(userId);
+                  selectedEmployeeRef.current = userId
+                    ? (employees.find((option) => option.userId === userId) ??
+                      selectedEmployeeRef.current)
+                    : null;
+                }}
               >
                 <option value="">جميع الموظفين</option>
                 {employeeOptions.map((option) => (
@@ -411,6 +495,27 @@ export function SupervisionSection({
               onChange={(event) => setQuery(event.target.value)}
             />
           </div>
+
+          <div className={managerStyles.employeeFilterTools}>
+            <SearchBar
+              label="بحث في الموظفين"
+              placeholder="ابحث باسم الموظف للوصول إلى ما بعد الصفحة الأولى"
+              value={employeeQuery}
+              onChange={(event) => setEmployeeQuery(event.target.value)}
+            />
+            {employeeNextCursor && (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => void loadEmployeeOptions(true)}
+                disabled={employeeLoading}
+                aria-busy={employeeLoading}
+              >
+                {employeeLoading ? 'جارٍ التحميل…' : 'المزيد من الموظفين'}
+              </Button>
+            )}
+          </div>
+          {employeeError && <p className={styles.notice}>{employeeError}</p>}
 
           <div className={styles.list}>
             {groups.length > 0 && (

@@ -107,6 +107,23 @@
   min-width: 0;
 }
 
+/* Employee-option search and progressive loading; independent of the feed
+   toolbar so the native select stays bounded while every employee remains
+   reachable through search/Load More. */
+.employeeFilterTools {
+  display: flex;
+  align-items: end;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+  min-width: 0;
+}
+
+.employeeFilterTools > :first-child {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
 @media (max-width: 720px) {
   .supervisionToolbar {
     grid-template-columns: 1fr;

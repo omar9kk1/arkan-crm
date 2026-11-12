@@ -215,15 +215,6 @@ export function useVisibleContacts(
   );
 }
 
-/**
- * Every contact the viewer may see (both types), as a plain array. Used by the
- * manager Clients page, which lists owners and brokers together.
- */
-export function useContactList(): RegistryContact[] {
-  const { contacts } = useContacts();
-  return contacts;
-}
-
 /** Resource form (loading/error/refresh) for screens that render their own states. */
 export function useRegistryContacts(): ContactsResource {
   return useContacts();

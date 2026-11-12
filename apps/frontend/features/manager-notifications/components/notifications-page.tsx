@@ -6,7 +6,9 @@ import { Toast } from '../../../components/ui/toast';
 import { ManagerPageShell } from '../../../components/layout/manager/manager-page-shell';
 import { Button } from '../../../components/ui/button';
 import { Card } from '../../../components/ui/card';
+import { PropertiesSegmentedTabs as SegmentedTabs } from '../../../components/ui/properties-segmented-tabs';
 import type { NotificationDto } from '../../../lib/api/notification-types';
+import { useAuth } from '../../auth/components/auth-provider';
 import { useNotifications } from '../../notifications/store';
 import {
   filterManagerNotifications,
@@ -16,6 +18,7 @@ import {
 import { NotificationCard } from './notification-card';
 import { NotificationFilters } from './notification-filters';
 import { NotificationDetailsDrawer } from './notification-details-drawer';
+import { SystemLogPanel } from './system-log-panel';
 import styles from './notifications.module.css';
 
 /**
@@ -25,7 +28,9 @@ import styles from './notifications.module.css';
  */
 export function NotificationsPage() {
   const router = useRouter();
+  const { user } = useAuth();
   const {
+
     items,
     status,
     refresh,
@@ -38,6 +43,9 @@ export function NotificationsPage() {
   const [filter, setFilter] = useState<ManagerFilter>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
+  const [view, setView] = useState<'inbox' | 'system'>('inbox');
+  const isOwner = user?.role === 'OWNER';
+  const showInbox = !isOwner || view === 'inbox';
 
   const selected = items.find((item) => item.id === selectedId) ?? null;
 
@@ -65,67 +73,94 @@ export function NotificationsPage() {
     <ManagerPageShell
       title="الإشعارات"
       description="متابعة تنبيهات المدير المهمة: العقارات بانتظار الموافقة، المتابعات المتأخرة، الصفقات، العمولات، والحضور."
-      actions={<Button onClick={markAll}>تعليم الكل كمقروء</Button>}
+      actions={
+        showInbox ? (
+          <Button onClick={markAll}>تعليم الكل كمقروء</Button>
+        ) : undefined
+      }
     >
       <div className={styles.scope}>
-        <NotificationFilters
-          items={items}
-          value={filter}
-          onChange={setFilter}
-        />
-        <p className={styles.muted}>
-          قراءة الإشعار لا تعني إنهاء المراجعة المطلوبة.
-        </p>
-        {notificationFilters.map((tab) => (
-          <section
-            key={tab.id}
-            id={`notifications-panel-${tab.id}`}
-            role="tabpanel"
-            aria-labelledby={`notifications-tab-${tab.id}`}
-            hidden={filter !== tab.id}
-            tabIndex={0}
-          >
-            {filter === tab.id && (
-              <div className={styles.list}>
-                {firstLoad ? (
-                  <Card>
-                    {status === 'error' ? (
-                      <>
-                        تعذّر تحميل الإشعارات.{' '}
-                        <Button onClick={() => void refresh()}>
-                          إعادة المحاولة
-                        </Button>
-                      </>
+        {isOwner && (
+          <div className={styles.ownerTabs}>
+            <SegmentedTabs
+              id="owner-notifications"
+              label="أقسام صفحة الإشعارات"
+              value={view}
+              onChange={(value) => {
+                setSelectedId(null);
+                setView(value === 'system' ? 'system' : 'inbox');
+              }}
+              items={[
+                { id: 'inbox', label: 'الإشعارات' },
+                { id: 'system', label: 'سجل النظام' },
+              ]}
+            />
+          </div>
+        )}
+        {showInbox ? (
+          <>
+            <NotificationFilters
+              items={items}
+              value={filter}
+              onChange={setFilter}
+            />
+            <p className={styles.muted}>
+              قراءة الإشعار لا تعني إنهاء المراجعة المطلوبة.
+            </p>
+            {notificationFilters.map((tab) => (
+              <section
+                key={tab.id}
+                id={`notifications-panel-${tab.id}`}
+                role="tabpanel"
+                aria-labelledby={`notifications-tab-${tab.id}`}
+                hidden={filter !== tab.id}
+                tabIndex={0}
+              >
+                {filter === tab.id && (
+                  <div className={styles.list}>
+                    {firstLoad ? (
+                      <Card>
+                        {status === 'error' ? (
+                          <>
+                            تعذّر تحميل الإشعارات.{' '}
+                            <Button onClick={() => void refresh()}>
+                              إعادة المحاولة
+                            </Button>
+                          </>
+                        ) : (
+                          'جارٍ تحميل الإشعارات…'
+                        )}
+                      </Card>
+                    ) : visible.length === 0 ? (
+                      <Card>لا توجد إشعارات في هذا التصنيف.</Card>
                     ) : (
-                      'جارٍ تحميل الإشعارات…'
+                      visible.map((item) => (
+                        <NotificationCard
+                          key={item.id}
+                          item={item}
+                          onOpen={() => openNotification(item)}
+                        />
+                      ))
                     )}
-                  </Card>
-                ) : visible.length === 0 ? (
-                  <Card>لا توجد إشعارات في هذا التصنيف.</Card>
-                ) : (
-                  visible.map((item) => (
-                    <NotificationCard
-                      key={item.id}
-                      item={item}
-                      onOpen={() => openNotification(item)}
-                    />
-                  ))
-                )}
-                {!firstLoad && nextCursor && (
-                  <div className={styles.pagination}>
-                    <Button
-                      disabled={loadingMore}
-                      onClick={() => void loadMore()}
-                    >
-                      {loadingMore ? 'جارٍ التحميل…' : 'تحميل المزيد'}
-                    </Button>
+                    {!firstLoad && nextCursor && (
+                      <div className={styles.pagination}>
+                        <Button
+                          disabled={loadingMore}
+                          onClick={() => void loadMore()}
+                        >
+                          {loadingMore ? 'جارٍ التحميل…' : 'تحميل المزيد'}
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
-            )}
-          </section>
-        ))}
-        {selected && (
+              </section>
+            ))}
+          </>
+        ) : (
+          <SystemLogPanel />
+        )}
+        {showInbox && selected && (
           <NotificationDetailsDrawer
             key={selected.id}
             item={selected}

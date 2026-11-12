@@ -148,6 +148,19 @@ export function getClientReview(id: string): Promise<ClientReviewDetailDto> {
   return authorizedRequest<ClientReviewDetailDto>(`${BASE}/${id}`);
 }
 
+/**
+ * `GET /client-reviews/:id/owner-detail` — OWNER-only read-through used by the
+ * System Log. It can read a managed employee's request without adding it to the
+ * OWNER's actionable review queue.
+ */
+export function getOwnerClientReview(
+  id: string,
+): Promise<ClientReviewDetailDto> {
+  return authorizedRequest<ClientReviewDetailDto>(
+    `${BASE}/${id}/owner-detail`,
+  );
+}
+
 /** `PATCH /client-reviews/:id` — the requester's EXPLICIT refreshed proposal. */
 export function resubmitClientReview(
   id: string,

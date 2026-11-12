@@ -5,6 +5,8 @@ import type {
   FollowUpHistoryDto,
   FollowUpListDto,
   FollowUpReminderResultDto,
+  FollowUpResponsiblePageDto,
+  FollowUpSummaryApiDto,
   FollowUpSupervisionListDto,
   FollowUpTabApi,
 } from './followup-types';
@@ -104,6 +106,32 @@ export function listSupervisionFollowUps(
   const value = params.toString();
   return authorizedRequest<FollowUpSupervisionListDto>(
     `${BASE}/manager/overview${value ? `?${value}` : ''}`,
+  );
+}
+
+/** Full-scope supervision counters for the current employee filter. */
+export function getSupervisionSummary(
+  employeeUserId?: string,
+): Promise<FollowUpSummaryApiDto> {
+  const params = new URLSearchParams();
+  if (employeeUserId) params.set('employeeUserId', employeeUserId);
+  const value = params.toString();
+  return authorizedRequest<FollowUpSummaryApiDto>(
+    `${BASE}/manager/summary${value ? `?${value}` : ''}`,
+  );
+}
+
+/** Searchable, paginated responsible-employee options. */
+export function listSupervisionEmployees(
+  query: { search?: string; cursor?: string; limit?: number } = {},
+): Promise<FollowUpResponsiblePageDto> {
+  const params = new URLSearchParams();
+  if (query.search) params.set('search', query.search);
+  if (query.cursor) params.set('cursor', query.cursor);
+  if (query.limit) params.set('limit', String(query.limit));
+  const value = params.toString();
+  return authorizedRequest<FollowUpResponsiblePageDto>(
+    `${BASE}/manager/employees${value ? `?${value}` : ''}`,
   );
 }
 

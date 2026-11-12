@@ -108,10 +108,11 @@ export interface FollowUpSupervisionListDto {
   /** Backward-compatible alias for `nextCursor !== null`. */
   truncated: boolean;
   generatedAt: string;
-  /** Full-scope counters (after the employee filter); first page only. */
-  summary?: FollowUpSummaryApiDto;
-  /** All responsible employees in the full scope; first page only. */
-  employees?: FollowUpResponsibleDto[];
+}
+
+export interface FollowUpResponsiblePageDto {
+  items: FollowUpResponsibleDto[];
+  nextCursor: string | null;
 }
 
 /** The result of ONE manual manager reminder (sent or replayed, with cooldown). */

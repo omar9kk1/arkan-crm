@@ -6,39 +6,53 @@ import {
 import { DraftTools } from '../../../lib/drafts/draft-tools';
 
 import { GlassSelect } from '../../../components/ui/glass-select';
+import { GlassCombobox } from '../../../components/ui/glass-combobox';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '../../../components/ui/button';
 import { Card } from '../../../components/ui/card';
 import { PropertyOverlay } from '../../manager-properties/components/property-overlay';
+import { searchDealClients } from '../../../lib/api/deals-api';
+import { useAuth } from '../../auth/components/auth-provider';
 import {
-  mockClients,
+  isEmployeeAttributionConfirmed,
+  mapClientOption,
   money,
+  type DealClientOption,
   type DealDraft,
-  type MockProperty,
-} from '../mock-data';
+  type DealEmployeeOption,
+  type DealPropertyOption,
+} from '../deal-model';
 import { EmployeeSelection } from './employee-selection';
 import { DealStepIndicator } from './deal-step-indicator';
 import { CommissionBreakdown } from './commission-breakdown';
 import styles from './deals.module.css';
 export function DealCreateWizard({
   properties,
+  clients,
+  employees,
   onClose,
   onCreate,
 }: {
-  properties: MockProperty[];
+  properties: DealPropertyOption[];
+  clients: DealClientOption[];
+  employees: DealEmployeeOption[];
   onClose: () => void;
-  onCreate: (draft: DealDraft) => boolean;
+  onCreate: (draft: DealDraft) => Promise<string | null>;
 }) {
   const formKey = 'create-deal';
   const { clear: clearFormDraft } = useDraftScope(formKey);
+  const { user } = useAuth();
+  const isOwner = user?.role === 'OWNER';
 
   const [step, setStep] = useDraftState(formKey + ':step', 0);
   const [draft, setDraft] = useDraftState<DealDraft>(formKey + ':draft', {
     propertyId: '',
     clientId: '',
-    propertyEmployee: '',
-    clientEmployee: '',
+    propertyEmployeeUserId: '',
+    propertyEmployeeName: '',
+    clientEmployeeUserId: '',
+    clientEmployeeName: '',
     type: 'بيع',
     price: 0,
     companyCommission: 0,
@@ -52,9 +66,79 @@ export function DealCreateWizard({
     client: false,
   });
   const [error, setError] = useState('');
+  const [clientSearch, setClientSearch] = useState('');
+  const [clientOptions, setClientOptions] =
+    useState<DealClientOption[]>(clients);
+  const [clientCursor, setClientCursor] = useState<string | null>(null);
+  const [clientLoading, setClientLoading] = useState(false);
+  const [clientLoadingMore, setClientLoadingMore] = useState(false);
+  const [clientError, setClientError] = useState('');
+  const [selectedClient, setSelectedClient] =
+    useState<DealClientOption | null>(() =>
+      clients.find((item) => item.id === draft.clientId) ?? null,
+    );
+  const clientRequest = useRef(0);
   const submitted = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const intro = useRef<HTMLParagraphElement>(null);
+
+  const loadClients = useCallback(
+    async (searchText: string, cursor?: string, append = false) => {
+      const requestId = ++clientRequest.current;
+      if (append) setClientLoadingMore(true);
+      else {
+        setClientLoading(true);
+        setClientError('');
+        setClientOptions([]);
+        setClientCursor(null);
+      }
+      try {
+        const page = await searchDealClients({
+          search: searchText.trim() || undefined,
+          limit: 50,
+          ...(cursor ? { cursor } : {}),
+        });
+        if (requestId !== clientRequest.current) return;
+        const mapped = page.items.map(mapClientOption);
+        setClientOptions((previous) =>
+          append ? [...previous, ...mapped] : mapped,
+        );
+        setClientCursor(page.nextCursor);
+      } catch (cause) {
+        if (requestId !== clientRequest.current) return;
+        setClientError(
+          cause instanceof Error
+            ? cause.message
+            : 'تعذر تحميل العملاء. حاول مرة أخرى.',
+        );
+        if (!append) {
+          setClientOptions([]);
+          setClientCursor(null);
+        }
+      } finally {
+        if (requestId === clientRequest.current) {
+          setClientLoading(false);
+          setClientLoadingMore(false);
+        }
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (step !== 1) return;
+    const timer = setTimeout(
+      () => void loadClients(clientSearch),
+      clientSearch.trim() ? 250 : 0,
+    );
+    return () => clearTimeout(timer);
+  }, [step, clientSearch, loadClients]);
+
+  useEffect(() => {
+    if (selectedClient) return;
+    const found = clients.find((item) => item.id === draft.clientId);
+    if (found) setSelectedClient(found);
+  }, [clients, draft.clientId, selectedClient]);
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
       heading.current?.focus({ preventScroll: true });
@@ -64,8 +148,67 @@ export function DealCreateWizard({
     return () => cancelAnimationFrame(frame);
   }, [step]);
   const property = properties.find((item) => item.id === draft.propertyId);
-  const client = mockClients.find((item) => item.id === draft.clientId);
-  const available = properties.filter((item) => item.status === 'متاح');
+  const client = selectedClient;
+
+  // OWNER confirms manually; MANAGER confirmation is derived from the real
+  // responsible employee (must be an active eligible employee in scope) so
+  // «التالي» works without the confirmation button.
+  const propertyEmployeeConfirmed = isEmployeeAttributionConfirmed({
+    isOwner,
+    manuallyConfirmed: confirmed.property,
+    responsibleUserId: property?.suggestedEmployeeUserId,
+    attributedUserId: draft.propertyEmployeeUserId,
+    eligibleUserIds: employees.map((employee) => employee.userId),
+  });
+  const clientEmployeeConfirmed = isEmployeeAttributionConfirmed({
+    isOwner,
+    manuallyConfirmed: confirmed.client,
+    responsibleUserId: client?.employeeUserId,
+    attributedUserId: draft.clientEmployeeUserId,
+    eligibleUserIds: employees.map((employee) => employee.userId),
+  });
+
+  // MANAGER attribution is read-only: keep the draft aligned with the
+  // property's current responsible employee even after a persisted draft.
+  useEffect(() => {
+    if (isOwner || !property) return;
+    if (
+      draft.propertyEmployeeUserId === property.suggestedEmployeeUserId &&
+      draft.propertyEmployeeName === property.suggestedEmployeeName
+    )
+      return;
+    setDraft({
+      ...draft,
+      propertyEmployeeUserId: property.suggestedEmployeeUserId,
+      propertyEmployeeName: property.suggestedEmployeeName,
+    });
+    setConfirmed((previous) => ({ ...previous, property: false }));
+    // Setters are stable; the effect is keyed on the real persisted values.
+  }, [
+    isOwner,
+    property,
+    draft,
+    setDraft,
+    setConfirmed,
+  ]);
+
+  // MANAGER client attribution is read-only too: always use the selected
+  // client's actual responsible employee, even with a persisted draft.
+  useEffect(() => {
+    if (isOwner || !client) return;
+    if (
+      draft.clientEmployeeUserId === client.employeeUserId &&
+      draft.clientEmployeeName === client.employee
+    )
+      return;
+    setDraft({
+      ...draft,
+      clientEmployeeUserId: client.employeeUserId,
+      clientEmployeeName: client.employee,
+    });
+    setConfirmed((previous) => ({ ...previous, client: false }));
+  }, [isOwner, client, draft, setDraft, setConfirmed]);
+
   function move(next: number) {
     setStep(next);
     setError('');
@@ -96,14 +239,56 @@ export function DealCreateWizard({
           <>
             <DraftTools formKey={formKey} />{' '}
             <form
-              onSubmit={(event) => {
+              onSubmit={async (event) => {
                 event.preventDefault();
-                if (step === 0 && (!property || !confirmed.property)) {
-                  setError('اختر العقار واعتمد الموظف أولًا.');
-                  return;
+                if (step === 0) {
+                  if (!property) {
+                    setError('اختر العقار أولًا.');
+                    return;
+                  }
+                  if (!draft.propertyEmployeeUserId) {
+                    setError(
+                      'لا يوجد موظف مسؤول عن هذا العقار؛ تعذّر المتابعة.',
+                    );
+                    return;
+                  }
+                  if (!propertyEmployeeConfirmed) {
+                    setError(
+                      isOwner
+                        ? 'اعتمد الموظف المسؤول عن العقار أولًا.'
+                        : 'لا يوجد موظف مسؤول صالح عن هذا العقار؛ تعذّر المتابعة.',
+                    );
+                    return;
+                  }
                 }
-                if (step === 1 && (!client || !confirmed.client)) {
-                  setError('اختر العميل واعتمد الموظف أولًا.');
+                if (step === 1) {
+                  if (!client) {
+                    setError('اختر العميل أولًا.');
+                    return;
+                  }
+                  if (!draft.clientEmployeeUserId) {
+                    setError(
+                      'لا يوجد موظف مسؤول عن هذا العميل؛ تعذّر المتابعة.',
+                    );
+                    return;
+                  }
+                  if (!clientEmployeeConfirmed) {
+                    setError(
+                      isOwner
+                        ? 'اعتمد الموظف المسؤول عن العميل أولًا.'
+                        : 'لا يوجد موظف مسؤول صالح عن هذا العميل؛ تعذّر المتابعة.',
+                    );
+                    return;
+                  }
+                }
+                if (
+                  step === 3 &&
+                  (!property ||
+                    !client ||
+                    !propertyEmployeeConfirmed ||
+                    !clientEmployeeConfirmed)
+                ) {
+                  setError('راجع العقار والعميل والموظفين المسؤولين أولًا.');
                   return;
                 }
                 if (step < 3) {
@@ -112,14 +297,13 @@ export function DealCreateWizard({
                 }
                 if (submitted.current) return;
                 submitted.current = true;
-                if (onCreate(draft)) {
-                  clearFormDraft();
-                } else {
+                const failure = await onCreate(draft);
+                if (failure) {
                   submitted.current = false;
-                  setError(
-                    'تعذر إنشاء الصفقة. راجع البيانات وتأكد أن العقار ما زال متاحًا.',
-                  );
+                  setError(failure);
+                  return;
                 }
+                clearFormDraft();
               }}
             >
               {step === 0 && (
@@ -130,13 +314,16 @@ export function DealCreateWizard({
                       required
                       value={draft.propertyId}
                       onChange={(event) => {
-                        const item = available.find(
+                        const item = properties.find(
                           (p) => p.id === event.target.value,
                         );
                         setDraft({
                           ...draft,
                           propertyId: event.target.value,
-                          propertyEmployee: item?.employee ?? '',
+                          propertyEmployeeUserId:
+                            item?.suggestedEmployeeUserId ?? '',
+                          propertyEmployeeName:
+                            item?.suggestedEmployeeName ?? '',
                         });
                         setConfirmed({ ...confirmed, property: false });
                       }}
@@ -146,22 +333,34 @@ export function DealCreateWizard({
                         <option
                           key={item.id}
                           value={item.id}
-                          disabled={item.status !== 'متاح'}
+                          disabled={!item.available}
                         >
-                          {item.title} · {item.id} · {item.status}
+                          {item.title} · {item.code} · {item.statusLabel}
                         </option>
                       ))}
                     </GlassSelect>
                   </label>
-                  {!available.length && <p>لا توجد عقارات متاحة في العينة.</p>}
+                  {!properties.some((item) => item.available) && (
+                    <p>لا توجد عقارات متاحة حاليًا.</p>
+                  )}
                   {property && (
                     <EmployeeSelection
-                      suggested={property.employee}
-                      value={draft.propertyEmployee}
+                      suggested={property.suggestedEmployeeName || 'غير محدد'}
+                      options={employees}
+                      value={draft.propertyEmployeeUserId}
                       label="العقار تابع/مدخل بواسطة الموظف"
-                      confirmed={confirmed.property}
-                      onChange={(value) => {
-                        setDraft({ ...draft, propertyEmployee: value });
+                      confirmed={propertyEmployeeConfirmed}
+                      allowOverride={isOwner}
+                      showConfirm={isOwner}
+                      onChange={(userId) => {
+                        const employee = employees.find(
+                          (item) => item.userId === userId,
+                        );
+                        setDraft({
+                          ...draft,
+                          propertyEmployeeUserId: userId,
+                          propertyEmployeeName: employee?.name ?? '',
+                        });
                         setConfirmed({ ...confirmed, property: false });
                       }}
                       onConfirm={() =>
@@ -175,37 +374,77 @@ export function DealCreateWizard({
                 <>
                   <label className={styles.field}>
                     العميل
-                    <GlassSelect
-                      required
+                    <GlassCombobox
                       value={draft.clientId}
-                      onChange={(event) => {
-                        const item = mockClients.find(
-                          (c) => c.id === event.target.value,
-                        );
+                      selectedLabel={selectedClient?.name}
+                      options={clientOptions.map((item) => ({
+                        value: item.id,
+                        label: item.name,
+                      }))}
+                      onChange={(clientId) => {
+                        const item =
+                          clientOptions.find((c) => c.id === clientId) ??
+                          clients.find((c) => c.id === clientId) ??
+                          null;
+                        setSelectedClient(item);
                         setDraft({
                           ...draft,
-                          clientId: event.target.value,
-                          clientEmployee: item?.employee ?? '',
+                          clientId,
+                          clientEmployeeUserId: item?.employeeUserId ?? '',
+                          clientEmployeeName: item?.employee ?? '',
                         });
                         setConfirmed({ ...confirmed, client: false });
                       }}
-                    >
-                      <option value="">اختر العميل</option>
-                      {mockClients.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.name}
-                        </option>
-                      ))}
-                    </GlassSelect>
+                      onQueryChange={setClientSearch}
+                      filterLocally={false}
+                      loading={clientLoading}
+                      loadingMore={clientLoadingMore}
+                      emptyLabel={
+                        clientSearch.trim()
+                          ? 'لا توجد نتائج'
+                          : 'لا يوجد عملاء متاحون'
+                      }
+                      hasMore={Boolean(clientCursor)}
+                      onLoadMore={() =>
+                        void loadClients(
+                          clientSearch,
+                          clientCursor ?? undefined,
+                          true,
+                        )
+                      }
+                      label="اختيار العميل"
+                      placeholder="ابحث باسم العميل أو الهاتف..."
+                    />
                   </label>
+                  {clientError && (
+                    <div className={styles.notice}>
+                      <p role="alert">{clientError}</p>
+                      <Button
+                        type="button"
+                        onClick={() => void loadClients(clientSearch)}
+                      >
+                        إعادة المحاولة
+                      </Button>
+                    </div>
+                  )}
                   {client && (
                     <EmployeeSelection
                       suggested={client.employee}
-                      value={draft.clientEmployee}
+                      options={employees}
+                      value={draft.clientEmployeeUserId}
                       label="العميل متابع بواسطة الموظف"
-                      confirmed={confirmed.client}
-                      onChange={(value) => {
-                        setDraft({ ...draft, clientEmployee: value });
+                      confirmed={clientEmployeeConfirmed}
+                      allowOverride={isOwner}
+                      showConfirm={isOwner}
+                      onChange={(userId) => {
+                        const employee = employees.find(
+                          (item) => item.userId === userId,
+                        );
+                        setDraft({
+                          ...draft,
+                          clientEmployeeUserId: userId,
+                          clientEmployeeName: employee?.name ?? '',
+                        });
                         setConfirmed({ ...confirmed, client: false });
                       }}
                       onConfirm={() =>
@@ -288,13 +527,20 @@ export function DealCreateWizard({
                 <>
                   <p>
                     سيتم {draft.type === 'بيع' ? 'بيع' : 'تأجير'} العقار{' '}
-                    {property?.title} ({draft.propertyId}) للعميل {client?.name}
-                    .
+                    {property?.title} ({property?.code}) للعميل {client?.name}.
                   </p>
                   <p>
                     السعر: {money(draft.price)} · تاريخ الإغلاق: {draft.date}
                   </p>
-                  <CommissionBreakdown deal={draft} />
+                  <CommissionBreakdown
+                    deal={{
+                      companyCommission: draft.companyCommission,
+                      propertyCommission: draft.propertyCommission,
+                      clientCommission: draft.clientCommission,
+                      propertyEmployee: draft.propertyEmployeeName,
+                      clientEmployee: draft.clientEmployeeName,
+                    }}
+                  />
                   <ul className={styles.list}>
                     <li>تم احتساب عمولة الشركة.</li>
                     <li>تم احتساب عمولة موظف العقار.</li>
@@ -332,15 +578,17 @@ export function DealCreateWizard({
               <div>
                 <dt>موظف العقار</dt>
                 <dd>
-                  {confirmed.property
-                    ? draft.propertyEmployee
+                  {propertyEmployeeConfirmed
+                    ? draft.propertyEmployeeName
                     : 'بانتظار الاعتماد'}
                 </dd>
               </div>
               <div>
                 <dt>موظف العميل</dt>
                 <dd>
-                  {confirmed.client ? draft.clientEmployee : 'بانتظار الاعتماد'}
+                  {clientEmployeeConfirmed
+                    ? draft.clientEmployeeName
+                    : 'بانتظار الاعتماد'}
                 </dd>
               </div>
             </dl>
@@ -349,7 +597,7 @@ export function DealCreateWizard({
             <h3>قبل إنشاء الصفقة</h3>
             <p>راجع السعر وتوزيع العمولات وبيانات الموظفين قبل التأكيد.</p>
             <p className={styles.muted}>
-              معاينة محلية فقط — لا تُرسل أي بيانات.
+              سيتم حفظ الصفقة وتحديث حالة العقار عند التأكيد.
             </p>
           </Card>
         </aside>

@@ -14,6 +14,8 @@ import detailStyles from './property-detail-sections.module.css';
 import styles from './properties.module.css';
 import { getProperty } from '../../../lib/api/properties-api';
 import type { PropertyViewDto } from '../../../lib/api/property-types';
+import { listDeals } from '../../../lib/api/deals-api';
+import { mapDeal, type Deal } from '../../manager-deals/deal-model';
 
 export function PropertyDetailsDrawer({
   property,
@@ -22,10 +24,13 @@ export function PropertyDetailsDrawer({
   onAction,
   onApproveDistinct,
   canDelete = false,
+  readOnly = false,
   busy = false,
   compareProperty = null,
   onCloseCompare,
   initialCandidates,
+  canOpenDeal = false,
+  onOpenDeal,
 }: {
   property: PreviewProperty;
   onClose: () => void;
@@ -34,6 +39,8 @@ export function PropertyDetailsDrawer({
   onAction?: (action: string, property: PreviewProperty) => void;
   /** Deleting to Trash is reserved for OWNER. */
   canDelete?: boolean;
+  /** System Log mode: no review/delete/approve actions, no handlers. */
+  readOnly?: boolean;
   /** Approve a potential-duplicate property as a genuinely distinct house. */
   onApproveDistinct?: (property: PreviewProperty) => void;
   /** True while a decision for this row is in flight — blocks a double click. */
@@ -48,6 +55,9 @@ export function PropertyDetailsDrawer({
    * with the Manager session exactly as before.
    */
   initialCandidates?: PropertyViewDto[];
+  /** OWNER-only: reveal the linked closed Deal of a SOLD property. */
+  canOpenDeal?: boolean;
+  onOpenDeal?: (deal: Deal) => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const leftTitleId = useId();
@@ -58,9 +68,53 @@ export function PropertyDetailsDrawer({
   );
   const [candidatesLoading, setCandidatesLoading] = useState(false);
   const [confirmDistinctOpen, setConfirmDistinctOpen] = useState(false);
+  const [linkedDeal, setLinkedDeal] = useState<Deal | null>(null);
+  const [dealLoading, setDealLoading] = useState(false);
   const actionable =
     property.apiStatus === 'PENDING' &&
     property.reviewStatus !== 'CHANGES_REQUESTED';
+  const showDealAction =
+    property.apiStatus === 'SOLD' && canOpenDeal && Boolean(onOpenDeal);
+
+  // OWNER-only: locate the property's closed Deal through the existing Deals
+  // list (sorted newest-first), so a SOLD card can open the real deal drawer.
+  useEffect(() => {
+    if (!showDealAction || !property.id) {
+      setLinkedDeal(null);
+      setDealLoading(false);
+      return;
+    }
+    let active = true;
+    setDealLoading(true);
+    (async () => {
+      try {
+        let cursor: string | undefined;
+        let found: Deal | null = null;
+        do {
+          const page = await listDeals({
+            limit: 100,
+            ...(cursor ? { cursor } : {}),
+          });
+          const match = page.items.find(
+            (item) => item.property.id === property.id,
+          );
+          if (match) {
+            found = mapDeal(match);
+            break;
+          }
+          cursor = page.nextCursor ?? undefined;
+        } while (cursor);
+        if (active) setLinkedDeal(found);
+      } catch {
+        if (active) setLinkedDeal(null);
+      } finally {
+        if (active) setDealLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [showDealAction, property.id]);
 
   const onCloseRef = useRef(onClose);
   useEffect(() => {
@@ -199,6 +253,12 @@ export function PropertyDetailsDrawer({
           </Button>
         </header>
         <div className={styles.overlayBody}>
+          {readOnly && (
+            <p className={styles.inset} role="note">
+              عرض للقراءة فقط من سجل النظام — الحالة المعروضة هي الحالة الحالية
+              للعقار وقد تختلف عن لحظة الحدث.
+            </p>
+          )}
           {/* Potential-duplicate review section — shown only when the backend
               flagged this pending house as a potential duplicate. It sits at
               the TOP so the Manager sees the «عقار مشابه» badge immediately. */}
@@ -260,18 +320,39 @@ export function PropertyDetailsDrawer({
                 )}
               </div>
             )}
-            {onAction && canDelete && (
+            {((onAction && canDelete) || showDealAction) && (
               <div className={styles.actions}>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => onAction('حذف', property)}
-                  aria-label={`حذف ${property.code} إلى سلة المحذوفات`}
-                  disabled={busy}
-                  aria-busy={busy}
-                >
-                  حذف إلى سلة المحذوفات
-                </Button>
+                {onAction && canDelete && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className={styles.trashButton}
+                    onClick={() => onAction('حذف', property)}
+                    aria-label={`حذف ${property.code} إلى سلة المحذوفات`}
+                    disabled={busy}
+                    aria-busy={busy}
+                  >
+                    <Icon
+                      name="trash"
+                      width={16}
+                      height={16}
+                      className={styles.trashIcon}
+                    />
+                    حذف
+                  </Button>
+                )}
+                {showDealAction && (dealLoading || linkedDeal) && (
+                  <Button
+                    type="button"
+                    className={styles.dealDetailsButton}
+                    disabled={dealLoading || !linkedDeal}
+                    onClick={() => {
+                      if (linkedDeal) onOpenDeal?.(linkedDeal);
+                    }}
+                  >
+                    تفاصيل الصفقة
+                  </Button>
+                )}
               </div>
             )}
           </PropertyDetailSections>

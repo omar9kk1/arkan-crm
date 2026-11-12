@@ -138,16 +138,16 @@ export const samples: Property[] = Array.from({ length: 6 }, (_, i) => ({
 /**
  * Approved per-tab visibility rules (frontend filtering only).
  *
- * The server already returns, for an employee: every AVAILABLE property plus the
- * employee's OWN `PENDING`/`REJECTED` rows (never another employee's pending
- * work — those are authorized only to their creator and the manager). These
- * rules then narrow the loaded rows per tab:
+ * The server already returns, for an employee: every published property
+ * (AVAILABLE or SOLD) plus the employee's OWN `PENDING`/`REJECTED` rows (never
+ * another employee's pending work — those are authorized only to their creator
+ * and the manager). These rules then narrow the loaded rows per tab:
  *
- * - `all`      → AVAILABLE only (approved inventory; review items excluded).
- * - `mine`     → AVAILABLE rows created by the viewer (`isMine`).
+ * - `all`      → published inventory: AVAILABLE + SOLD (review items excluded).
+ * - `mine`     → published rows created by the viewer (`isMine`).
  * - `review`   → every authorized unapproved row of the viewer: PENDING (with
  *                any review state, so CHANGES_REQUESTED counts as unapproved
- *                too) and REJECTED. Approved rows never belong here.
+ *                too) and REJECTED. Published rows never belong here.
  * - `changes`  → unchanged: the narrower subset the viewer still has to correct.
  * - `assigned` → unchanged (the backend has no assignment field yet).
  *
@@ -160,9 +160,12 @@ export const samples: Property[] = Array.from({ length: 6 }, (_, i) => ({
 export function matchesTab(p: Property, tab: string): boolean {
   switch (tab) {
     case 'all':
-      return p.apiStatus === 'AVAILABLE';
+      return p.apiStatus === 'AVAILABLE' || p.apiStatus === 'SOLD';
     case 'mine':
-      return p.apiStatus === 'AVAILABLE' && p.mine === true;
+      return (
+        (p.apiStatus === 'AVAILABLE' || p.apiStatus === 'SOLD') &&
+        p.mine === true
+      );
     case 'assigned':
       return !!p.assignment;
     case 'review':

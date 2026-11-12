@@ -183,6 +183,7 @@ export function ManagerTrash() {
                 <div className={styles.trashCardActions}>
                   <Button
                     type="button"
+                    className={styles.trashPill}
                     onClick={() => void restore(property)}
                     disabled={busyId === property.id}
                     aria-busy={busyId === property.id}
@@ -192,6 +193,7 @@ export function ManagerTrash() {
                   <Button
                     type="button"
                     variant="danger"
+                    className={styles.trashPill}
                     onClick={() => {
                       setDialogError('');
                       setPermanentTarget(property);

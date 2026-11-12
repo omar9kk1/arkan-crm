@@ -16,7 +16,8 @@ export function FinanceMovementCard({
     >
       <div>
         <span className={styles.badge}>
-          {movementLabels[movement.type]} · {movement.direction}
+          {movementLabels[movement.type]} · {movement.direction} ·{' '}
+          {movement.status}
         </span>
         <h3>{movement.title}</h3>
         <p>

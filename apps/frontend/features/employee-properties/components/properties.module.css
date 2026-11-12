@@ -122,6 +122,14 @@
   font-weight: 600;
   line-height: 1.6;
 }
+/* SOLD stays in the catalog with a translucent green status capsule. */
+.cardStatusSold.cardStatusSold {
+  background: color-mix(in srgb, var(--success, #15803d) 88%, transparent);
+  border-color: transparent;
+  color: #fff;
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
 .cardDistrict,
 .cardPrice {
   display: block;

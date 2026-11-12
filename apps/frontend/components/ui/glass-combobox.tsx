@@ -16,12 +16,30 @@ export function GlassCombobox({
   options,
   label,
   placeholder = 'ابحث بالاسم أو الهاتف...',
+  onQueryChange,
+  filterLocally = true,
+  loading = false,
+  emptyLabel = 'لا توجد نتائج',
+  hasMore = false,
+  onLoadMore,
+  loadingMore = false,
+  selectedLabel,
 }: {
   value: string;
   onChange: (value: string) => void;
   options: readonly Option[];
   label: string;
   placeholder?: string;
+  /** Server-search hook. Enables remote filtering/pagination when provided. */
+  onQueryChange?: (query: string) => void;
+  filterLocally?: boolean;
+  loading?: boolean;
+  emptyLabel?: string;
+  hasMore?: boolean;
+  onLoadMore?: () => void;
+  loadingMore?: boolean;
+  /** Keeps a selected label visible when the remote result set changes. */
+  selectedLabel?: string;
 }) {
   const [open, setOpen] = useState(false),
     [query, setQuery] = useState(''),
@@ -30,13 +48,14 @@ export function GlassCombobox({
     menu = useRef<HTMLDivElement>(null),
     root = useRef<HTMLSpanElement>(null),
     id = useId();
-  const filtered = options.filter((o) =>
-    normalize(o.label).includes(normalize(query)),
-  );
+  const filtered = filterLocally
+    ? options.filter((o) => normalize(o.label).includes(normalize(query)))
+    : options;
   const selected = options.find((o) => o.value === value);
   const start = () => {
     setQuery('');
     setActive(0);
+    onQueryChange?.('');
     setOpen(true);
   };
   const choose = (option: Option) => {
@@ -104,12 +123,13 @@ export function GlassCombobox({
         }
         autoComplete="off"
         placeholder={placeholder}
-        value={open ? query : selected?.label || ''}
+        value={open ? query : selected?.label || selectedLabel || ''}
         onClick={() => {
           if (!open) start();
         }}
         onChange={(e) => {
           setQuery(e.target.value);
+          onQueryChange?.(e.target.value);
           setActive(0);
           setOpen(true);
         }}
@@ -155,7 +175,22 @@ export function GlassCombobox({
         aria-label={label}
         className={styles.menu}
         onMouseDown={(e) => e.preventDefault()}
+        onScroll={(event) => {
+          const el = event.currentTarget;
+          if (
+            hasMore &&
+            !loadingMore &&
+            onLoadMore &&
+            el.scrollHeight - el.scrollTop - el.clientHeight < 48
+          )
+            onLoadMore();
+        }}
       >
+        {loading ? (
+          <div className={styles.option} role="status">
+            جارٍ التحميل...
+          </div>
+        ) : null}
         {filtered.map((option, index) => (
           <div
             key={option.value}
@@ -174,9 +209,14 @@ export function GlassCombobox({
             {option.label}
           </div>
         ))}
-        {!filtered.length && (
+        {!loading && !filtered.length && (
           <div className={styles.option} role="status">
-            لا توجد نتائج مطابقة
+            {emptyLabel}
+          </div>
+        )}
+        {loadingMore && (
+          <div className={styles.option} role="status">
+            جارٍ تحميل المزيد...
           </div>
         )}
       </div>

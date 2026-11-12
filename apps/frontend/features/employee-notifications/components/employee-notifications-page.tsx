@@ -5,12 +5,12 @@ import { useRouter } from 'next/navigation';
 import { Toast } from '../../../components/ui/toast';
 import { EmployeePageShell } from '../../../components/layout/employee/employee-page-shell';
 import { Button } from '../../../components/ui/button';
+import { Card } from '../../../components/ui/card';
 import type { NotificationDto } from '../../../lib/api/notification-types';
 import { requestOpenProperty } from '../../notifications/open-property';
 import { useNotifications } from '../../notifications/store';
-import local from './employee-notifications.module.css';
 import { tabs, filterNotifications, type EmployeeFilter } from '../model';
-import { EmployeeNotificationCard } from './employee-notification-card';
+import { NotificationCard } from '../../manager-notifications/components/notification-card';
 import { EmployeeNotificationFilters } from './employee-notification-filters';
 import { EmployeeNotificationDetailsDrawer } from './employee-notification-details-drawer';
 import styles from '../../manager-notifications/components/notifications.module.css';
@@ -61,9 +61,7 @@ export function EmployeeNotificationsPage() {
       title="الإشعارات"
       description="متابعة تنبيهاتك اليومية: المتابعات المتأخرة، العقارات المناسبة، رسائل المدير، وحالة العقارات المرسلة للمراجعة."
       actions={
-        <Button className={local.markAll} onClick={markAll}>
-          تعليم الكل كمقروء
-        </Button>
+        <Button onClick={markAll}>تعليم الكل كمقروء</Button>
       }
     >
       <div className={styles.scope}>
@@ -83,9 +81,9 @@ export function EmployeeNotificationsPage() {
             tabIndex={0}
           >
             {tab === t.id && (
-              <div className={local.list}>
+              <div className={styles.list}>
                 {firstLoad ? (
-                  <p className={local.empty}>
+                  <Card>
                     {status === 'error' ? (
                       <>
                         تعذّر تحميل الإشعارات.{' '}
@@ -96,14 +94,12 @@ export function EmployeeNotificationsPage() {
                     ) : (
                       'جارٍ تحميل الإشعارات…'
                     )}
-                  </p>
+                  </Card>
                 ) : visible.length === 0 ? (
-                  <p className={local.empty}>
-                    لا توجد إشعارات في هذا التصنيف.
-                  </p>
+                  <Card>لا توجد إشعارات في هذا التصنيف.</Card>
                 ) : (
                   visible.map((item) => (
-                    <EmployeeNotificationCard
+                    <NotificationCard
                       key={item.id}
                       item={item}
                       onOpen={() => openNotification(item)}

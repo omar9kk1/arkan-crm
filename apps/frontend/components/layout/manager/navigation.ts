@@ -1,4 +1,5 @@
 import type { IconName } from '../../ui/icon';
+import { visibleManagerMoreNavigation } from './navigation-permissions';
 export interface ManagerNavItem {
   id: string;
   label: string;
@@ -72,11 +73,9 @@ export function managerMoreNavigation(
   role: string | undefined,
 ): ManagerNavItem[] {
   // Finance and Trash are OWNER-only surfaces: MANAGER must not see them.
-  if (role !== 'OWNER')
-    return moreNavigation.filter(
-      (item) => item.id !== 'finance' && item.id !== 'trash',
-    );
-  return moreNavigation.map((item) =>
+  const visible = visibleManagerMoreNavigation(role, moreNavigation);
+  if (role !== 'OWNER') return visible;
+  return visible.map((item) =>
     item.id === 'employees' ? { ...item, label: 'المديرين' } : item,
   );
 }

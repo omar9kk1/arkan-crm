@@ -8,15 +8,6 @@ import {
 import { responsibleLabel, statusLabel } from '../../../lib/property-adapter';
 import styles from './properties.module.css';
 
-export function PropertyStatusBadge({ status }: { status: string }) {
-  return (
-    <span
-      className={`${styles.badge} ${status === 'مطلوب تعديل' ? styles.warning : ''}`}
-    >
-      {status}
-    </span>
-  );
-}
 export function EmployeePropertyCard({
   property: p,
   onOpen,
@@ -78,7 +69,13 @@ export function EmployeePropertyCard({
         )}
       </span>
       <span className={styles.cardPills}>
-        <span className={styles.cardStatus}>{status}</span>
+        <span
+          className={`${styles.cardStatus} ${
+            p.apiStatus === 'SOLD' ? styles.cardStatusSold : ''
+          }`}
+        >
+          {status}
+        </span>
         {responsible && (
           <span className={styles.cardResponsible}>{responsible}</span>
         )}

@@ -73,7 +73,13 @@ export function PropertyCard({
         )}
       </span>
       <span className={styles.cardPills}>
-        <span className={styles.cardStatus}>{status}</span>
+        <span
+          className={`${styles.cardStatus} ${
+            property.apiStatus === 'SOLD' ? styles.cardStatusSold : ''
+          }`}
+        >
+          {status}
+        </span>
         {responsible && (
           <span className={styles.cardResponsible}>{responsible}</span>
         )}

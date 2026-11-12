@@ -13,7 +13,6 @@ import { PropertyOverlay } from '../../manager-properties/components/property-ov
 import { Button } from '../../../components/ui/button';
 import {
   type Currency,
-  propertyOptions,
   localDate,
   parseAmount,
   type ManualExpenseDraft,
@@ -22,9 +21,11 @@ import styles from './finance.module.css';
 export function ManualExpenseModal({
   onClose,
   onSave,
+  properties,
 }: {
   onClose: () => void;
-  onSave: (draft: ManualExpenseDraft) => void;
+  onSave: (draft: ManualExpenseDraft) => Promise<void>;
+  properties: readonly { id: string; label: string }[];
 }) {
   const formKey = 'manual-expense';
   const { clear: clearFormDraft } = useDraftScope(formKey);
@@ -36,24 +37,31 @@ export function ManualExpenseModal({
   );
   const [linked, setLinked] = useDraftState(formKey + ':linked', false);
   const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
   const submitted = useRef(false);
   return (
     <PropertyOverlay title="تسجيل مصروف يدوي" onClose={onClose}>
-      <p className={styles.muted}>سيُضاف المصروف إلى المعاينة المحلية فقط.</p>
+      <p className={styles.muted}>سيُضاف المصروف إلى السجل المالي المحفوظ.</p>
       <>
         <DraftTools formKey={formKey} />{' '}
         <form
-          onSubmit={(event) => {
+          onSubmit={async (event) => {
             event.preventDefault();
             if (submitted.current) return;
             const data = new FormData(event.currentTarget);
             const amount = parseAmount(String(data.get('amount')), currency);
             const description = String(data.get('description') ?? '').trim();
             const date = String(data.get('date'));
+            const propertyId = linked
+              ? String(data.get('property') ?? '')
+              : '';
+            const property =
+              properties.find((item) => item.id === propertyId)?.label ?? '';
             if (
               amount === null ||
               !description ||
-              !String(data.get('type') || '').trim()
+              !String(data.get('type') || '').trim() ||
+              (linked && !propertyId)
             ) {
               setError(
                 'أدخل نوع المصروف والوصف ومبلغًا صحيحًا؛ المصري حتى منزلتين والكويتي حتى 3 منازل عشرية.',
@@ -61,15 +69,29 @@ export function ManualExpenseModal({
               return;
             }
             submitted.current = true;
-            onSave({
-              expenseType: String(data.get('type')).trim(),
-              currency,
-              amountFils: amount,
-              date,
-              property: linked ? String(data.get('property')) : '',
-              description,
-            });
-            clearFormDraft();
+            setSaving(true);
+            setError('');
+            try {
+              await onSave({
+                expenseType: String(data.get('type')).trim(),
+                currency,
+                amountFils: amount,
+                date,
+                property,
+                propertyId: propertyId || undefined,
+                description,
+              });
+              clearFormDraft();
+            } catch (saveError) {
+              submitted.current = false;
+              setError(
+                saveError instanceof Error
+                  ? saveError.message
+                  : 'تعذر حفظ المصروف. حاول مرة أخرى.',
+              );
+            } finally {
+              setSaving(false);
+            }
           }}
         >
           <label className={styles.field}>
@@ -136,8 +158,10 @@ export function ManualExpenseModal({
                 required
               >
                 <option value="">اختر العقار</option>
-                {propertyOptions.map((property) => (
-                  <option key={property}>{property}</option>
+                {properties.map((property) => (
+                  <option key={property.id} value={property.id}>
+                    {property.label}
+                  </option>
                 ))}
               </GlassSelect>
             </label>
@@ -152,7 +176,9 @@ export function ManualExpenseModal({
             />
           </label>
           {error && <p role="alert">{error}</p>}
-          <Button type="submit">حفظ</Button>
+          <Button type="submit" disabled={saving}>
+            {saving ? 'جارٍ الحفظ...' : 'حفظ'}
+          </Button>
         </form>{' '}
       </>
     </PropertyOverlay>

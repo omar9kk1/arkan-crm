@@ -32,6 +32,9 @@ import { ReviewActionDialog } from './review-action-dialog';
 import { TrashDeleteDialog } from './trash-dialogs';
 import { AddPropertyModal } from './add-property-modal';
 import { useAuth } from '../../auth/components/auth-provider';
+import { DealDetailsDrawer } from '../../manager-deals/components/deal-details-drawer';
+import { mapDeal, type Deal } from '../../manager-deals/deal-model';
+import { getDeal } from '../../../lib/api/deals-api';
 import styles from './properties.module.css';
 
 const PAGE_SIZE = 100;
@@ -69,6 +72,10 @@ export function ManagerProperties() {
   const [trashTarget, setTrashTarget] = useState<PreviewProperty | null>(null);
   const [trashBusy, setTrashBusy] = useState(false);
   const [trashDialogError, setTrashDialogError] = useState('');
+  /** OWNER: the closed Deal opened from a SOLD property card. */
+  const [linkedDeal, setLinkedDeal] = useState<Deal | null>(null);
+  /** The property to restore when returning from the linked deal drawer. */
+  const [dealOrigin, setDealOrigin] = useState<PreviewProperty | null>(null);
 
   const notify = useCallback(
     (text: string) =>
@@ -147,12 +154,13 @@ export function ManagerProperties() {
     countOf('REJECTED') +
     rows.filter((property) => property.reviewStatus === 'CHANGES_REQUESTED')
       .length;
-  // «العقارات» is the APPROVED inventory: only AVAILABLE rows may appear there,
-  // so a row that is still under review — or was rejected / sent back for
-  // changes — can never be mistaken for published stock. Approving a row moves
-  // it here (and into «عقاراتي» for its creator) on the next read.
+  // «العقارات» is the published inventory: AVAILABLE plus SOLD history, so a
+  // property that was sold in a Deal stays visible company-wide with its
+  // «تم البيع» badge. Rows still under review — or rejected / sent back for
+  // changes — never appear here.
   const approved = visible.filter(
-    (property) => property.apiStatus === 'AVAILABLE',
+    (property) =>
+      property.apiStatus === 'AVAILABLE' || property.apiStatus === 'SOLD',
   );
   // «تحت المراجعة» gathers every authorized unapproved row: PENDING (ordinary
   // or changes-requested) and REJECTED. The drawer already withholds the review
@@ -164,7 +172,7 @@ export function ManagerProperties() {
   );
   // Tab counts follow the same two rules over the loaded set; the search box
   // only narrows the panel below and never the headline number.
-  const approvedCount = countOf('AVAILABLE');
+  const approvedCount = countOf('AVAILABLE') + countOf('SOLD');
   const unapprovedCount = countOf('PENDING') + countOf('REJECTED');
   const regions = [
     ...new Set(approved.map((property) => property.region)),
@@ -287,7 +295,7 @@ export function ManagerProperties() {
           {[
             { title: 'عقار داخل البرنامج', value: rows.length },
             { title: 'بانتظار الموافقة', value: pendingCount },
-            { title: 'عقار معتمد', value: countOf('AVAILABLE') },
+            { title: 'عقار معتمد', value: approvedCount },
             { title: 'مطلوب تعديل', value: needsCorrectionCount },
           ].map((item) => (
             <StatCard
@@ -347,7 +355,7 @@ export function ManagerProperties() {
                 <section key={region} className={styles.region}>
                   <SectionHeader
                     title={`عقارات ${region}`}
-                    description="العقارات المعتمدة والمتاحة في النظام"
+                    description="العقارات المنشورة في النظام: المتاحة والتي تم بيعها"
                   >
                     <span className={styles.badge}>
                       {
@@ -452,8 +460,32 @@ export function ManagerProperties() {
             }}
             onAction={canReview ? onAction : undefined}
             canDelete={canDelete}
+            canOpenDeal={canDelete}
+            onOpenDeal={(deal) => {
+              setCompareProperty(null);
+              setDealOrigin(selectedLive);
+              closeSelected();
+              setLinkedDeal(deal);
+            }}
             onApproveDistinct={canApprove ? approveDistinct : undefined}
             busy={busyId === selectedLive.id}
+          />
+        )}
+        {linkedDeal && (
+          <DealDetailsDrawer
+            deal={linkedDeal}
+            onClose={() => {
+              setLinkedDeal(null);
+              setDealOrigin(null);
+            }}
+            onBack={() => {
+              setLinkedDeal(null);
+              if (dealOrigin) setSelected(dealOrigin);
+              setDealOrigin(null);
+            }}
+            onRefresh={async () =>
+              mapDeal(await getDeal(linkedDeal.id))
+            }
           />
         )}
         {review && (
