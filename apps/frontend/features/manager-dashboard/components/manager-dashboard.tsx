@@ -88,7 +88,6 @@ export function ManagerDashboard() {
   return (
     <ManagerPageShell
       title="الرئيسية"
-      description="لوحة مؤشرات المدير: حجم النظام، أداء الموظفين، العقارات، العملاء، الملاك، الصفقات، والتنبيهات المهمة."
       actions={
         <label className={styles.period}>
           الفترة
@@ -97,7 +96,6 @@ export function ManagerDashboard() {
             onChange={(event) =>
               setPeriod(event.target.value as ManagerDashboardPeriod)
             }
-            aria-describedby="dashboard-preview"
           >
             {PERIOD_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
@@ -108,14 +106,11 @@ export function ManagerDashboard() {
         </label>
       }
     >
-      <p
-        id="dashboard-preview"
-        className={styles.preview}
-        aria-busy={loading}
-        title={error ?? undefined}
-      >
-        بيانات مباشرة من قاعدة البيانات • الفترة المختارة
-      </p>
+      {error ? (
+        <p className={styles.preview} role="alert">
+          {error}
+        </p>
+      ) : null}
       <DashboardStats items={stats} />
       <div className={styles.panels}>
         <DealsChartPlaceholder deals={dashboard.deals} />
@@ -128,13 +123,11 @@ export function ManagerDashboard() {
         />
         <DashboardFeed
           title="تنبيهات مهمة"
-          description="أهم الأشياء التي تحتاج مراجعة المدير."
           badge={`${alertCount} تنبيهات`}
           items={alertItems}
         />
         <DashboardFeed
           title="آخر الأنشطة"
-          description="أحدث حركة حصلت في النظام حسب الفترة المختارة."
           items={activityItems}
         />
       </div>

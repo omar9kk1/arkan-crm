@@ -35,7 +35,6 @@ export function ReportsPage() {
   return (
     <ManagerPageShell
       title="التقارير"
-      description="معاينة التقارير المخطط لها في الإصدار القادم."
     >
       <ComingSoonCard
         title="التقارير التفصيلية قريبًا"

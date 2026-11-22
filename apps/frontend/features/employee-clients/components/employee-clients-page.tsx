@@ -265,7 +265,6 @@ export default function EmployeeClientsPage() {
             title={item.title}
             value={item.value}
             icon="users"
-            hint="أرقام فعلية من قاعدة البيانات"
           />
         ))}
       </div>

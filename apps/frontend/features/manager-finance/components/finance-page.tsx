@@ -76,6 +76,10 @@ export function FinancePage() {
   );
   const [notice, setNotice] = useState('');
   const manualRequestId = useRef<string | null>(null);
+  const unresolvedCount = summaries.reduce(
+    (sum, summary) => sum + summary.unresolvedCount,
+    0,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -156,7 +160,6 @@ export function FinancePage() {
   return (
     <ManagerPageShell
       title="المالية"
-      description="متابعة كل حركة مالية بالتفاصيل: العمولات الداخلة، عمولات الموظفين، المرتبات، والمصاريف اليدوية."
       actions={
         <Button
           onClick={() => {
@@ -170,12 +173,15 @@ export function FinancePage() {
       }
     >
       <div className={styles.scope}>
-        <p className={styles.muted}>
-          سجل مالي محفوظ يجمع عمولات الصفقات وعمولات الموظفين والرواتب
-          والمصاريف اليدوية. العمولات المعلقة لا تُحسب ضمن الخارج حتى يؤكد
-          المالك صرفها.
-        </p>
         <FinanceSummaryCards summaries={summaries} />
+        {unresolvedCount > 0 && (
+          <Card className={styles.fxWarning}>
+            <p role="status">
+              توجد {unresolvedCount} حركة بعملات أجنبية بانتظار تحويلها إلى
+              الدينار الكويتي. لم تُحتسب في الإجماليات أعلاه حتى يكتمل التحويل.
+            </p>
+          </Card>
+        )}
         <FinanceFilters
           value={filters}
           onChange={setFilters}
@@ -185,7 +191,6 @@ export function FinancePage() {
           <aside>
             <Card>
               <h2>ملخص الحركة</h2>
-              <p>حسب الفلاتر الحالية</p>
               <dl className={styles.facts}>
                 {([
                   // A real COUNT — the same shared count-up as everywhere else.
@@ -223,11 +228,6 @@ export function FinancePage() {
                   </div>
                 ))}
               </dl>
-              <p className={styles.muted}>
-                صافي الحركة = الداخل − جميع الحركات الخارجة المؤكدة، بما فيها
-                المصاريف اليدوية. عمولات الموظفين المعلقة تظهر في السجل بحالة
-                «بانتظار الصرف» ولا تُخصم حتى تأكيد الصرف.
-              </p>
             </Card>
           </aside>
           <section aria-label="سجل الحركة المالية">

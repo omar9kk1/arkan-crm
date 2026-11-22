@@ -47,7 +47,6 @@ export function ManagerFollowups() {
   return (
     <ManagerPageShell
       title="المتابعات"
-      description="متابعاتك الشخصية، وإشراف شامل على متابعات الموظفين مع تذكير الموظف للمتأخرة."
     >
       <div className={managerStyles.sectionSwitcher}>
         <SegmentedTabs

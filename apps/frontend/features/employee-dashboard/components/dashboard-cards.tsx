@@ -8,6 +8,6 @@ export function EmployeeStatCard({
   value: number | string;
 }) {
   return (
-    <StatCard title={title} value={value} hint="" icon="users" />
+    <StatCard title={title} value={value} icon="users" />
   );
 }

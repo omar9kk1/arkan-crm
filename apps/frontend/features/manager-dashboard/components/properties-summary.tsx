@@ -16,10 +16,7 @@ export function PropertiesSummary({
   ];
   const total = items.reduce((sum, item) => sum + item.value, 0);
   return (
-    <DashboardPanel
-      title="قسم العقارات"
-      description="توزيع حالة العقارات الحالية داخل النظام."
-    >
+    <DashboardPanel title="قسم العقارات">
       <SummaryMetrics items={items} />
       <div className={styles.statusBars}>
         {items.map((item) => (

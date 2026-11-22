@@ -355,7 +355,6 @@ export default function ManagerClientsPage() {
               title={item.title}
               value={item.value}
               icon="users"
-              hint="أرقام فعلية من قاعدة البيانات"
             />
           ))}
         </div>

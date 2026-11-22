@@ -90,11 +90,6 @@ export function SettingsPage() {
   return (
     <ManagerPageShell
       title="الإعدادات"
-      description={
-        isOwner
-          ? 'إدارة إعدادات النظام الأساسية، بيانات الشركة، قواعد المتابعة، الصلاحيات، والتنبيهات.'
-          : 'عرض إعدادات المتابعة والتنبيهات الشخصية؛ أما بيانات الشركة والحضور والصلاحيات فمتاحة لمالك النظام فقط.'
-      }
     >
       <p className={styles.banner}>
         {isOwner

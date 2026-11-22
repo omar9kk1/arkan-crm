@@ -8,7 +8,7 @@ export function DashboardFeed({
   items,
 }: {
   title: string;
-  description: string;
+  description?: string;
   badge?: string;
   items: readonly { title: string; detail: string; warning?: boolean }[];
 }) {

@@ -10,7 +10,7 @@ export function DashboardPanel({
   children,
 }: {
   title: string;
-  description: string;
+  description?: string;
   badge?: string;
   className?: string;
   children: ReactNode;
@@ -20,7 +20,7 @@ export function DashboardPanel({
       <header className={styles.panelHeading}>
         <div>
           <h2>{title}</h2>
-          <p>{description}</p>
+          {description ? <p>{description}</p> : null}
         </div>
         {badge && <span className={styles.tag}>{badge}</span>}
       </header>

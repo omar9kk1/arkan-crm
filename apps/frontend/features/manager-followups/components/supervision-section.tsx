@@ -433,7 +433,6 @@ export function SupervisionSection({
                 title={item.title}
                 value={item.value}
                 icon="chart"
-                hint="من قاعدة البيانات مباشرة"
               />
             ))}
           </div>

@@ -315,7 +315,6 @@ export function FollowUpsBoard({
                 title={item.title}
                 value={item.value}
                 icon="clock"
-                hint="من قاعدة البيانات مباشرة"
               />
             ))}
           </div>

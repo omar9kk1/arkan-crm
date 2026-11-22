@@ -30,7 +30,6 @@ export function AttendanceSummaryCards({
           title={String(title)}
           value={value}
           icon="clock"
-          hint="ملخص اليوم الحالي لجميع الموظفين"
         />
       ))}
     </div>

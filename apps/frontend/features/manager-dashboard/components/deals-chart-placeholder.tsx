@@ -46,7 +46,6 @@ export function DealsChartPlaceholder({
   return (
     <DashboardPanel
       title="الصفقات والعمولات"
-      description="أداء الصفقات خلال الفترة المختارة."
       badge={compactKwd(deals.totalCommissionInPeriod)}
       className={styles.chartCard}
     >

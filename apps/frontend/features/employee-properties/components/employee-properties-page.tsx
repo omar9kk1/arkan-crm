@@ -128,7 +128,6 @@ export function EmployeePropertiesPage() {
   return (
     <EmployeePageShell
       title="العقارات"
-      description="إدارة العقارات التي أضفتها أو المخصصة لك للتركيز على التسويق أو متابعة المالك."
       actions={
         <Button onClick={() => setForm({})} disabled={!user}>
           إضافة عقار

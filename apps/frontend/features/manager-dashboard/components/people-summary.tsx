@@ -12,10 +12,7 @@ export function PeopleSummary({
   followUps: ManagerDashboardDto['followUps'];
 }) {
   return (
-    <DashboardPanel
-      title="العملاء والملاك"
-      description="حركة العملاء والملاك والمتابعات المتأخرة."
-    >
+    <DashboardPanel title="العملاء والملاك">
       <SummaryMetrics
         items={[
           { label: 'عملاء جدد', value: clients.newInPeriod },

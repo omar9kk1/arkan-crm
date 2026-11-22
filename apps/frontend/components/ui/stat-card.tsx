@@ -13,7 +13,7 @@ export function StatCard({
 }: {
   title: string;
   value: ReactNode;
-  hint: string;
+  hint?: string;
   icon: IconName;
   /** ONE shared count-up for NUMERIC values (adaptive per the value: 0 →
    * instant, 1 → subtle reveal, 2..10 → every integer held ~1.2s, 11..30 →
@@ -43,7 +43,7 @@ export function StatCard({
         </span>
       </div>
       <strong className={styles.value}>{displayValue}</strong>
-      <p>{hint}</p>
+      {hint ? <p>{hint}</p> : null}
     </Card>
   );
 }

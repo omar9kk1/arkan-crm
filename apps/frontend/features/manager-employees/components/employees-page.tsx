@@ -269,11 +269,6 @@ export function EmployeesPage() {
           </Button>
         ) : null
       }
-      description={
-        isOwner
-          ? 'إدارة حسابات المديرين والموظفين، تعيين الفرق، ومنح صلاحيات المراجعة.'
-          : 'متابعة أداء الموظفين، العملاء، العقارات، الصفقات، العمولات، والمتابعات المتأخرة.'
-      }
     >
       <div className={styles.scope}>
         {isOwner ? (

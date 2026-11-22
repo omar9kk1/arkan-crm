@@ -302,7 +302,7 @@ export function ManagerProperties() {
               key={item.title}
               {...item}
               icon="building"
-              hint={nextCursor ? 'ضمن العقارات المحمّلة' : 'من الخادم'}
+              hint={nextCursor ? 'ضمن العقارات المحمّلة' : ''}
             />
           ))}
         </div>
@@ -355,7 +355,6 @@ export function ManagerProperties() {
                 <section key={region} className={styles.region}>
                   <SectionHeader
                     title={`عقارات ${region}`}
-                    description="العقارات المنشورة في النظام: المتاحة والتي تم بيعها"
                   >
                     <span className={styles.badge}>
                       {

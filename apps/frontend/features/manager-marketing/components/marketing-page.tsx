@@ -34,7 +34,6 @@ export function MarketingPage() {
   return (
     <ManagerPageShell
       title="التسويق"
-      description="معاينة أدوات التسويق المخطط لها في الإصدار القادم."
     >
       <ComingSoonCard
         title="إدارة التسويق قريبًا"

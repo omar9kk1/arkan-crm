@@ -72,7 +72,6 @@ export function NotificationsPage() {
   return (
     <ManagerPageShell
       title="الإشعارات"
-      description="متابعة تنبيهات المدير المهمة: العقارات بانتظار الموافقة، المتابعات المتأخرة، الصفقات، العمولات، والحضور."
       actions={
         showInbox ? (
           <Button onClick={markAll}>تعليم الكل كمقروء</Button>

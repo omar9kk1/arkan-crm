@@ -79,9 +79,6 @@ export function EmployeeAchievementsToday() {
   return (
     <section className={styles.achievementsSection}>
       <h2 className={styles.achievementsTitle}>إنجازاتي اليوم</h2>
-      <p className={styles.achievementsSubtitle}>
-        ملخص نشاطك المسجّل في النظام
-      </p>
 
       {loading ? (
         <div className={styles.achievementsSkeleton} />

@@ -36,7 +36,6 @@ export function DealsPage() {
   return (
     <ManagerPageShell
       title="الصفقات"
-      description="المدير فقط يسجل الصفقة، والنظام يقترح موظف العقار وموظف العميل من البيانات المسجلة."
       actions={
         <Button
           className={styles.createDealButton}
@@ -50,13 +49,15 @@ export function DealsPage() {
       }
     >
       <div className={styles.scope}>
-        <p className={styles.muted}>
-          {loading
-            ? 'جارٍ تحميل الصفقات…'
-            : error
-              ? error
-              : 'الصفقات المسجلة ضمن نطاق صلاحياتك.'}
-        </p>
+        {(loading || error) && (
+          <p
+            className={styles.muted}
+            role={error ? 'alert' : 'status'}
+            aria-live="polite"
+          >
+            {loading ? 'جارٍ تحميل الصفقات…' : error}
+          </p>
+        )}
         <div className={styles.stats}>
           {[
             { title: 'إجمالي الصفقات', value: deals.length },
@@ -77,7 +78,6 @@ export function DealsPage() {
               key={item.title}
               {...item}
               icon="deals"
-              hint="ضمن السجل"
             />
           ))}
         </div>

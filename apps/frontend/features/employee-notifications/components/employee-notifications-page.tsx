@@ -59,7 +59,6 @@ export function EmployeeNotificationsPage() {
   return (
     <EmployeePageShell
       title="الإشعارات"
-      description="متابعة تنبيهاتك اليومية: المتابعات المتأخرة، العقارات المناسبة، رسائل المدير، وحالة العقارات المرسلة للمراجعة."
       actions={
         <Button onClick={markAll}>تعليم الكل كمقروء</Button>
       }

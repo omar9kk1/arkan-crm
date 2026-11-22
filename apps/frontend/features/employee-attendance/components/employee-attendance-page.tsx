@@ -83,7 +83,6 @@ export function EmployeeAttendancePage() {
   return (
     <EmployeePageShell
       title="الحضور والانصراف"
-      description="متابعة حضورك اليومي، وقت الدخول والخروج، ساعات العمل، والتنبيهات الخاصة بالتأخير."
     >
       <div className={shared.stats}>
         {[

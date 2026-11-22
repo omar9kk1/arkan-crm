@@ -27,7 +27,6 @@ export function TopEmployeesPlaceholder({
   return (
     <DashboardPanel
       title="أفضل الموظفين"
-      description="التقييم مقسّم حسب نوع الأداء عشان يبقى عادل وواضح."
       badge="الفترة المختارة"
     >
       <ul className={styles.leaders}>

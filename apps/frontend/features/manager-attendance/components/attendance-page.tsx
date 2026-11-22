@@ -57,7 +57,6 @@ export function AttendancePage() {
   return (
     <ManagerPageShell
       title="الحضور والانصراف"
-      description="متابعة حضور الموظفين اليومي، ساعات العمل، التأخير، الغياب، وربط التأخير بالرواتب لاحقًا."
       actions={
         <div className={styles.actions}>
           <Button onClick={() => setNotice('تم تجهيز تقرير الحضور والانصراف')}>

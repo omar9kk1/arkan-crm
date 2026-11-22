@@ -34,7 +34,6 @@ export function FinanceSummaryCards({
           title={item.title}
           value={item.value}
           icon="wallet"
-          hint="حسب الفلاتر الحالية"
         />
       ))}
     </div>
