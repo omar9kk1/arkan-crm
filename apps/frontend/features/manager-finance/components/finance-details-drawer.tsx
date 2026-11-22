@@ -1,5 +1,9 @@
 import { PropertyOverlay } from '../../manager-properties/components/property-overlay';
-import { money, type FinanceMovement } from '../finance-model';
+import {
+  money,
+  movementDetailRows,
+  type FinanceMovement,
+} from '../finance-model';
 import styles from './finance.module.css';
 export function FinanceDetailsDrawer({
   movement,
@@ -21,19 +25,11 @@ export function FinanceDetailsDrawer({
           <bdi>{money(movement.amountFils, movement.currency)}</bdi>
         </strong>
         <span className={styles.badge}>
-          {movement.direction} · {movement.status}
+          {movement.direction} • {movement.status}
         </span>
       </div>
       <dl className={styles.facts}>
-        {[
-          ['التاريخ', movement.date],
-          ['المصدر', `${movement.sourceType} · ${movement.sourceId}`],
-          ['الطرف', movement.party],
-          ['الموظف', movement.employee ?? 'غير مرتبط بموظف'],
-          ['العقار', movement.property ?? 'غير مرتبط بعقار'],
-          ['العميل أو المالك', movement.clientOrOwner ?? 'غير مرتبط'],
-          ['رقم العملية', movement.reference],
-        ].map(([label, value]) => (
+        {movementDetailRows(movement).map(([label, value]) => (
           <div key={label}>
             <dt>{label}</dt>
             <dd>
@@ -42,7 +38,7 @@ export function FinanceDetailsDrawer({
           </div>
         ))}
       </dl>
-      <h3>تفصيل الحساب</h3>
+      <h3>تفاصيل الحساب</h3>
       <ul className={styles.list}>
         {movement.calculation.map((line) => (
           <li key={line}>{line}</li>
@@ -51,7 +47,8 @@ export function FinanceDetailsDrawer({
       <h3>ملاحظات</h3>
       <p>{movement.notes || 'لا توجد ملاحظات.'}</p>
       <p className={styles.muted}>
-        حركة محفوظة في السجل المالي. لا تُعدّل الصفقات أو العمولات من هنا.
+        قراءة الحركة لا تغيّر حالتها المالية. لا تتوفر إجراءات تعديل أو صرف من
+        هذا العرض.
       </p>
     </PropertyOverlay>
   );

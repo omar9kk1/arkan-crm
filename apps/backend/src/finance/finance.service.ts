@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import {
   FinanceDirection,
+  FinanceFxStatus,
   FinanceSourceType,
   PaymentStatus,
   Prisma,
@@ -24,7 +25,13 @@ import {
   type FinanceMovementType,
   type FinancePeriod,
 } from './dto/finance.dto';
-import { financeSchemaReady } from './finance-schema';
+import {
+  convertToReportingAmount,
+  financeReportingFields,
+  REPORTING_CURRENCY,
+} from './finance-fx';
+import { financeFxSchemaReady, financeSchemaReady } from './finance-schema';
+import { FxRateService, type FxQuote } from './fx-rate.service';
 
 const FINANCE_SCHEMA_MESSAGE =
   'ترحيل المالية غير مطبّق على قاعدة البيانات هذه بعد. لم يتم تفعيل السجل المالي؛ يلزم تطبيق الترحيل المعتمد أولًا.';
@@ -182,6 +189,13 @@ export interface FinanceMovementDto {
   direction: FinanceDirection;
   amount: string;
   currency: string;
+  /** Persisted KWD reporting amount, or null for unresolved legacy rows. */
+  reportingAmount: string | null;
+  reportingCurrency: 'KWD';
+  fxStatus: FinanceFxStatus;
+  fxRate: string | null;
+  fxRateDate: string | null;
+  fxProvider: string | null;
   occurredAt: string;
   createdAt: string;
   title: string;
@@ -201,6 +215,8 @@ export interface FinanceMovementDto {
 export interface FinanceSummaryBucketDto {
   currency: string;
   count: number;
+  /** Movements in scope that are excluded from the totals below. */
+  unresolvedCount: number;
   income: string;
   commission: string;
   payroll: string;
@@ -217,22 +233,12 @@ export interface FinanceLedgerDto {
   parties: string[];
 }
 
-type CurrencyTotals = {
-  currency: string;
-  count: number;
-  income: bigint;
-  commission: bigint;
-  payroll: bigint;
-  manual: bigint;
-  pendingCommission: bigint;
-  pendingPayroll: bigint;
-};
-
 @Injectable()
 export class FinanceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    private readonly fx: FxRateService,
   ) {}
 
   /**
@@ -245,7 +251,10 @@ export class FinanceService {
   }
 
   private async requireSchema(): Promise<void> {
-    if (!(await financeSchemaReady(this.prisma)))
+    if (
+      !(await financeSchemaReady(this.prisma)) ||
+      !(await financeFxSchemaReady(this.prisma))
+    )
       throw new ServiceUnavailableException(FINANCE_SCHEMA_MESSAGE);
   }
 
@@ -268,6 +277,8 @@ export class FinanceService {
         select: {
           amount: true,
           currency: true,
+          reportingAmount: true,
+          fxStatus: true,
           sourceType: true,
           direction: true,
           commission: { select: { status: true } },
@@ -329,6 +340,35 @@ export class FinanceService {
 
     const reference = `ME-${dto.requestId ?? randomUUID()}`;
 
+    // Idempotent retry: return the persisted row without calling the provider
+    // again. The transaction below repeats this check for concurrent requests.
+    const existingMovement = await this.findManualExpenseMovement(reference);
+    if (existingMovement) return this.serialize(existingMovement);
+
+    // FX is fetched OUTSIDE the database transaction. If the allowlisted
+    // provider is unavailable, the write never starts (fail closed).
+    const fxQuote: FxQuote | null =
+      dto.currency === REPORTING_CURRENCY
+        ? null
+        : await this.fx.egpToKwd(dto.date);
+    const reportingAmount = fxQuote
+      ? convertToReportingAmount(amount, fxQuote.rate)
+      : amount;
+    if (reportingAmount.lte(0)) {
+      throw new BadRequestException(
+        'المبلغ بالجنيه المصري صغير جدًا بعد التحويل إلى الدينار الكويتي.',
+      );
+    }
+    const reportingFields = fxQuote
+      ? {
+          reportingAmount,
+          fxStatus: FinanceFxStatus.CONVERTED,
+          fxRate: new Prisma.Decimal(fxQuote.rate),
+          fxRateDate: this.date(fxQuote.rateDate, 'تاريخ سعر الصرف'),
+          fxProvider: fxQuote.provider,
+        }
+      : financeReportingFields(amount, dto.currency);
+
     try {
       return await this.prisma.$transaction(async (tx) => {
         const existing = await tx.manualExpense.findUnique({
@@ -369,6 +409,9 @@ export class FinanceService {
         const calculation = [
           `نوع المصروف: ${type}`,
           `المبلغ: ${amount.toFixed(3)} ${dto.currency}`,
+          ...(fxQuote
+            ? [`المعادل بالدينار: ${reportingAmount.toFixed(3)} د.ك`]
+            : []),
           dto.propertyId ? 'مرتبط بعقار محدد' : 'غير مرتبط بعقار',
         ].join('\n');
 
@@ -382,6 +425,7 @@ export class FinanceService {
             createdById: viewer.id,
             amount,
             currency: dto.currency,
+            ...reportingFields,
             counterparty: 'مصروفات الشركة',
             calculationNotes: calculation,
             notes: description,
@@ -401,6 +445,14 @@ export class FinanceService {
               type,
               amount: amount.toFixed(3),
               currency: dto.currency,
+              reportingAmount: reportingAmount.toFixed(3),
+              reportingCurrency: REPORTING_CURRENCY,
+              fxStatus: fxQuote
+                ? FinanceFxStatus.CONVERTED
+                : FinanceFxStatus.NOT_REQUIRED,
+              fxRate: fxQuote?.rate ?? null,
+              fxRateDate: fxQuote?.rateDate ?? null,
+              fxProvider: fxQuote?.provider ?? null,
               description,
               propertyId: dto.propertyId ?? null,
               occurredAt: dto.date,
@@ -417,20 +469,25 @@ export class FinanceService {
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
       ) {
-        const existing = await this.prisma.manualExpense.findUnique({
-          where: { reference },
-          select: { id: true },
-        });
-        if (existing) {
-          const movement = await this.prisma.financeMovement.findFirst({
-            where: { manualExpenseId: existing.id },
-            include: FINANCE_INCLUDE,
-          });
-          if (movement) return this.serialize(movement);
-        }
+        const movement = await this.findManualExpenseMovement(reference);
+        if (movement) return this.serialize(movement);
       }
       throw error;
     }
+  }
+
+  private async findManualExpenseMovement(
+    reference: string,
+  ): Promise<MovementRow | null> {
+    const existing = await this.prisma.manualExpense.findUnique({
+      where: { reference },
+      select: { id: true },
+    });
+    if (!existing) return null;
+    return this.prisma.financeMovement.findFirst({
+      where: { manualExpenseId: existing.id },
+      include: FINANCE_INCLUDE,
+    });
   }
 
   /**
@@ -588,6 +645,7 @@ export class FinanceService {
           createdById: commission.createdById,
           amount: commission.amount,
           currency: commission.currency,
+          ...financeReportingFields(commission.amount, commission.currency),
           counterparty: commission.employee.user.name,
           calculationNotes: [
             `الصفقة: ${commission.deal.reference}`,
@@ -747,65 +805,68 @@ export class FinanceService {
     rows: Array<{
       amount: Prisma.Decimal;
       currency: string;
+      reportingAmount: Prisma.Decimal | null;
+      fxStatus: FinanceFxStatus;
       sourceType: FinanceSourceType;
       direction: FinanceDirection;
       commission: { status: PaymentStatus } | null;
       payrollEntry: { status: PaymentStatus } | null;
     }>,
   ): FinanceSummaryBucketDto[] {
-    const buckets = new Map<string, CurrencyTotals>();
+    let unresolvedCount = 0;
+    let income = 0n;
+    let commission = 0n;
+    let payroll = 0n;
+    let manual = 0n;
+    let pendingCommission = 0n;
+    let pendingPayroll = 0n;
+
     for (const row of rows) {
-      const key = row.currency;
-      const bucket = buckets.get(key) ?? {
-        currency: key,
-        count: 0,
-        income: 0n,
-        commission: 0n,
-        payroll: 0n,
-        manual: 0n,
-        pendingCommission: 0n,
-        pendingPayroll: 0n,
-      };
-      bucket.count += 1;
-      const fils = decimalToFils(row.amount.toString());
+      // Summaries are KWD-only. The original amount is never added directly:
+      // every counted row uses its persisted KWD reporting amount.
+      const reportingAmount =
+        row.reportingAmount ??
+        (row.currency === REPORTING_CURRENCY ? row.amount : null);
+      if (
+        row.fxStatus === FinanceFxStatus.UNRESOLVED ||
+        reportingAmount === null
+      ) {
+        unresolvedCount += 1;
+        continue;
+      }
+
+      const fils = decimalToFils(reportingAmount.toString());
       if (row.sourceType === FinanceSourceType.DEAL) {
-        bucket.income += fils;
+        income += fils;
       } else if (row.sourceType === FinanceSourceType.COMMISSION) {
         if (row.commission?.status === PaymentStatus.PAID)
-          bucket.commission += fils;
+          commission += fils;
         else if (row.commission?.status === PaymentStatus.PENDING)
-          bucket.pendingCommission += fils;
+          pendingCommission += fils;
       } else if (row.sourceType === FinanceSourceType.PAYROLL) {
         if (row.payrollEntry?.status === PaymentStatus.PAID)
-          bucket.payroll += fils;
+          payroll += fils;
         else if (row.payrollEntry?.status === PaymentStatus.PENDING)
-          bucket.pendingPayroll += fils;
+          pendingPayroll += fils;
       } else if (row.sourceType === FinanceSourceType.MANUAL_EXPENSE) {
-        bucket.manual += fils;
+        manual += fils;
       }
-      buckets.set(key, bucket);
     }
 
-    return [...buckets.values()]
-      .sort((a, b) =>
-        a.currency === 'KWD' ? -1 : b.currency === 'KWD' ? 1 : a.currency.localeCompare(b.currency),
-      )
-      .map((bucket) => ({
-        currency: bucket.currency,
-        count: bucket.count,
-        income: filsToDecimalString(bucket.income),
-        commission: filsToDecimalString(bucket.commission),
-        payroll: filsToDecimalString(bucket.payroll),
-        manual: filsToDecimalString(bucket.manual),
-        pendingCommission: filsToDecimalString(bucket.pendingCommission),
-        pendingPayroll: filsToDecimalString(bucket.pendingPayroll),
-        net: filsToDecimalString(
-          bucket.income -
-            bucket.commission -
-            bucket.payroll -
-            bucket.manual,
-        ),
-      }));
+    return [
+      {
+        currency: REPORTING_CURRENCY,
+        count: rows.length,
+        unresolvedCount,
+        income: filsToDecimalString(income),
+        commission: filsToDecimalString(commission),
+        payroll: filsToDecimalString(payroll),
+        manual: filsToDecimalString(manual),
+        pendingCommission: filsToDecimalString(pendingCommission),
+        pendingPayroll: filsToDecimalString(pendingPayroll),
+        net: filsToDecimalString(income - commission - payroll - manual),
+      },
+    ];
   }
 
   private serialize(movement: MovementRow): FinanceMovementDto {
@@ -833,6 +894,12 @@ export class FinanceService {
       direction: movement.direction,
       amount: movement.amount.toFixed(3),
       currency: movement.currency,
+      reportingAmount: movement.reportingAmount?.toFixed(3) ?? null,
+      reportingCurrency: REPORTING_CURRENCY,
+      fxStatus: movement.fxStatus,
+      fxRate: movement.fxRate?.toFixed() ?? null,
+      fxRateDate: movement.fxRateDate?.toISOString().slice(0, 10) ?? null,
+      fxProvider: movement.fxProvider,
       occurredAt: movement.occurredAt.toISOString().slice(0, 10),
       createdAt: movement.createdAt.toISOString(),
       title: this.title(movement, property?.title ?? null, employee?.name ?? null),
@@ -942,7 +1009,7 @@ export class FinanceService {
         return `عمولة ${type}${propertyTitle ? ` — ${propertyTitle}` : ''}`;
       }
       case FinanceSourceType.COMMISSION:
-        return `عمولة ${employeeName ?? 'موظف'} — ${movement.commission?.deal.reference ?? 'صفقة'}`;
+        return `عمولة ${employeeName ?? 'موظف'}`;
       case FinanceSourceType.PAYROLL:
         return `راتب ${employeeName ?? 'موظف'}`;
       case FinanceSourceType.MANUAL_EXPENSE:

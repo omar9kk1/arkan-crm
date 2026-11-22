@@ -972,6 +972,15 @@ model ManualExpense {
   @@index([createdById, occurredAt])
 }
 
+enum FinanceFxStatus {
+  /// The movement is already in KWD; no conversion was needed.
+  NOT_REQUIRED
+  /// A historical EGP -> KWD rate is persisted on this row and is immutable.
+  CONVERTED
+  /// A legacy foreign-currency row that still needs the one-time backfill.
+  UNRESOLVED
+}
+
 model FinanceMovement {
   id               String            @id @default(uuid()) @db.Uuid
   reference        String            @unique
@@ -988,9 +997,22 @@ model FinanceMovement {
   manualExpense    ManualExpense?    @relation(fields: [manualExpenseId], references: [id], onDelete: Restrict)
   createdById      String            @db.Uuid
   createdBy        User              @relation(fields: [createdById], references: [id], onDelete: Restrict)
-  /// KWD amounts use THREE decimal places (fils) exactly.
+  /// The original amount in `currency`; KWD amounts use THREE decimal places
+  /// (fils) exactly. This column is never overwritten by FX conversion.
   amount           Decimal           @db.Decimal(15, 3)
   currency         String            @db.Char(3)
+  /// Persisted KWD reporting amount (THREE decimals, ROUND_HALF_UP). Every
+  /// Finance summary uses this value, never a live rate.
+  reportingAmount  Decimal?          @db.Decimal(15, 3)
+  /// Conversion state. UNRESOLVED legacy rows are flagged and excluded from
+  /// totals until the reviewed backfill persists a historical rate.
+  fxStatus         FinanceFxStatus   @default(NOT_REQUIRED)
+  /// EGP -> KWD rate exactly as supplied by the allowlisted provider.
+  fxRate           Decimal?          @db.Decimal(24, 12)
+  /// The provider's actual rate date (YYYY-MM-DD), which may be earlier than
+  /// the transaction date for weekends/holidays.
+  fxRateDate       DateTime?         @db.Date
+  fxProvider       String?
   counterparty     String
   calculationNotes String?
   notes            String?
@@ -1003,6 +1025,7 @@ model FinanceMovement {
   @@unique([sourceType, sourceId])
   @@index([manualExpenseId])
   @@index([occurredAt, direction])
+  @@index([fxStatus])
 }
 
 model AttendanceRecord {

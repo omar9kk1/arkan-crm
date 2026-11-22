@@ -12,7 +12,9 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:validate": "prisma validate",
-    "db:seed": "npm run build && node --env-file-if-exists=.env prisma/seed.cjs"
+    "db:seed": "npm run build && node --env-file-if-exists=.env prisma/seed.cjs",
+    "finance:fx:preview": "npm run build && node --env-file-if-exists=.env dist/scripts/finance-fx-backfill.js --preview",
+    "finance:fx:backfill:test": "npm run build && node --env-file-if-exists=.env dist/scripts/finance-fx-backfill.js --apply --database=arkan_crm_api_test"
   },
   "dependencies": {
     "@arkan/shared": "0.1.0",

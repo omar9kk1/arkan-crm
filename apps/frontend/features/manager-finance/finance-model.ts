@@ -1,4 +1,5 @@
 import type {
+  FinanceFxStatusApi,
   FinanceMovementApiDto,
   FinanceSummaryApiDto,
 } from '../../lib/api/finance-types';
@@ -22,6 +23,13 @@ export interface FinanceMovement {
   sourceId: string;
   date: string;
   amountFils: bigint;
+  /** Persisted KWD reporting amount; null when a legacy row is unresolved. */
+  reportingAmountFils: bigint | null;
+  reportingCurrency: 'KWD';
+  fxStatus: FinanceFxStatusApi;
+  fxRate: string | null;
+  fxRateDate: string | null;
+  fxProvider: string | null;
   direction: 'داخل' | 'خارج';
   party: string;
   employee?: string;
@@ -50,6 +58,7 @@ export interface FinanceFilter {
 export interface FinanceSummary {
   currency: Currency;
   count: number;
+  unresolvedCount: number;
   income: bigint;
   commission: bigint;
   payroll: bigint;
@@ -112,27 +121,27 @@ export function filterMovements(
         .includes(query),
   );
 }
-export function summarize(
-  movements: readonly FinanceMovement[],
-  currency: Currency = 'KWD',
-) {
-  return movements
-    .filter((item) => (item.currency ?? 'KWD') === currency)
-    .reduce(
-      (sum, item) => {
-        sum[item.type] += item.amountFils;
-        sum.net +=
-          item.direction === 'داخل' ? item.amountFils : -item.amountFils;
-        return sum;
-      },
-      {
-        income: 0n,
-        commission: 0n,
-        payroll: 0n,
-        manual: 0n,
-        net: 0n,
-      },
-    );
+export function summarize(movements: readonly FinanceMovement[]) {
+  return movements.reduce(
+    (sum, item) => {
+      // Totals use only the persisted KWD reporting amount. Unresolved legacy
+      // rows are excluded and surfaced separately instead of counting as zero.
+      const amount =
+        item.reportingAmountFils ??
+        (item.currency === 'KWD' ? item.amountFils : null);
+      if (amount === null) return sum;
+      sum[item.type] += amount;
+      sum.net += item.direction === 'داخل' ? amount : -amount;
+      return sum;
+    },
+    {
+      income: 0n,
+      commission: 0n,
+      payroll: 0n,
+      manual: 0n,
+      net: 0n,
+    },
+  );
 }
 /** Exact decimal string -> integer fils (KWD, 3 decimals; no floats). */
 export function toFils(value: string): bigint {
@@ -174,6 +183,13 @@ export function manualMovement(
     sourceId: `ME-${id}`,
     date: draft.date,
     amountFils: draft.amountFils,
+    reportingAmountFils:
+      draft.currency === 'KWD' ? draft.amountFils : null,
+    reportingCurrency: 'KWD',
+    fxStatus: draft.currency === 'KWD' ? 'NOT_REQUIRED' : 'UNRESOLVED',
+    fxRate: null,
+    fxRateDate: null,
+    fxProvider: null,
     currency: draft.currency,
     direction: 'خارج',
     party: 'مصروفات الشركة',
@@ -190,23 +206,14 @@ export function totalMoney(
   movements: readonly FinanceMovement[],
   select: (totals: ReturnType<typeof summarize>) => bigint,
 ) {
-  const currencies = [
-    ...new Set(movements.map((item) => item.currency ?? 'KWD')),
-  ];
-  return (currencies.length ? currencies : (['KWD'] as Currency[]))
-    .map((currency) => money(select(summarize(movements, currency)), currency))
-    .join(' / ');
+  return money(select(summarize(movements)), 'KWD');
 }
 export function summaryMoney(
   summaries: readonly FinanceSummary[],
   select: (totals: FinanceSummary) => bigint,
 ) {
-  return (summaries.length ? summaries : ([{ currency: 'KWD' }] as const))
-    .map((summary) => {
-      if (!('income' in summary)) return money(0n, 'KWD');
-      return money(select(summary), summary.currency);
-    })
-    .join(' / ');
+  const kwd = summaries.find((summary) => summary.currency === 'KWD');
+  return money(kwd ? select(kwd) : 0n, 'KWD');
 }
 export function summaryCount(summaries: readonly FinanceSummary[]) {
   return summaries.reduce((sum, item) => sum + item.count, 0);
@@ -218,6 +225,80 @@ const typeByKind: Record<FinanceMovementApiDto['kind'], MovementType> = {
   payroll: 'payroll',
   manual: 'manual',
 };
+
+/**
+ * Human-readable card labels. Internal ids/references remain on the movement
+ * object for filtering/navigation, but never reach the visible card.
+ */
+export function movementCardDisplay(movement: FinanceMovement) {
+  const title = movement.title?.trim() || 'حركة مالية';
+  return {
+    title,
+    party:
+      movement.party && movement.party !== movement.employee
+        ? movement.party
+        : '',
+    employee:
+      movement.employee &&
+      movement.type !== 'commission' &&
+      movement.type !== 'payroll'
+        ? movement.employee
+        : '',
+    property: movement.property ?? '',
+  };
+}
+
+/** Readable detail rows; deliberately excludes sourceType/sourceId/reference. */
+export function movementDetailRows(
+  movement: FinanceMovement,
+): Array<[string, string]> {
+  const rows: Array<[string, string]> = [
+    ['نوع الحركة', movementLabels[movement.type]],
+    ['الحالة', movement.status],
+    ['التاريخ', movement.date],
+    ['الطرف', movement.party],
+    ['الموظف', movement.employee ?? 'غير مرتبط بموظف'],
+    ['العقار', movement.property ?? 'غير مرتبط بعقار'],
+    ['العميل/المالك', movement.clientOrOwner ?? 'غير محدد'],
+  ];
+  if (movement.fxStatus === 'CONVERTED') {
+    rows.push(
+      [
+        'المعادل بالدينار الكويتي',
+        movement.reportingAmountFils === null
+          ? '—'
+          : money(movement.reportingAmountFils, 'KWD'),
+      ],
+      [
+        'سعر الصرف',
+        movement.fxRate
+          ? `${movement.fxRate} د.ك لكل 1 ج.م`
+          : '—',
+      ],
+      ['تاريخ سعر الصرف', movement.fxRateDate ?? '—'],
+      ['مصدر سعر الصرف', fxProviderLabel(movement.fxProvider)],
+    );
+  } else if (
+    movement.fxStatus === 'UNRESOLVED' &&
+    movement.currency !== 'KWD'
+  ) {
+    rows.push([
+      'التحويل إلى الدينار',
+      'قيد التحويل — لم تُحتسب في الإجماليات',
+    ]);
+  }
+  return rows;
+}
+
+const fxProviderLabels: Record<string, string> = {
+  frankfurter: 'Frankfurter (أسعار مرجعية)',
+};
+
+function fxProviderLabel(provider: string | null): string {
+  if (!provider) return '—';
+  return fxProviderLabels[provider] ?? provider;
+}
+
 const sourceLabels: Record<FinanceMovementApiDto['sourceType'], SourceType> = {
   DEAL: 'صفقة',
   COMMISSION: 'عمولة',
@@ -237,6 +318,15 @@ export function mapFinanceMovement(dto: FinanceMovementApiDto): FinanceMovement 
     sourceId: dto.sourceId,
     date: dto.occurredAt,
     amountFils: toFils(dto.amount),
+    reportingAmountFils:
+      dto.reportingAmount == null ? null : toFils(dto.reportingAmount),
+    reportingCurrency: 'KWD',
+    fxStatus:
+      dto.fxStatus ??
+      (dto.currency === 'KWD' ? 'NOT_REQUIRED' : 'UNRESOLVED'),
+    fxRate: dto.fxRate ?? null,
+    fxRateDate: dto.fxRateDate ?? null,
+    fxProvider: dto.fxProvider ?? null,
     currency: dto.currency as Currency,
     direction: dto.direction === 'INCOME' ? 'داخل' : 'خارج',
     party: dto.counterparty,
@@ -256,6 +346,7 @@ export function mapFinanceSummary(dto: FinanceSummaryApiDto): FinanceSummary {
   return {
     currency: dto.currency as Currency,
     count: dto.count,
+    unresolvedCount: dto.unresolvedCount ?? 0,
     income: toFils(dto.income),
     commission: toFils(dto.commission),
     payroll: toFils(dto.payroll),

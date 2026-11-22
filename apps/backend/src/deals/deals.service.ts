@@ -18,7 +18,11 @@ import { clientOwnershipWhere } from '../clients/client-policy';
 import { resolveLimit } from '../common/pagination';
 import { propertyVisibilityWhere } from '../properties/property-visibility';
 import { PrismaService } from '../prisma/prisma.service';
-import { financeSchemaReady } from '../finance/finance-schema';
+import { financeReportingFields } from '../finance/finance-fx';
+import {
+  financeFxSchemaReady,
+  financeSchemaReady,
+} from '../finance/finance-schema';
 import { CreateDealDto } from './dto/create-deal.dto';
 import { ListDealClientsQueryDto } from './dto/list-deal-clients.query';
 import { ListDealsQueryDto } from './dto/list-deals.query';
@@ -308,6 +312,7 @@ export class DealsService {
       // On a database that has not been activated yet, deal creation stays
       // functional and never writes a rounded 3-decimal movement.
       if (await financeSchemaReady(tx)) {
+        const fxReady = await financeFxSchemaReady(tx);
         const propertyCode =
           property.approvedReference ?? property.reference;
         const dealCalculation = [
@@ -333,11 +338,15 @@ export class DealsService {
             createdById: viewer.id,
             amount: companyCommission,
             currency: CURRENCY,
+            ...(fxReady
+              ? financeReportingFields(companyCommission, CURRENCY)
+              : {}),
             counterparty: 'الشركة',
             calculationNotes: dealCalculation,
             notes: dto.notes?.trim() || null,
             occurredAt: closedAt,
           },
+          select: { id: true },
         });
 
         if (propertyCommission.gt(0)) {
@@ -351,6 +360,9 @@ export class DealsService {
               createdById: viewer.id,
               amount: propertyCommission,
               currency: CURRENCY,
+              ...(fxReady
+                ? financeReportingFields(propertyCommission, CURRENCY)
+                : {}),
               counterparty: propertyEmployee.name,
               calculationNotes: [
                 `الصفقة: ${reference}`,
@@ -361,6 +373,7 @@ export class DealsService {
               ].join('\n'),
               occurredAt: closedAt,
             },
+            select: { id: true },
           });
         }
 
@@ -375,6 +388,9 @@ export class DealsService {
               createdById: viewer.id,
               amount: clientCommission,
               currency: CURRENCY,
+              ...(fxReady
+                ? financeReportingFields(clientCommission, CURRENCY)
+                : {}),
               counterparty: clientEmployee.name,
               calculationNotes: [
                 `الصفقة: ${reference}`,
@@ -385,6 +401,7 @@ export class DealsService {
               ].join('\n'),
               occurredAt: closedAt,
             },
+            select: { id: true },
           });
         }
       }

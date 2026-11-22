@@ -20,6 +20,15 @@
   gap: var(--space-3);
   margin-bottom: var(--space-5);
 }
+.fxWarning {
+  margin-bottom: var(--space-5);
+  border-inline-start: 3px solid var(--dashboard-gold);
+}
+.fxWarning p {
+  margin: 0;
+  font-size: var(--text-small);
+  color: var(--ink);
+}
 .filters > .field {
   flex: 1 1 140px;
   margin: 0;

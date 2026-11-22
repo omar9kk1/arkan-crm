@@ -8,6 +8,7 @@ export type FinanceStatusApi =
   | 'PAID'
   | 'CANCELLED'
   | 'RECORDED';
+export type FinanceFxStatusApi = 'NOT_REQUIRED' | 'CONVERTED' | 'UNRESOLVED';
 
 export interface FinancePropertyApiDto {
   id: string;
@@ -25,6 +26,15 @@ export interface FinanceMovementApiDto {
   /** Exact decimal string, never a JSON float. */
   amount: string;
   currency: string;
+  /** Persisted KWD reporting amount, or null for unresolved legacy rows. */
+  reportingAmount: string | null;
+  reportingCurrency: 'KWD';
+  fxStatus: FinanceFxStatusApi;
+  /** Exact EGP -> KWD rate string, or null when no conversion was needed. */
+  fxRate: string | null;
+  /** The provider's actual rate date (YYYY-MM-DD). */
+  fxRateDate: string | null;
+  fxProvider: string | null;
   /** Calendar date (YYYY-MM-DD). */
   occurredAt: string;
   createdAt: string;
@@ -45,6 +55,7 @@ export interface FinanceMovementApiDto {
 export interface FinanceSummaryApiDto {
   currency: string;
   count: number;
+  unresolvedCount: number;
   income: string;
   commission: string;
   payroll: string;

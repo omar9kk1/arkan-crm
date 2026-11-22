@@ -16,12 +16,19 @@ jest.setTimeout(180000);
 interface FinanceItem {
   id: string;
   reference: string;
+  title: string;
   kind: 'deal' | 'commission' | 'payroll' | 'manual';
   sourceType: string;
   sourceId: string;
   direction: 'INCOME' | 'EXPENSE';
   amount: string;
   currency: string;
+  reportingAmount: string | null;
+  reportingCurrency: 'KWD';
+  fxStatus: 'NOT_REQUIRED' | 'CONVERTED' | 'UNRESOLVED';
+  fxRate: string | null;
+  fxRateDate: string | null;
+  fxProvider: string | null;
   occurredAt: string;
   status: string;
   counterparty: string;
@@ -41,6 +48,7 @@ interface Ledger {
   summaries: Array<{
     currency: string;
     count: number;
+    unresolvedCount: number;
     income: string;
     commission: string;
     payroll: string;
@@ -72,6 +80,19 @@ describeWithDatabase('Finance ledger', () => {
 
   const api = () => request(ctx.app.getHttpServer());
   const today = () => new Date().toISOString().slice(0, 10);
+
+  function mockFx(rate = '0.0057646', rateDate = today()) {
+    return jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        date: rateDate,
+        base: 'EGP',
+        quote: 'KWD',
+        rate,
+      }),
+    } as Response);
+  }
 
   async function createProperty(reference = `FIN-${randomUUID().slice(0, 8)}`) {
     return ctx.prisma.property.create({
@@ -175,6 +196,10 @@ describeWithDatabase('Finance ledger', () => {
     await ctx.close();
   });
 
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it('creates one linked ledger row per deal and commission, exactly once', async () => {
     const { deal, property, client } = await createDeal();
 
@@ -210,6 +235,14 @@ describeWithDatabase('Finance ledger', () => {
       expect(item.dealId).toBe(deal.id);
       expect(item.employee?.id).toBe(employeeUserId);
       expect(item.manager?.id).toBe(managerId);
+      // The card title is human-readable; the internal deal reference/UUID is
+      // never part of it (it remains available on `sourceId`/`dealId` only).
+      expect(item.title).toBe('عمولة Finance Employee');
+      expect(item.title).not.toContain(deal.reference);
+      expect(item.title).not.toMatch(
+        /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
+      );
+      expect(item.sourceId).toBe(item.commissionId);
     }
 
     const bucket = first.summaries.find((row) => row.currency === 'KWD');
@@ -528,6 +561,237 @@ describeWithDatabase('Finance ledger', () => {
     const bucket = all.summaries.find((row) => row.currency === 'KWD')!;
     expect(bucket.count).toBe(5);
     expect(bucket.manual).toBe('0.005');
+  });
+
+  it('converts EGP manual expenses automatically and persists an immutable rate', async () => {
+    const fetchMock = mockFx('0.0057646', '2026-01-01');
+    const key = randomUUID();
+    const description = `EGP automatic ${key}`;
+    const payload = {
+      type: 'تصوير عقار',
+      amount: '1000.00',
+      currency: 'EGP',
+      date: '2026-01-01',
+      description,
+      requestId: key,
+    };
+
+    const first = await api()
+      .post('/finance/manual-expenses')
+      .set(auth(ownerToken))
+      .send(payload);
+    expect(first.status).toBe(201);
+    expect(first.body.data).toMatchObject({
+      kind: 'manual',
+      amount: '1000.000',
+      currency: 'EGP',
+      reportingAmount: '5.765',
+      reportingCurrency: 'KWD',
+      fxStatus: 'CONVERTED',
+      fxRate: '0.0057646',
+      fxRateDate: '2026-01-01',
+      fxProvider: 'frankfurter',
+      status: 'RECORDED',
+    });
+    expect(first.body.data.calculation.join('\n')).toContain(
+      'المعادل بالدينار: 5.765 د.ك',
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      'https://api.frankfurter.dev/v2/rate/EGP/KWD?date=2026-01-01',
+    );
+
+    // Idempotent retry returns the persisted row without another provider call.
+    const retry = await api()
+      .post('/finance/manual-expenses')
+      .set(auth(ownerToken))
+      .send(payload);
+    expect(retry.status).toBe(201);
+    expect(retry.body.data.id).toBe(first.body.data.id);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const persisted = await ctx.prisma.financeMovement.findUniqueOrThrow({
+      where: { id: first.body.data.id as string },
+      select: {
+        amount: true,
+        currency: true,
+        reportingAmount: true,
+        fxStatus: true,
+        fxRate: true,
+        fxRateDate: true,
+        fxProvider: true,
+      },
+    });
+    expect(persisted.amount.toFixed(3)).toBe('1000.000');
+    expect(persisted.reportingAmount?.toFixed(3)).toBe('5.765');
+    expect(persisted.fxStatus).toBe('CONVERTED');
+    expect(persisted.fxRate?.toString()).toBe('0.0057646');
+    expect(persisted.fxRateDate?.toISOString().slice(0, 10)).toBe(
+      '2026-01-01',
+    );
+    expect(persisted.fxProvider).toBe('frankfurter');
+
+    const listed = await ledger(
+      `?type=manual&query=${encodeURIComponent(description)}`,
+    );
+    expect(listed.items).toHaveLength(1);
+    expect(listed.items[0]).toMatchObject({
+      amount: '1000.000',
+      currency: 'EGP',
+      reportingAmount: '5.765',
+      fxStatus: 'CONVERTED',
+    });
+    const bucket = listed.summaries.find((row) => row.currency === 'KWD')!;
+    expect(bucket).toMatchObject({
+      count: 1,
+      unresolvedCount: 0,
+      manual: '5.765',
+      net: '-5.765',
+    });
+  });
+
+  it('fails closed when the FX provider is unavailable', async () => {
+    jest
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new Error('provider unavailable'));
+    const key = randomUUID();
+    const description = `EGP failure ${key}`;
+    const response = await api()
+      .post('/finance/manual-expenses')
+      .set(auth(ownerToken))
+      .send({
+        type: 'أخرى',
+        amount: '10.00',
+        currency: 'EGP',
+        date: '2026-01-02',
+        description,
+        requestId: key,
+      });
+
+    expect(response.status).toBe(503);
+    expect(String(response.body.error?.message ?? response.body.message)).toContain(
+      'تعذر جلب سعر صرف',
+    );
+    expect(
+      await ctx.prisma.manualExpense.count({
+        where: { reference: `ME-${key}` },
+      }),
+    ).toBe(0);
+    expect(
+      await ctx.prisma.financeMovement.count({
+        where: { notes: description },
+      }),
+    ).toBe(0);
+  });
+
+  it('persists the provider actual rate date when it falls back', async () => {
+    const fetchMock = mockFx('0.0061', '2025-12-31');
+    const key = randomUUID();
+    const description = `EGP fallback ${key}`;
+    const response = await api()
+      .post('/finance/manual-expenses')
+      .set(auth(ownerToken))
+      .send({
+        type: 'أخرى',
+        amount: '100.00',
+        currency: 'EGP',
+        date: '2026-01-01',
+        description,
+        requestId: key,
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.data).toMatchObject({
+      amount: '100.000',
+      currency: 'EGP',
+      reportingAmount: '0.610',
+      fxStatus: 'CONVERTED',
+      fxRate: '0.0061',
+      fxRateDate: '2025-12-31',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('never calls the FX provider for KWD movements', async () => {
+    const fetchMock = jest.spyOn(globalThis, 'fetch');
+    const key = randomUUID();
+    const response = await api()
+      .post('/finance/manual-expenses')
+      .set(auth(ownerToken))
+      .send({
+        type: 'أخرى',
+        amount: '0.001',
+        currency: 'KWD',
+        date: today(),
+        description: `KWD no fx ${key}`,
+        requestId: key,
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.data).toMatchObject({
+      amount: '0.001',
+      currency: 'KWD',
+      reportingAmount: '0.001',
+      reportingCurrency: 'KWD',
+      fxStatus: 'NOT_REQUIRED',
+      fxRate: null,
+      fxRateDate: null,
+      fxProvider: null,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('flags unresolved legacy foreign-currency rows instead of counting them as zero', async () => {
+    const key = randomUUID();
+    const reference = `ME-legacy-${key}`;
+    const occurredAt = new Date('2026-01-03T00:00:00.000Z');
+    const expense = await ctx.prisma.manualExpense.create({
+      data: {
+        reference,
+        type: 'أخرى',
+        amount: '250.00',
+        currency: 'EGP',
+        description: `legacy ${key}`,
+        createdById: ownerId,
+        occurredAt,
+      },
+      select: { id: true },
+    });
+    await ctx.prisma.financeMovement.create({
+      data: {
+        reference: `FM-M-${expense.id.replace(/-/g, '')}`,
+        direction: 'EXPENSE',
+        sourceType: 'MANUAL_EXPENSE',
+        sourceId: expense.id,
+        manualExpenseId: expense.id,
+        createdById: ownerId,
+        amount: '250.00',
+        currency: 'EGP',
+        reportingAmount: null,
+        fxStatus: 'UNRESOLVED',
+        counterparty: 'مصروفات الشركة',
+        calculationNotes: 'legacy foreign-currency row',
+        occurredAt,
+      },
+    });
+
+    const listed = await ledger(
+      `?type=manual&query=${encodeURIComponent(`legacy ${key}`)}`,
+    );
+    expect(listed.items).toHaveLength(1);
+    expect(listed.items[0]).toMatchObject({
+      amount: '250.000',
+      currency: 'EGP',
+      reportingAmount: null,
+      fxStatus: 'UNRESOLVED',
+    });
+    const bucket = listed.summaries.find((row) => row.currency === 'KWD')!;
+    expect(bucket).toMatchObject({
+      count: 1,
+      unresolvedCount: 1,
+      manual: '0.000',
+      net: '0.000',
+    });
   });
 
   it('denies MANAGER and EMPLOYEE access to every Finance endpoint', async () => {
