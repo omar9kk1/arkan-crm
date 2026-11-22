@@ -47,6 +47,10 @@ export interface EmployeeDto {
   assignedCount: number;
   /** Distinct overdue follow-up subjects for this employee. */
   lateCount: number;
+  /** Distinct real deals where this employee is property/client employee. */
+  dealsCount: number;
+  /** Exact KWD string (3 decimals): PENDING + PAID, CANCELLED excluded. */
+  commissionTotal: string;
 }
 
 /** Directory row: all card/stat fields, no property list. */

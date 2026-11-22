@@ -1,6 +1,6 @@
 import { StatCard } from '../../../components/ui/stat-card';
 import type { EmployeeSummaryApiDto } from '../../../lib/api/employee-types';
-import { money, UNAVAILABLE, type EmployeeRecord } from '../model';
+import { commissionMoney, UNAVAILABLE, type EmployeeRecord } from '../model';
 import styles from './employees.module.css';
 
 /** `null` is a metric the backend cannot answer yet — never a fabricated 0. */
@@ -34,7 +34,7 @@ export function EmployeeStats({
             'إجمالي العمولة',
             employee.commission === null
               ? UNAVAILABLE
-              : money(employee.commission),
+              : commissionMoney(employee.commission),
           ],
           ['متابعات متأخرة', number(employee.lateCount)],
         ].map(([label, value]) => (

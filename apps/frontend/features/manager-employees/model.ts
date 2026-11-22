@@ -31,10 +31,9 @@ export interface EmployeePropertyRef {
  * UI model for one real EMPLOYEE account.
  *
  * `propertyCount` / `propertiesByStatus` / `properties` are the real statistics
- * linked through `Property.createdByUserId`. The remaining metrics are typed
- * `number | null` and stay `null` because those domains have no backend feature
- * yet: they are rendered «—», never a fake or assumed zero. `id` is always
- * `User.id` — no relationship is ever keyed by display name.
+ * linked through `Property.createdByUserId`; `dealsCount` and `commission` come
+ * from the backend's set-based deal/commission aggregates. A metric stays
+ * `null` only when the backend genuinely has no value.
  */
 export interface EmployeeRecord {
   id: string;
@@ -57,7 +56,8 @@ export interface EmployeeRecord {
   clientsCount: number | null;
   assignedCount: number | null;
   dealsCount: number | null;
-  commission: number | null;
+  /** Exact KWD decimal string from the API, or null when unavailable. */
+  commission: string | null;
   lateCount: number | null;
 }
 
@@ -93,8 +93,8 @@ export function mapEmployeeListItem(
     properties: [],
     clientsCount: dto.clientsCount,
     assignedCount: dto.assignedCount,
-    dealsCount: null,
-    commission: null,
+    dealsCount: dto.dealsCount,
+    commission: dto.commissionTotal,
     lateCount: dto.lateCount,
   };
 }
@@ -121,11 +121,11 @@ export function mapEmployee(dto: EmployeeDto): EmployeeRecord {
       status: property.status,
       statusLabel: STATUS_LABEL[property.status],
     })),
-    // No backend surface yet → explicitly unavailable.
+    // Real backend aggregates (the API always returns these fields).
     clientsCount: dto.clientsCount,
     assignedCount: dto.assignedCount,
-    dealsCount: null,
-    commission: null,
+    dealsCount: dto.dealsCount,
+    commission: dto.commissionTotal,
     lateCount: dto.lateCount,
   };
 }
@@ -143,3 +143,10 @@ export function propertyStatusSummary(counts: Record<string, number>): string {
 
 export const money = (amount: number) =>
   `${new Intl.NumberFormat('ar-KW').format(amount)} د.ك`;
+
+/** Employee commission totals are exact API strings; always show 3 decimals. */
+export const commissionMoney = (amount: string) =>
+  `${new Intl.NumberFormat('ar-KW', {
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  }).format(Number(amount))} د.ك`;

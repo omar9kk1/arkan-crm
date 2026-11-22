@@ -34,6 +34,10 @@ export interface EmployeeDto {
   properties: EmployeePropertyDto[];
   clientsCount: number;
   assignedCount: number;
+  /** Distinct real deals where this employee is the property and/or client employee. */
+  dealsCount: number;
+  /** Exact KWD string (3 decimals); PENDING + PAID, CANCELLED excluded. */
+  commissionTotal: string;
   lateCount: number;
 }
 

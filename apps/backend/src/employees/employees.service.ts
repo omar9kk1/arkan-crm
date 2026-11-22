@@ -79,6 +79,9 @@ interface EmployeePageMetric {
   propertiesByStatus: Record<PropertyStatus, number>;
   clientsCount: number;
   assignedCount: number;
+  dealsCount: number;
+  /** Exact decimal string (KWD, 3 decimals). */
+  commissionTotal: string;
   lateCount: number;
 }
 
@@ -287,8 +290,19 @@ export class EmployeesService {
       propertiesByStatus: this.emptyStatusCounts(),
       clientsCount: 0,
       assignedCount: 0,
+      dealsCount: 0,
+      commissionTotal: '0.000',
       lateCount: 0,
     };
+  }
+
+  /**
+   * The SQL SUM is returned as exact numeric text. Normalize to the project's
+   * three-decimal KWD representation without any JavaScript float arithmetic.
+   */
+  private formatCommissionTotal(value: string): string {
+    const [whole = '0', fraction = ''] = value.split('.');
+    return `${whole}.${(fraction + '000').slice(0, 3)}`;
   }
 
   /**
@@ -321,6 +335,8 @@ export class EmployeesService {
         archived: number;
         clientsCount: number;
         assignedCount: number;
+        dealsCount: number;
+        commissionTotal: string;
         lateCount: number;
       }>
     >`
@@ -355,6 +371,33 @@ export class EmployeesService {
         JOIN "PropertyAssignment" a ON a."employeeId" = pr.id
         GROUP BY 1
       ),
+      deal_pairs AS (
+        SELECT d.id, d."propertyEmployeeId" AS profile_id
+        FROM "Deal" d
+        JOIN "EmployeeProfile" pr ON pr.id = d."propertyEmployeeId"
+        JOIN ids ON ids.id = pr."userId"
+        UNION
+        SELECT d.id, d."clientEmployeeId"
+        FROM "Deal" d
+        JOIN "EmployeeProfile" pr ON pr.id = d."clientEmployeeId"
+        JOIN ids ON ids.id = pr."userId"
+      ),
+      deal_counts AS (
+        SELECT pr."userId" AS uid, COUNT(DISTINCT dp.id)::int AS cnt
+        FROM "EmployeeProfile" pr
+        JOIN ids ON ids.id = pr."userId"
+        JOIN deal_pairs dp ON dp.profile_id = pr.id
+        GROUP BY 1
+      ),
+      commission_totals AS (
+        SELECT pr."userId" AS uid,
+               COALESCE(SUM(c.amount), 0)::text AS total
+        FROM "EmployeeProfile" pr
+        JOIN ids ON ids.id = pr."userId"
+        JOIN "Commission" c ON c."employeeId" = pr.id
+        WHERE c.status <> 'CANCELLED'
+        GROUP BY 1
+      ),
       late_counts AS (
         SELECT pr."userId" AS uid, COUNT(f.id)::int AS cnt
         FROM "EmployeeProfile" pr
@@ -373,11 +416,15 @@ export class EmployeesService {
              COALESCE(pr.archived, 0)::int AS archived,
              COALESCE(cc.cnt, 0)::int AS "clientsCount",
              COALESCE(ac.cnt, 0)::int AS "assignedCount",
+             COALESCE(dc.cnt, 0)::int AS "dealsCount",
+             COALESCE(ct.total, '0') AS "commissionTotal",
              COALESCE(lc.cnt, 0)::int AS "lateCount"
       FROM ids
       LEFT JOIN props pr ON pr.uid = ids.id
       LEFT JOIN client_counts cc ON cc.uid = ids.id
       LEFT JOIN assigned_counts ac ON ac.uid = ids.id
+      LEFT JOIN deal_counts dc ON dc.uid = ids.id
+      LEFT JOIN commission_totals ct ON ct.uid = ids.id
       LEFT JOIN late_counts lc ON lc.uid = ids.id
     `;
     for (const row of rows) {
@@ -393,6 +440,8 @@ export class EmployeesService {
         },
         clientsCount: row.clientsCount,
         assignedCount: row.assignedCount,
+        dealsCount: row.dealsCount,
+        commissionTotal: this.formatCommissionTotal(row.commissionTotal),
         lateCount: row.lateCount,
       });
     }
@@ -1071,6 +1120,8 @@ export class EmployeesService {
       propertiesByStatus: metric.propertiesByStatus,
       clientsCount: metric.clientsCount,
       assignedCount: metric.assignedCount,
+      dealsCount: metric.dealsCount,
+      commissionTotal: metric.commissionTotal,
       lateCount: metric.lateCount,
     };
   }
